@@ -94,12 +94,8 @@
           "name": "entity_fields_entity_type_id_entity_types_id_fk",
           "tableFrom": "entity_fields",
           "tableTo": "entity_types",
-          "columnsFrom": [
-            "entity_type_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["entity_type_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -109,10 +105,7 @@
         "entity_fields_entity_type_id_name_unique": {
           "name": "entity_fields_entity_type_id_name_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "entity_type_id",
-            "name"
-          ]
+          "columns": ["entity_type_id", "name"]
         }
       },
       "policies": {},
@@ -238,12 +231,8 @@
           "name": "entity_instances_entity_type_id_entity_types_id_fk",
           "tableFrom": "entity_instances",
           "tableTo": "entity_types",
-          "columnsFrom": [
-            "entity_type_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["entity_type_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -346,12 +335,8 @@
           "name": "entity_relations_from_instance_id_entity_instances_id_fk",
           "tableFrom": "entity_relations",
           "tableTo": "entity_instances",
-          "columnsFrom": [
-            "from_instance_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["from_instance_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -359,12 +344,8 @@
           "name": "entity_relations_to_instance_id_entity_instances_id_fk",
           "tableFrom": "entity_relations",
           "tableTo": "entity_instances",
-          "columnsFrom": [
-            "to_instance_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["to_instance_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -513,12 +494,8 @@
           "name": "workflow_events_instance_id_entity_instances_id_fk",
           "tableFrom": "workflow_events",
           "tableTo": "entity_instances",
-          "columnsFrom": [
-            "instance_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["instance_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -526,12 +503,8 @@
           "name": "workflow_events_workflow_id_workflows_id_fk",
           "tableFrom": "workflow_events",
           "tableTo": "workflows",
-          "columnsFrom": [
-            "workflow_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["workflow_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -605,12 +578,8 @@
           "name": "workflow_states_workflow_id_workflows_id_fk",
           "tableFrom": "workflow_states",
           "tableTo": "workflows",
-          "columnsFrom": [
-            "workflow_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["workflow_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -690,12 +659,8 @@
           "name": "workflow_transitions_workflow_id_workflows_id_fk",
           "tableFrom": "workflow_transitions",
           "tableTo": "workflows",
-          "columnsFrom": [
-            "workflow_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["workflow_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -755,12 +720,8 @@
           "name": "workflows_entity_type_id_entity_types_id_fk",
           "tableFrom": "workflows",
           "tableTo": "entity_types",
-          "columnsFrom": [
-            "entity_type_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["entity_type_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -872,12 +833,8 @@
           "name": "automation_executions_rule_id_automation_rules_id_fk",
           "tableFrom": "automation_executions",
           "tableTo": "automation_rules",
-          "columnsFrom": [
-            "rule_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["rule_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1192,9 +1149,7 @@
         "tenants_slug_unique": {
           "name": "tenants_slug_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "slug"
-          ]
+          "columns": ["slug"]
         }
       },
       "policies": {},

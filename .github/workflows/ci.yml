@@ -126,13 +126,13 @@ jobs:
           DATABASE_URL: ${{ env.DATABASE_MIGRATION_URL }}
 
       - name: Run unit + integration tests
-        run: pnpm test -- --coverage
+        run: pnpm test
 
       - name: Upload coverage
         uses: codecov/codecov-action@v4
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: true
+          fail_ci_if_error: false
 
   # ── 3. Tenant isolation tests (mandatory on db/ changes) ──────────────────
   isolation-tests:

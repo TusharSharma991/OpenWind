@@ -4,11 +4,12 @@ RUN corepack enable
 
 FROM base AS builder
 WORKDIR /app
-COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml turbo.json ./
 COPY packages/ packages/
+COPY modules/ modules/
 COPY apps/admin-ui/ apps/admin-ui/
 RUN pnpm install --frozen-lockfile
-RUN pnpm --filter @platform/admin-ui build
+RUN pnpm exec turbo run build --filter=@platform/admin-ui...
 
 FROM base AS runner
 WORKDIR /app

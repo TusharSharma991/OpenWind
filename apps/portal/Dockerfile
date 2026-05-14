@@ -4,11 +4,12 @@ RUN corepack enable
 
 FROM base AS builder
 WORKDIR /app
-COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml turbo.json ./
 COPY packages/ packages/
+COPY modules/ modules/
 COPY apps/portal/ apps/portal/
 RUN pnpm install --frozen-lockfile
-RUN pnpm --filter @platform/portal build
+RUN pnpm exec turbo run build --filter=@platform/portal...
 
 FROM base AS runner
 WORKDIR /app

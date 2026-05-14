@@ -1,0 +1,34 @@
+{
+  "name": "@platform/api",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:isolation": "vitest run tests/isolation",
+    "test:e2e": "vitest run tests/e2e",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@hono/zod-validator": "^0.4.0",
+    "@platform/auth": "workspace:*",
+    "@platform/automation-engine": "workspace:*",
+    "@platform/config": "workspace:*",
+    "@platform/db": "workspace:*",
+    "@platform/entity-engine": "workspace:*",
+    "@platform/logger": "workspace:*",
+    "@platform/workflow-engine": "workspace:*",
+    "hono": "^4.5.0"
+  },
+  "devDependencies": {
+    "@platform/tsconfig": "workspace:*",
+    "@types/node": "^25.7.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}

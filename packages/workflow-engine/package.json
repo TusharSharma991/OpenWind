@@ -1,0 +1,26 @@
+{
+  "name": "@platform/workflow-engine",
+  "version": "0.0.1",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@platform/config": "workspace:*",
+    "@platform/db": "workspace:*",
+    "@platform/entity-engine": "workspace:*",
+    "@platform/logger": "workspace:*",
+    "bullmq": "^5.0.0",
+    "ioredis": "^5.0.0"
+  },
+  "devDependencies": {
+    "@platform/tsconfig": "workspace:*",
+    "@types/node": "^25.7.0",
+    "typescript": "^5.5.0"
+  }
+}

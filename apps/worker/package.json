@@ -1,0 +1,27 @@
+{
+  "name": "@platform/worker",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@platform/automation-engine": "workspace:*",
+    "@platform/config": "workspace:*",
+    "@platform/db": "workspace:*",
+    "@platform/logger": "workspace:*",
+    "@platform/workflow-engine": "workspace:*",
+    "bullmq": "^5.0.0",
+    "ioredis": "^5.0.0"
+  },
+  "devDependencies": {
+    "@platform/tsconfig": "workspace:*",
+    "@types/node": "^25.7.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.5.0"
+  }
+}

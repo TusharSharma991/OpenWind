@@ -1,0 +1,305 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  NODE_VERSION: "22"
+  PNPM_VERSION: "9"
+  TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+  TURBO_TEAM: ${{ secrets.TURBO_TEAM }}
+
+jobs:
+  # ── 1. Lint and type-check ─────────────────────────────────────────────────
+  quality:
+    name: Quality gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # needed for commitlint
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate commit messages
+        if: github.event_name == 'pull_request'
+        run: |
+          pnpm commitlint \
+            --from ${{ github.event.pull_request.base.sha }} \
+            --to ${{ github.event.pull_request.head.sha }} \
+            --verbose
+
+      - name: Check formatting
+        run: pnpm format:check
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Type check
+        run: pnpm typecheck
+
+      - name: Build all packages
+        run: pnpm build
+
+  # ── 2. Unit and integration tests ─────────────────────────────────────────
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    needs: quality
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: platform
+          POSTGRES_PASSWORD: platform_test_password
+          POSTGRES_DB: platform_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+        ports:
+          - 6379:6379
+
+    env:
+      DATABASE_URL: postgresql://platform:platform_test_password@localhost:5432/platform_test
+      DATABASE_MIGRATION_URL: postgresql://platform:platform_test_password@localhost:5432/platform_test
+      REDIS_URL: redis://localhost:6379
+      NODE_ENV: test
+      ENCRYPTION_KEY: 0000000000000000000000000000000000000000000000000000000000000000
+      ANTHROPIC_API_KEY: test_key_not_used_in_tests
+      S3_ENDPOINT: http://localhost:9000
+      S3_BUCKET: test-bucket
+      S3_ACCESS_KEY: test
+      S3_SECRET_KEY: test
+      ZITADEL_ISSUER: http://localhost:8080
+      ZITADEL_AUDIENCE: platform-api
+      NOVU_API_KEY: test_key
+      NOVU_API_URL: http://localhost:3010
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Run database migrations
+        run: pnpm db:migrate
+        env:
+          DATABASE_URL: ${{ env.DATABASE_MIGRATION_URL }}
+
+      - name: Run unit + integration tests
+        run: pnpm test -- --coverage
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
+
+  # ── 3. Tenant isolation tests (mandatory on db/ changes) ──────────────────
+  isolation-tests:
+    name: Tenant isolation
+    runs-on: ubuntu-latest
+    needs: quality
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: platform
+          POSTGRES_PASSWORD: platform_test_password
+          POSTGRES_DB: platform_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+
+    env:
+      DATABASE_URL: postgresql://platform:platform_test_password@localhost:5432/platform_test
+      DATABASE_MIGRATION_URL: postgresql://platform:platform_test_password@localhost:5432/platform_test
+      NODE_ENV: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Run database migrations
+        run: pnpm db:migrate
+        env:
+          DATABASE_URL: ${{ env.DATABASE_MIGRATION_URL }}
+
+      - name: Run tenant isolation tests
+        run: pnpm test:isolation
+
+  # ── 4. AI-assisted code review ─────────────────────────────────────────────
+  claude-review:
+    name: Claude review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get diff
+        id: diff
+        run: |
+          git diff ${{ github.event.pull_request.base.sha }} \
+                   ${{ github.event.pull_request.head.sha }} \
+                   -- '*.ts' '*.tsx' > /tmp/pr.diff
+          echo "diff_size=$(wc -c < /tmp/pr.diff)" >> $GITHUB_OUTPUT
+
+      - name: Claude code review
+        if: steps.diff.outputs.diff_size > 0
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node .github/scripts/claude-review.mjs \
+            --pr ${{ github.event.pull_request.number }} \
+            --diff /tmp/pr.diff \
+            --conventions CLAUDE.md
+
+  # ── 5. Security scan ──────────────────────────────────────────────────────
+  security:
+    name: Security scan
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run CodeQL analysis
+        uses: github/codeql-action/init@v3
+        with:
+          languages: typescript
+          queries: security-and-quality
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install and build
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+
+      - name: Audit dependencies
+        run: pnpm audit --audit-level=high
+
+  # ── 6. Docker build validation ────────────────────────────────────────────
+  docker:
+    name: Docker build
+    runs-on: ubuntu-latest
+    needs: [test, isolation-tests]
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+
+    strategy:
+      matrix:
+        app: [api, worker, admin-ui, portal]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build ${{ matrix.app }}
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/${{ matrix.app }}/Dockerfile
+          push: false
+          cache-from: type=gha,scope=${{ matrix.app }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.app }}
+          build-args: |
+            NODE_VERSION=${{ env.NODE_VERSION }}
+
+  # ── Summary ───────────────────────────────────────────────────────────────
+  ci-complete:
+    name: CI complete
+    runs-on: ubuntu-latest
+    needs: [quality, test, isolation-tests, security]
+    if: always()
+    steps:
+      - name: Check all jobs passed
+        run: |
+          if [[ "${{ needs.quality.result }}" != "success" ]] || \
+             [[ "${{ needs.test.result }}" != "success" ]] || \
+             [[ "${{ needs.isolation-tests.result }}" != "success" ]] || \
+             [[ "${{ needs.security.result }}" != "success" ]]; then
+            echo "One or more required CI jobs failed."
+            exit 1
+          fi
+          echo "All CI jobs passed."

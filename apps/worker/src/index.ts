@@ -1,8 +1,8 @@
-import { logger } from '@platform/logger';
+import { logger } from "@platform/logger";
 
-logger.info('Worker process starting');
+logger.info("Worker process starting");
 
-process.on('SIGTERM', () => {
-  logger.info('Worker shutting down');
+process.on("SIGTERM", () => {
+  logger.info("Worker shutting down");
   process.exit(0);
 });

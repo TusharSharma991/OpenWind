@@ -8,16 +8,16 @@ This guide covers platform-specific notes, troubleshooting, and the details behi
 
 `docker compose up -d` starts these services:
 
-| Service | Port | Purpose |
-|---------|------|---------|
-| Postgres 16 | 5432 | Primary database (RLS, multi-tenant) |
-| Redis 7 | 6379 | BullMQ queue backend + application cache |
-| MinIO | 9000 / 9001 | S3-compatible object storage. Console at :9001 |
-| Zitadel | 8080 | Identity provider (OIDC/OAuth2/SAML) |
-| Novu | 3003 | Notification infrastructure |
-| MailHog | 1025 / 8025 | SMTP trap — catches all outbound email. UI at :8025 |
-| BullBoard | 3002 | BullMQ job queue dashboard |
-| OpenBao | 8200 | Secrets manager (OpenBao dev mode). Token: `dev-root-token` |
+| Service     | Port        | Purpose                                                     |
+| ----------- | ----------- | ----------------------------------------------------------- |
+| Postgres 16 | 5432        | Primary database (RLS, multi-tenant)                        |
+| Redis 7     | 6379        | BullMQ queue backend + application cache                    |
+| MinIO       | 9000 / 9001 | S3-compatible object storage. Console at :9001              |
+| Zitadel     | 8080        | Identity provider (OIDC/OAuth2/SAML)                        |
+| Novu        | 3003        | Notification infrastructure                                 |
+| MailHog     | 1025 / 8025 | SMTP trap — catches all outbound email. UI at :8025         |
+| BullBoard   | 3002        | BullMQ job queue dashboard                                  |
+| OpenBao     | 8200        | Secrets manager (OpenBao dev mode). Token: `dev-root-token` |
 
 ### Useful docker compose commands
 
@@ -49,6 +49,7 @@ newgrp docker
 ```
 
 If Postgres fails to start with a permissions error on the data volume, run:
+
 ```bash
 docker compose down -v && docker compose up -d postgres
 ```
@@ -73,20 +74,20 @@ The defaults in `.env.example` work with the docker-compose services above — n
 
 ### Key variables
 
-| Variable | Default | Notes |
-|----------|---------|-------|
-| `DATABASE_URL` | `postgresql://platform:platform_dev_password@localhost:5432/platform` | Postgres connection |
-| `REDIS_URL` | `redis://localhost:6379` | Redis connection |
-| `ZITADEL_ISSUER` | `http://localhost:8080` | Zitadel OIDC issuer |
-| `ZITADEL_AUDIENCE` | `platform-api` | JWT audience claim |
-| `S3_ENDPOINT` | `http://localhost:9000` | MinIO endpoint |
-| `S3_BUCKET` | `platform-dev` | MinIO bucket |
-| `S3_ACCESS_KEY` | `minioadmin` | MinIO access key |
-| `S3_SECRET_KEY` | `minioadmin` | MinIO secret key |
-| `NOVU_API_KEY` | *(see .env.example)* | Novu self-hosted API key |
-| `OPENBAO_ADDR` | `http://localhost:8200` | OpenBao address |
-| `OPENBAO_TRANSIT_KEY` | `platform-dev` | Transit encryption key name |
-| `ANTHROPIC_API_KEY` | *(your key)* | Only needed if testing AI features |
+| Variable              | Default                                                               | Notes                              |
+| --------------------- | --------------------------------------------------------------------- | ---------------------------------- |
+| `DATABASE_URL`        | `postgresql://platform:platform_dev_password@localhost:5432/platform` | Postgres connection                |
+| `REDIS_URL`           | `redis://localhost:6379`                                              | Redis connection                   |
+| `ZITADEL_ISSUER`      | `http://localhost:8080`                                               | Zitadel OIDC issuer                |
+| `ZITADEL_AUDIENCE`    | `platform-api`                                                        | JWT audience claim                 |
+| `S3_ENDPOINT`         | `http://localhost:9000`                                               | MinIO endpoint                     |
+| `S3_BUCKET`           | `platform-dev`                                                        | MinIO bucket                       |
+| `S3_ACCESS_KEY`       | `minioadmin`                                                          | MinIO access key                   |
+| `S3_SECRET_KEY`       | `minioadmin`                                                          | MinIO secret key                   |
+| `NOVU_API_KEY`        | _(see .env.example)_                                                  | Novu self-hosted API key           |
+| `OPENBAO_ADDR`        | `http://localhost:8200`                                               | OpenBao address                    |
+| `OPENBAO_TRANSIT_KEY` | `platform-dev`                                                        | Transit encryption key name        |
+| `ANTHROPIC_API_KEY`   | _(your key)_                                                          | Only needed if testing AI features |
 
 `ANTHROPIC_API_KEY` is the only variable that requires a real value not provided by docker-compose. AI features will simply not work without it — the rest of the platform runs fine.
 
@@ -110,6 +111,7 @@ pnpm db:seed           # seed tenants, entity types, sample data
 ```
 
 The seed script creates:
+
 - Two tenants: `demo-corp` (all modules installed) and `test-tenant` (blank)
 - Platform admin user (credentials printed to console on first run)
 - Default entity types for installed modules
@@ -158,6 +160,7 @@ Zitadel is the OIDC/OAuth2/SAML identity provider. In development it runs in ins
 On first boot, Zitadel seeds a `platform` organisation and an API application. The client ID and client secret are written to `.zitadel-init` (gitignored) and also set in `.env.local` by the setup script.
 
 To create a test user:
+
 1. Open http://localhost:8080
 2. Log in as admin
 3. Go to Users → New User
@@ -195,13 +198,13 @@ pnpm --filter @platform/portal dev    # portal only (port 3004)
 
 ### Port reference
 
-| App | Port |
-|-----|------|
-| API | 3000 |
-| Admin UI | 3001 |
+| App       | Port |
+| --------- | ---- |
+| API       | 3000 |
+| Admin UI  | 3001 |
 | BullBoard | 3002 |
-| Novu | 3003 |
-| Portal | 3004 |
+| Novu      | 3003 |
+| Portal    | 3004 |
 
 ---
 
@@ -210,6 +213,7 @@ pnpm --filter @platform/portal dev    # portal only (port 3004)
 ### `pnpm install` fails
 
 Ensure you're running Node.js 22+ and pnpm 9+:
+
 ```bash
 node --version   # should be 22.x
 pnpm --version   # should be 9.x
@@ -220,6 +224,7 @@ If the lockfile is out of sync: `pnpm install --frozen-lockfile=false`
 ### `pnpm dev` — "Cannot connect to database"
 
 Postgres may not be ready yet. Wait a few seconds and retry, or check:
+
 ```bash
 docker compose ps postgres   # should show "healthy"
 ```
@@ -227,6 +232,7 @@ docker compose ps postgres   # should show "healthy"
 ### `pnpm dev` — Zitadel JWT validation fails
 
 Zitadel takes ~15 seconds to fully start. The API retries JWKS fetching on startup, but if you start `pnpm dev` before Zitadel is ready you may need to restart the API:
+
 ```bash
 docker compose ps zitadel   # wait until healthy
 pnpm --filter @platform/api dev
@@ -235,14 +241,17 @@ pnpm --filter @platform/api dev
 ### Port already in use
 
 If something is already on port 5432/6379/8080 etc.:
+
 ```bash
 lsof -i :5432    # find what's using the port
 ```
+
 Or change the host port in `docker-compose.yml` (the left side of `ports:`).
 
 ### Full reset
 
 When in doubt, a full reset takes about 2 minutes:
+
 ```bash
 docker compose down -v
 docker compose up -d

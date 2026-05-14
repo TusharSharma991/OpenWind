@@ -22,12 +22,14 @@ Closes #
 ## Checklist
 
 ### Required for all PRs
+
 - [ ] Tests included — coverage does not drop
 - [ ] TypeScript compiles with zero errors (`pnpm typecheck`)
 - [ ] Lint passes (`pnpm lint`)
 - [ ] Commit messages follow Conventional Commits
 
 ### Required if this PR touches `packages/db/` or any new tables
+
 - [ ] All new tenant-scoped tables have `tenant_id UUID NOT NULL`
 - [ ] All new tenant-scoped tables have `ENABLE ROW LEVEL SECURITY`
 - [ ] Both read and write RLS policies are defined
@@ -36,6 +38,7 @@ Closes #
 - [ ] Down migration (rollback SQL) is present as a comment in the migration file
 
 ### Required if this PR touches `apps/api/` or adds new routes
+
 - [ ] All inputs validated with Zod at the route boundary
 - [ ] Authentication middleware applied (`requireAuth()`)
 - [ ] Rate limiting configured for the endpoint
@@ -43,10 +46,12 @@ Closes #
 - [ ] Tenant isolation tests cover the new route
 
 ### Required if this PR makes a significant architectural decision
+
 - [ ] ADR created or updated in `docs/decisions/`
 - [ ] ADR reviewed by at least one other engineer
 
 ### Required if this PR changes a public API
+
 - [ ] `CHANGELOG.md` entry added
 - [ ] Backwards compatibility considered (breaking changes need migration path)
 

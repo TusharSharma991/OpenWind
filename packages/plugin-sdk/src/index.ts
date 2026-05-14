@@ -1,1 +1,6 @@
-export type { PluginManifest, PluginPermission, SlotRegistration, PageRegistration } from './types.js';
+export type {
+  PluginManifest,
+  PluginPermission,
+  SlotRegistration,
+  PageRegistration,
+} from "./types.js";

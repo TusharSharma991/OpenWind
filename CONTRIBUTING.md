@@ -7,7 +7,7 @@ Thank you for your interest in contributing. OpenWind is in active early develop
 ## Before you start
 
 1. **Read [`CLAUDE.md`](CLAUDE.md)** — engineering conventions enforced by CI (naming, TypeScript strictness, security rules, testing requirements). Not optional reading.
-2. **Read the relevant ADR(s)** in [`docs/decisions/`](docs/decisions/) for the area you're working in. The ADRs explain *why* things are the way they are — they prevent you from re-litigating settled decisions in a PR.
+2. **Read the relevant ADR(s)** in [`docs/decisions/`](docs/decisions/) for the area you're working in. The ADRs explain _why_ things are the way they are — they prevent you from re-litigating settled decisions in a PR.
 3. **Check the [roadmap](docs/roadmap.md)** to understand which phase a component belongs to and what it depends on. Phase 2 components cannot be built without Phase 1 being solid.
 
 ---
@@ -18,13 +18,13 @@ Thank you for your interest in contributing. OpenWind is in active early develop
 
 The five Phase 1 component issues are the right place to start for new contributors. Each is self-contained, has clear scope, and links to the relevant ADRs:
 
-| Issue | Component | Depends on |
-|-------|-----------|------------|
-| [#7 — 1A Infrastructure & tenancy](https://github.com/TinyPhi/OpenWind/issues/7) | Postgres migrations, RLS, OpenBao, rate limiting | Nothing |
-| [#8 — 1B Auth](https://github.com/TinyPhi/OpenWind/issues/8) | Zitadel JWT, RBAC, API keys | #7 |
-| [#9 — 1C Entity Engine](https://github.com/TinyPhi/OpenWind/issues/9) | Entity types, fields, runtime Zod, Redis cache | #7, #8 |
-| [#10 — 1D Workflow Engine](https://github.com/TinyPhi/OpenWind/issues/10) | State machine, transitions, SLA timers | #9 |
-| [#11 — 1E Automation Engine](https://github.com/TinyPhi/OpenWind/issues/11) | Outbox, rule executor, trigger/action types | #9, #10 |
+| Issue                                                                            | Component                                        | Depends on |
+| -------------------------------------------------------------------------------- | ------------------------------------------------ | ---------- |
+| [#7 — 1A Infrastructure & tenancy](https://github.com/TinyPhi/OpenWind/issues/7) | Postgres migrations, RLS, OpenBao, rate limiting | Nothing    |
+| [#8 — 1B Auth](https://github.com/TinyPhi/OpenWind/issues/8)                     | Zitadel JWT, RBAC, API keys                      | #7         |
+| [#9 — 1C Entity Engine](https://github.com/TinyPhi/OpenWind/issues/9)            | Entity types, fields, runtime Zod, Redis cache   | #7, #8     |
+| [#10 — 1D Workflow Engine](https://github.com/TinyPhi/OpenWind/issues/10)        | State machine, transitions, SLA timers           | #9         |
+| [#11 — 1E Automation Engine](https://github.com/TinyPhi/OpenWind/issues/11)      | Outbox, rule executor, trigger/action types      | #9, #10    |
 
 Each issue has a detailed scope table. Pick one, comment that you're working on it, and open a draft PR early.
 
@@ -64,14 +64,14 @@ pnpm db:seed
 pnpm dev
 ```
 
-| Service | URL | Default credentials |
-|---------|-----|---------------------|
-| Admin UI | http://localhost:3001 | Zitadel login |
-| API + docs | http://localhost:3000/docs | — |
-| Zitadel console | http://localhost:8080 | admin@platform.local / Admin1234! |
-| MailHog | http://localhost:8025 | — |
-| MinIO console | http://localhost:9001 | minioadmin / minioadmin |
-| OpenBao UI | http://localhost:8200 | Token: `dev-root-token` |
+| Service         | URL                        | Default credentials               |
+| --------------- | -------------------------- | --------------------------------- |
+| Admin UI        | http://localhost:3001      | Zitadel login                     |
+| API + docs      | http://localhost:3000/docs | —                                 |
+| Zitadel console | http://localhost:8080      | admin@platform.local / Admin1234! |
+| MailHog         | http://localhost:8025      | —                                 |
+| MinIO console   | http://localhost:9001      | minioadmin / minioadmin           |
+| OpenBao UI      | http://localhost:8200      | Token: `dev-root-token`           |
 
 ### Running tests
 
@@ -145,11 +145,13 @@ The scope in parentheses is the package or component (`workflow`, `entity`, `aut
 ### PR checklist summary
 
 Every PR must:
+
 - [ ] Include tests — coverage must not drop
 - [ ] Pass `pnpm typecheck` and `pnpm lint` with zero errors
 - [ ] Follow Conventional Commits
 
 If the PR touches `packages/db/` or adds tables:
+
 - [ ] `tenant_id UUID NOT NULL` on all new tenant-scoped tables
 - [ ] RLS enabled + both read and write policies defined
 - [ ] `tenant_id` index present
@@ -157,6 +159,7 @@ If the PR touches `packages/db/` or adds tables:
 - [ ] Down migration present as a comment in the migration file
 
 If the PR touches `apps/api/` or adds routes:
+
 - [ ] All inputs validated with Zod at the route boundary
 - [ ] `requireAuth()` applied
 - [ ] Rate limiting configured
@@ -164,6 +167,7 @@ If the PR touches `apps/api/` or adds routes:
 - [ ] Tenant isolation tests for the new route
 
 If the PR makes a significant architectural decision:
+
 - [ ] ADR created or updated in `docs/decisions/`
 
 ---
@@ -172,12 +176,12 @@ If the PR makes a significant architectural decision:
 
 Before changing how something fundamental works, check whether an ADR already covers it:
 
-| ADR | Decision |
-|-----|----------|
-| [ADR-001](docs/decisions/ADR-001-multitenancy.md) | Multi-tenancy via Postgres RLS |
-| [ADR-002](docs/decisions/ADR-002-workflow-engine.md) | DB-native workflow state machine |
-| [ADR-003](docs/decisions/ADR-003-field-validation.md) | Runtime Zod schema generation from entity fields |
-| [ADR-004](docs/decisions/ADR-004-config-first-module-design.md) | Modules are config (seed SQL), not code |
+| ADR                                                             | Decision                                         |
+| --------------------------------------------------------------- | ------------------------------------------------ |
+| [ADR-001](docs/decisions/ADR-001-multitenancy.md)               | Multi-tenancy via Postgres RLS                   |
+| [ADR-002](docs/decisions/ADR-002-workflow-engine.md)            | DB-native workflow state machine                 |
+| [ADR-003](docs/decisions/ADR-003-field-validation.md)           | Runtime Zod schema generation from entity fields |
+| [ADR-004](docs/decisions/ADR-004-config-first-module-design.md) | Modules are config (seed SQL), not code          |
 
 If your change contradicts an ADR, don't work around it — open a discussion to challenge the ADR first. ADRs can be superseded, but that requires explicit agreement, not a quiet bypass.
 
@@ -198,6 +202,7 @@ packages/automation-engine → packages/db, packages/workflow-engine, packages/e
 ```
 
 Cross-module communication happens only through:
+
 1. The event bus (publish/subscribe via `packages/automation-engine`)
 2. The entity relation API (foreign key lookups between entity types)
 3. tRPC procedures exposed by `apps/api`

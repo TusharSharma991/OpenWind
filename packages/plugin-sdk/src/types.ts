@@ -3,9 +3,9 @@ export type PluginPermission =
   | `events:${string}`
   | `slots:${string}`
   | `api:${string}`
-  | 'ai:inference'
-  | 'files:read'
-  | 'files:write';
+  | "ai:inference"
+  | "files:read"
+  | "files:write";
 
 export interface SlotRegistration {
   name: string;

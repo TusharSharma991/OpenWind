@@ -15,12 +15,14 @@ The platform's three engines (Entity, Workflow, Automation) are generic interpre
 > **When a new business module is needed (helpdesk, reimbursements, HRMS), where does its business logic live — in TypeScript code or in database configuration?**
 
 Getting this wrong in week 9 (when the first module is built) produces a codebase where:
+
 - Every module has its own routes, its own validators, its own business logic
 - Adding a custom field requires a code change and deployment
 - Workflow changes require engineering effort
 - The engine layer becomes irrelevant as modules bypass it with direct queries
 
 Getting it right means:
+
 - A new module is a seed SQL file — entity types, fields, workflows, automation rules as INSERT statements
 - Custom fields are rows a tenant can add without a deployment
 - Workflow redesigns happen in a UI without touching code
@@ -54,17 +56,18 @@ Specifically:
 
 A module is a named bundle of:
 
-| Component | Storage | Edited by |
-|-----------|---------|-----------|
-| Entity type definitions | `entity_types` rows | Seed SQL + admin UI |
-| Field definitions | `entity_fields` rows | Seed SQL + field builder UI |
-| Workflow definitions | `workflows` + `workflow_states` + `workflow_transitions` rows | Seed SQL + workflow builder UI |
-| Default automation rules | `automation_rules` rows | Seed SQL + automation builder UI |
-| Notification template references | Novu template IDs in automation rule config | Novu UI |
-| UI view config (list columns, detail layout) | `view_configs` rows (JSONB) | Seed SQL + UI |
-| Frontend components (list, detail, forms) | Generic engine-driven components | None required for standard modules |
+| Component                                    | Storage                                                       | Edited by                          |
+| -------------------------------------------- | ------------------------------------------------------------- | ---------------------------------- |
+| Entity type definitions                      | `entity_types` rows                                           | Seed SQL + admin UI                |
+| Field definitions                            | `entity_fields` rows                                          | Seed SQL + field builder UI        |
+| Workflow definitions                         | `workflows` + `workflow_states` + `workflow_transitions` rows | Seed SQL + workflow builder UI     |
+| Default automation rules                     | `automation_rules` rows                                       | Seed SQL + automation builder UI   |
+| Notification template references             | Novu template IDs in automation rule config                   | Novu UI                            |
+| UI view config (list columns, detail layout) | `view_configs` rows (JSONB)                                   | Seed SQL + UI                      |
+| Frontend components (list, detail, forms)    | Generic engine-driven components                              | None required for standard modules |
 
 A module has no:
+
 - Dedicated API routes
 - Custom Zod validation schemas (field validation is generated at runtime from `entity_fields`)
 - TypeScript business logic
@@ -156,9 +159,9 @@ Platform-defined entity types (available to all tenants, not overridable) have `
 
 ## Open Questions
 
-| ID | Question | Phase |
-|----|----------|-------|
-| **CF-01** | What is the process for a module to define "system fields" that tenants cannot delete or rename? The `is_system` flag exists on `entity_fields` — who sets it and when can it be overridden? | Phase 2 |
-| **CF-02** | When a module is uninstalled, what happens to tenant data in that module's entity types? Hard delete, soft delete, or archive-and-export? Define the uninstall contract before Phase 2. | Phase 2 |
+| ID        | Question                                                                                                                                                                                                                                                             | Phase   |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| **CF-01** | What is the process for a module to define "system fields" that tenants cannot delete or rename? The `is_system` flag exists on `entity_fields` — who sets it and when can it be overridden?                                                                         | Phase 2 |
+| **CF-02** | When a module is uninstalled, what happens to tenant data in that module's entity types? Hard delete, soft delete, or archive-and-export? Define the uninstall contract before Phase 2.                                                                              | Phase 2 |
 | **CF-03** | Module versioning: if a module ships an updated seed (e.g., adds a new field to the helpdesk ticket type), how is the delta applied to tenants who already have the module installed? The module seed runner needs a migration model, not just an idempotent insert. | Phase 2 |
-| **CF-04** | How are conflicts resolved when a tenant has customised a field definition and the module ships an update to that same field? Tenant customisation wins? Module update wins? Merge? | Phase 2 |
+| **CF-04** | How are conflicts resolved when a tenant has customised a field definition and the module ships an update to that same field? Tenant customisation wins? Module update wins? Merge?                                                                                  | Phase 2 |

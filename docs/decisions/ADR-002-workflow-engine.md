@@ -52,12 +52,14 @@ XState is a mature JavaScript library for modeling state machines and statechart
 **How it works:** Each workflow is an XState machine. When a transition is requested, XState computes the next state, guards are evaluated by XState's guard system, and side effects are handled by XState services. The machine definition is stored as JSON in the database and hydrated at runtime.
 
 **Advantages:**
+
 - Extremely powerful. XState supports parallel states, history states, nested states, deferred events, and actors.
 - Type-safe machine definitions.
 - XState's developer tooling (visualizer, inspector) is excellent.
 - Well-tested library with a large community.
 
 **Disadvantages:**
+
 - Significant accidental complexity. XState is designed for UI state management and complex statecharts. Business workflows do not need parallel states, history states, or actors. The full power of XState is 80% unused and creates cognitive overhead.
 - Serializing and deserializing XState machine definitions to/from JSON is error-prone. XState's internal representation does not map cleanly to a database-storable format.
 - Non-technical administrators cannot read or write XState configurations. Our no-code workflow builder would need to translate from a simple visual model to XState config, adding a translation layer and potential for bugs.
@@ -74,12 +76,14 @@ Temporal provides durable workflow execution: workflows are TypeScript functions
 **How it works:** Each workflow type is a TypeScript function decorated with Temporal's SDK. Transitions are implemented as signals. The entire execution history is persisted by Temporal.
 
 **Advantages:**
+
 - Extremely durable. Process crashes, deployments, and network failures do not affect workflow execution.
 - Natural expression of time-dependent logic (wait 24 hours, retry three times, etc.).
 - Built-in audit history.
 - Excellent for complex multi-step processes.
 
 **Disadvantages:**
+
 - Architectural mismatch. Temporal is designed for orchestrating distributed systems, not for managing business object state. A support ticket does not need durable execution — it needs a state machine.
 - Operational complexity. Temporal requires a separate cluster (or managed service), Elasticsearch for visibility, and specific deployment patterns. This is a significant operational burden.
 - Temporal workflows are code, not configuration. A non-technical administrator cannot define or modify a workflow without a developer. Our core requirement is that workflows are customer-configurable.
@@ -107,6 +111,7 @@ The workflow definition lives entirely in five tables: `workflows`, `workflow_st
 7. All in a single Postgres transaction
 
 **Advantages:**
+
 - The workflow definition is data, not code. A no-code builder reads and writes `workflow_states` and `workflow_transitions` rows. The engine executes them.
 - Full transactional atomicity. Either the transition happens (all five writes commit) or it does not (all five roll back). There is no partial state.
 - The audit trail (`workflow_events`) is a first-class database table — queryable, filterable, exportable. `SELECT * FROM workflow_events WHERE instance_id = X ORDER BY created_at` gives a complete history of an entity.
@@ -115,6 +120,7 @@ The workflow definition lives entirely in five tables: `workflows`, `workflow_st
 - Operationally simple: if the API server is up and Postgres is up, the workflow engine is up.
 
 **Disadvantages:**
+
 - We build and maintain it. Library-based options outsource maintenance to the open-source community. Mitigation: the core implementation is small enough (~400 lines of TypeScript) that ownership is manageable.
 - No built-in visualizer. Mitigation: the visual workflow builder in Phase 3 reads directly from `workflow_states` and `workflow_transitions` — this is easier than visualizing an XState config.
 - Condition expression evaluation requires a sandboxed evaluator. Mitigation: a small expression evaluator (see Condition Expression Language below) handles the common cases. The `script` action handles edge cases.
@@ -142,19 +148,18 @@ export async function executeTransition(
     fieldUpdates?: Record<string, unknown>;
   },
   db: DrizzleTransaction,
-  eventBus: EventBus
+  eventBus: EventBus,
 ): Promise<EntityInstance> {
-
   // 1. Load instance with pessimistic lock
   const instance = await db
     .select()
     .from(entityInstances)
     .where(eq(entityInstances.id, params.instanceId))
-    .for('update')  // Postgres FOR UPDATE — prevents concurrent transitions
+    .for("update") // Postgres FOR UPDATE — prevents concurrent transitions
     .limit(1)
-    .then(r => r[0]);
+    .then((r) => r[0]);
 
-  if (!instance) throw new WorkflowError('INSTANCE_NOT_FOUND');
+  if (!instance) throw new WorkflowError("INSTANCE_NOT_FOUND");
 
   // 2. Load transition definition
   const transition = await db
@@ -164,25 +169,29 @@ export async function executeTransition(
       and(
         eq(workflowTransitions.id, params.transitionId),
         eq(workflowTransitions.workflowId, instance.workflowId!),
-        eq(workflowTransitions.fromState, instance.currentState)
-      )
+        eq(workflowTransitions.fromState, instance.currentState),
+      ),
     )
     .limit(1)
-    .then(r => r[0]);
+    .then((r) => r[0]);
 
-  if (!transition) throw new WorkflowError('TRANSITION_NOT_AVAILABLE', {
-    instanceId: params.instanceId,
-    currentState: instance.currentState,
-    requestedTransition: params.transitionId,
-  });
+  if (!transition)
+    throw new WorkflowError("TRANSITION_NOT_AVAILABLE", {
+      instanceId: params.instanceId,
+      currentState: instance.currentState,
+      requestedTransition: params.transitionId,
+    });
 
   // 3. Evaluate role guard
   if (transition.allowedRoles.length > 0) {
-    const hasRole = transition.allowedRoles.some(r => params.actorRoles.includes(r));
-    if (!hasRole) throw new WorkflowError('TRANSITION_FORBIDDEN', {
-      required: transition.allowedRoles,
-      actor: params.actorRoles,
-    });
+    const hasRole = transition.allowedRoles.some((r) =>
+      params.actorRoles.includes(r),
+    );
+    if (!hasRole)
+      throw new WorkflowError("TRANSITION_FORBIDDEN", {
+        required: transition.allowedRoles,
+        actor: params.actorRoles,
+      });
   }
 
   // 4. Evaluate conditions
@@ -190,21 +199,25 @@ export async function executeTransition(
     const conditionResult = evaluateConditions(
       transition.conditions,
       instance.fields,
-      { actorId: params.actorId, actorRoles: params.actorRoles }
+      { actorId: params.actorId, actorRoles: params.actorRoles },
     );
-    if (!conditionResult.passed) throw new WorkflowError('CONDITION_NOT_MET', {
-      reason: conditionResult.reason,
-    });
+    if (!conditionResult.passed)
+      throw new WorkflowError("CONDITION_NOT_MET", {
+        reason: conditionResult.reason,
+      });
   }
 
   // 5. Check required fields
   if (transition.requiresFields.length > 0) {
     const allFieldsPresent = transition.requiresFields.every(
-      f => instance.fields[f] != null
+      (f) => instance.fields[f] != null,
     );
-    if (!allFieldsPresent) throw new WorkflowError('REQUIRED_FIELDS_MISSING', {
-      fields: transition.requiresFields.filter(f => instance.fields[f] == null),
-    });
+    if (!allFieldsPresent)
+      throw new WorkflowError("REQUIRED_FIELDS_MISSING", {
+        fields: transition.requiresFields.filter(
+          (f) => instance.fields[f] == null,
+        ),
+      });
   }
 
   // 6. Apply field updates (if any provided with the transition)
@@ -229,30 +242,38 @@ export async function executeTransition(
     workflowId: instance.workflowId!,
     fromState: instance.currentState,
     toState: transition.toState,
-    triggeredBy: params.actorId ? 'user' : 'automation',
+    triggeredBy: params.actorId ? "user" : "automation",
     actorId: params.actorId,
     comment: params.comment,
-    metadata: { transitionId: params.transitionId, fieldUpdates: params.fieldUpdates },
+    metadata: {
+      transitionId: params.transitionId,
+      fieldUpdates: params.fieldUpdates,
+    },
   });
 
   // 9. Publish domain event to outbox (within the same transaction)
   await db.insert(outboxEvents).values({
     tenantId: instance.tenantId,
-    eventType: 'workflow.transitioned',
+    eventType: "workflow.transitioned",
     version: 1,
     payload: {
       instanceId: instance.id,
       entityTypeId: instance.entityTypeId,
       fromState: instance.currentState,
       toState: transition.toState,
-      triggeredBy: params.actorId ? 'user' : 'automation',
+      triggeredBy: params.actorId ? "user" : "automation",
       actorId: params.actorId,
     },
   });
 
   // 10. Manage SLA timers
   await cancelSlaTimer(params.instanceId, instance.currentState, db);
-  await scheduleSlaTimerIfNeeded(params.instanceId, transition.toState, instance.workflowId!, db);
+  await scheduleSlaTimerIfNeeded(
+    params.instanceId,
+    transition.toState,
+    instance.workflowId!,
+    db,
+  );
 
   return updated;
 }
@@ -275,14 +296,18 @@ Transition conditions are stored as a JSON rule tree, evaluated by a simple recu
 ```typescript
 // Condition grammar
 type Condition =
-  | { op: 'AND'; conditions: Condition[] }
-  | { op: 'OR'; conditions: Condition[] }
-  | { op: 'NOT'; condition: Condition }
-  | { op: 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte'; field: string; value: unknown }
-  | { op: 'in' | 'not_in'; field: string; values: unknown[] }
-  | { op: 'is_null' | 'is_not_null'; field: string }
-  | { op: 'role_is'; role: string }
-  | { op: 'field_changed'; field: string };
+  | { op: "AND"; conditions: Condition[] }
+  | { op: "OR"; conditions: Condition[] }
+  | { op: "NOT"; condition: Condition }
+  | {
+      op: "eq" | "neq" | "gt" | "gte" | "lt" | "lte";
+      field: string;
+      value: unknown;
+    }
+  | { op: "in" | "not_in"; field: string; values: unknown[] }
+  | { op: "is_null" | "is_not_null"; field: string }
+  | { op: "role_is"; role: string }
+  | { op: "field_changed"; field: string };
 ```
 
 Example: "Route to Finance Review if amount exceeds 50,000 AND submitter does not have the finance-exempt role":
@@ -308,7 +333,7 @@ async function scheduleSlaTimerIfNeeded(
   instanceId: string,
   state: string,
   workflowId: string,
-  db: DrizzleTransaction
+  db: DrizzleTransaction,
 ): Promise<void> {
   const workflowState = await db
     .select()
@@ -316,29 +341,31 @@ async function scheduleSlaTimerIfNeeded(
     .where(
       and(
         eq(workflowStates.workflowId, workflowId),
-        eq(workflowStates.name, state)
-      )
+        eq(workflowStates.name, state),
+      ),
     )
     .limit(1)
-    .then(r => r[0]);
+    .then((r) => r[0]);
 
   if (!workflowState?.slaHours) return;
 
   const delayMs = workflowState.slaHours * 60 * 60 * 1000;
 
   const job = await slaQueue.add(
-    'sla-check',
+    "sla-check",
     { instanceId, state, workflowId },
-    { delay: delayMs, jobId: `sla:${instanceId}:${state}` }
+    { delay: delayMs, jobId: `sla:${instanceId}:${state}` },
   );
 
   // Store job ID so we can cancel it on state exit
-  await redis.set(`sla:${instanceId}:${state}`, job.id, { EX: workflowState.slaHours * 3600 + 3600 });
+  await redis.set(`sla:${instanceId}:${state}`, job.id, {
+    EX: workflowState.slaHours * 3600 + 3600,
+  });
 }
 
 async function cancelSlaTimer(
   instanceId: string,
-  exitingState: string
+  exitingState: string,
 ): Promise<void> {
   const jobId = await redis.get(`sla:${instanceId}:${exitingState}`);
   if (!jobId) return;
@@ -369,7 +396,7 @@ Clients should never need to guess which transitions are available from a given 
 async function getAvailableTransitions(
   instanceId: string,
   actorId: string,
-  actorRoles: string[]
+  actorRoles: string[],
 ): Promise<WorkflowTransition[]> {
   // Load all transitions from current state
   // Filter by role guard
@@ -396,6 +423,7 @@ This ensures that an in-flight expense claim is not affected by an administrator
 ## Consequences
 
 ### Positive
+
 - The workflow engine is fully transparent. Any developer can read the five tables and understand completely what any workflow does and why any transition was or was not available.
 - The audit trail (`workflow_events`) is a first-class queryable table. Compliance reports, customer support investigations, and debugging are all just SQL queries.
 - Customer-configurable workflows are naturally supported: the workflow definition is data, and the no-code builder is a UI for editing that data.
@@ -403,6 +431,7 @@ This ensures that an in-flight expense claim is not affected by an administrator
 - The transition execution model is idempotent given a unique `transitionId` per request. Duplicate requests from retrying clients do not cause double-transitions.
 
 ### Negative
+
 - The condition expression language has a ceiling. Conditions that cannot be expressed in the tree grammar require a `script` action. This is an explicit design tradeoff, not an oversight.
 - Complex multi-step coordination (wait for webhook, branch on result, wait again) cannot be expressed as workflow transitions. These require the iPaaS layer. The team must know which layer to use for which problem.
 - The custom implementation requires maintenance. When edge cases are discovered in production, the team fixes them — there is no upstream library to file a bug against.
@@ -423,12 +452,12 @@ These targets must be validated in the Phase 1 load testing milestone.
 
 These questions were surfaced during architecture review and have not yet been resolved. They should be answered before the relevant phase ships.
 
-| ID | Question | Phase |
-|----|----------|-------|
-| **WE-01** | What happens to in-flight instances when a workflow version is retired? Can a version be retired while instances are on it, or is this blocked? The GC policy is tracked in [issue #3](https://github.com/TinyPhi/OpenWind/issues/3) but the admin UX for managing stuck instances is unspecified. | Phase 2 |
-| **WE-02** | Can a workflow transition be undone (rollback to previous state)? If so, what is the API contract and how is the rollback represented in `workflow_events`? If not, document this as a deliberate constraint. | Phase 2 |
-| **WE-03** | How are SLA breaches handled when BullMQ is down for an extended period? Are missed SLA firings backfilled on recovery or permanently lost? Define the recovery behaviour explicitly. | Phase 1 |
-| **WE-04** | The condition expression language covers ~95% of cases. What is the process for evaluating whether a new operator belongs in the language vs. the `script` action? Who makes this call? | Phase 2 |
-| **WE-05** | Is `getAvailableTransitions` the single authoritative source for transition availability, or can the UI also apply additional filters? If both, what happens when they disagree? | Phase 1 |
+| ID        | Question                                                                                                                                                                                                                                                                                                                 | Phase   |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------- |
+| **WE-01** | What happens to in-flight instances when a workflow version is retired? Can a version be retired while instances are on it, or is this blocked? The GC policy is tracked in [issue #3](https://github.com/TinyPhi/OpenWind/issues/3) but the admin UX for managing stuck instances is unspecified.                       | Phase 2 |
+| **WE-02** | Can a workflow transition be undone (rollback to previous state)? If so, what is the API contract and how is the rollback represented in `workflow_events`? If not, document this as a deliberate constraint.                                                                                                            | Phase 2 |
+| **WE-03** | How are SLA breaches handled when BullMQ is down for an extended period? Are missed SLA firings backfilled on recovery or permanently lost? Define the recovery behaviour explicitly.                                                                                                                                    | Phase 1 |
+| **WE-04** | The condition expression language covers ~95% of cases. What is the process for evaluating whether a new operator belongs in the language vs. the `script` action? Who makes this call?                                                                                                                                  | Phase 2 |
+| **WE-05** | Is `getAvailableTransitions` the single authoritative source for transition availability, or can the UI also apply additional filters? If both, what happens when they disagree?                                                                                                                                         | Phase 1 |
 | **WE-06** | Parallel approval quorum rules are unspecified. What happens when one approver rejects while others are pending? What happens when an approver is deactivated mid-approval? Define at minimum: `ALL_REQUIRED` and `MAJORITY` modes, and the behaviour for deactivated approvers (auto-reassign, auto-abstain, or block). | Phase 2 |
-| **WE-07** | How are circular workflow configurations prevented at configuration time (e.g. A → B → A with no terminal state reachable)? Is there a validation step in the workflow builder? | Phase 3 |
+| **WE-07** | How are circular workflow configurations prevented at configuration time (e.g. A → B → A with no terminal state reachable)? Is there a validation step in the workflow builder?                                                                                                                                          | Phase 3 |

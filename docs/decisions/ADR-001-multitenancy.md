@@ -42,6 +42,7 @@ Each customer gets a dedicated Postgres database. Tenant A's data lives in `db_t
 **How it works:** The application maintains a connection string registry keyed by tenant ID. On each request, it looks up the tenant's connection string and uses that pool for all queries. No shared state between databases.
 
 **Advantages:**
+
 - Maximum isolation. A query cannot accidentally cross tenant boundaries.
 - Independent backup and restore per tenant.
 - Possible to offer dedicated hardware tiers to large customers.
@@ -49,6 +50,7 @@ Each customer gets a dedicated Postgres database. Tenant A's data lives in `db_t
 - A runaway query or lock on one tenant cannot affect others.
 
 **Disadvantages:**
+
 - Connection pool explosion. Postgres allows roughly 100–200 active connections per database safely. With 500 tenants, each needing a minimum pool of 5 connections, that is 2,500 connections and 500 independent Postgres processes. This is a significant infrastructure cost and operational burden.
 - Migration complexity scales with tenant count. Applying a schema change to 500 databases means 500 sequential (or parallelized but complex) migration operations. A failed migration on tenant 237 leaves the fleet in a partially-migrated state. The tooling to manage this safely is non-trivial.
 - Cross-tenant analytics are expensive. Generating platform-wide reports (e.g., total tickets across all customers) requires federated queries across hundreds of databases.
@@ -65,11 +67,13 @@ All tenants share a single Postgres instance, but each tenant has a dedicated Po
 **How it works:** On each request, the application sets `SET search_path TO tenant_abc, public` so all unqualified table references resolve to that tenant's schema. Every schema has identical table definitions.
 
 **Advantages:**
+
 - Better resource sharing than database-per-tenant. One Postgres process, one connection pool per application instance (via PgBouncer with schema-level routing).
 - Still good isolation — unqualified queries can only see the current schema.
 - Per-tenant backup is possible via `pg_dump --schema=tenant_abc`.
 
 **Disadvantages:**
+
 - DDL migrations still scale linearly. Adding a column to `entity_instances` means running `ALTER TABLE` on 500 schemas. With Postgres DDL taking `AccessExclusiveLock`, this blocks reads and writes on each schema during the migration window. Even parallelized, this is slow and risky.
 - Postgres schema count limit. While Postgres technically supports thousands of schemas, the `pg_catalog` overhead grows with schema count. `VACUUM`, `ANALYZE`, and `pg_dump` slow down as schema count increases. This is a well-documented production issue at >1,000 schemas.
 - `search_path` manipulation is fragile. A missing middleware, a connection reuse bug, or a transaction that doesn't reset `search_path` can silently query the wrong schema. This class of bug is subtle and hard to detect in testing.
@@ -99,6 +103,7 @@ SET LOCAL app.tenant_id = 'abc-123-...';
 All queries against `entity_instances` in that session automatically get `WHERE tenant_id = 'abc-123-...'` appended by the database engine, invisibly, before execution. There is no way to forget this — it is enforced at the storage layer, not the application layer.
 
 **Advantages:**
+
 - Isolation is enforced by Postgres, not application code. A developer who writes `SELECT * FROM entity_instances` without a WHERE clause gets only their tenant's rows, not all rows. This is the critical safety property.
 - One schema definition. DDL migrations run once and apply to all tenants instantly. Adding a column is a single `ALTER TABLE` statement, regardless of tenant count.
 - Operational simplicity scales. Connection pooling, monitoring, vacuuming, and backup all operate on a single database. Adding the 500th customer adds rows, not infrastructure.
@@ -106,6 +111,7 @@ All queries against `entity_instances` in that session automatically get `WHERE 
 - This is the production-proven model used by Supabase, PostgREST, Neon, and numerous multi-tenant SaaS applications.
 
 **Disadvantages and mitigations:**
+
 - **RLS performance overhead.** RLS policies add a predicate to every query. This is mitigated by: (a) indexing `tenant_id` on every table, (b) composite indexes that include `tenant_id` as the leading column for frequently-filtered queries, (c) benchmarking confirms the overhead is <3% for indexed queries at our scale.
 - **Superuser bypass.** A session connected as a Postgres superuser bypasses RLS. Mitigation: the application's database user is never a superuser. Migration tooling uses a separate user with `BYPASSRLS` only during migration runs, not during normal operation.
 - **Large tenant row counts.** A single extremely large tenant could degrade query performance for other tenants if their queries generate large sequential scans. Mitigation: per-tenant query timeouts, per-tenant connection limits via PgBouncer, and read replicas for analytics workloads.
@@ -125,16 +131,16 @@ Every database connection used for application requests must have the tenant con
 
 ```typescript
 // packages/db/src/middleware.ts
-import { sql } from 'drizzle-orm';
-import { db } from './client';
+import { sql } from "drizzle-orm";
+import { db } from "./client";
 
 export async function withTenantContext<T>(
   tenantId: string,
-  fn: () => Promise<T>
+  fn: () => Promise<T>,
 ): Promise<T> {
   return db.transaction(async (tx) => {
     await tx.execute(
-      sql`SELECT set_config('app.tenant_id', ${tenantId}, true)`
+      sql`SELECT set_config('app.tenant_id', ${tenantId}, true)`,
       //                                              ^^^^ true = local to transaction
     );
     return fn();
@@ -170,11 +176,11 @@ The `true` argument to `current_setting` makes it return `NULL` rather than thro
 
 Three database users are provisioned:
 
-| User | Permissions | Used by |
-|------|-------------|---------|
-| `app_user` | DML on all tables, subject to RLS | API server, workers |
-| `migration_user` | DDL + BYPASSRLS | Migration tool only, never in runtime |
-| `analytics_user` | SELECT + BYPASSRLS on specific tables | Metabase, internal reporting |
+| User             | Permissions                           | Used by                               |
+| ---------------- | ------------------------------------- | ------------------------------------- |
+| `app_user`       | DML on all tables, subject to RLS     | API server, workers                   |
+| `migration_user` | DDL + BYPASSRLS                       | Migration tool only, never in runtime |
+| `analytics_user` | SELECT + BYPASSRLS on specific tables | Metabase, internal reporting          |
 
 The `app_user` cannot alter schemas, cannot `BYPASSRLS`, and cannot access `pg_catalog` beyond what is needed for connection. Connection strings for `migration_user` and `analytics_user` are never present in application environment variables — only in migration and analytics tooling respectively.
 
@@ -218,6 +224,7 @@ All schema migrations are in `packages/db/migrations/`. Migration files are numb
 - Applied to production during a deployment window by the `migration_user`
 
 New tenant-scoped tables must include RLS setup in the same migration file. The migration reviewer checklist includes:
+
 - [ ] Does the table have `tenant_id uuid NOT NULL`?
 - [ ] Is `ENABLE ROW LEVEL SECURITY` present?
 - [ ] Are both read and write policies defined?
@@ -237,12 +244,14 @@ PgBouncer is configured with per-database (per-application-user) connection limi
 ## Consequences
 
 ### Positive
+
 - Tenant isolation is enforced at the database layer. Application developers cannot accidentally bypass it.
 - Schema migrations are a single operation regardless of tenant count. Scaling from 10 to 10,000 customers does not change migration complexity.
 - Operational simplicity: one database, one connection pool, one backup, one monitoring target.
 - The model is well-understood and production-proven. Documentation, troubleshooting guides, and expertise are widely available.
 
 ### Negative
+
 - Every developer must understand RLS. A developer who connects directly to the database (e.g., via `psql` for debugging) must remember to set `app.tenant_id` or they will see no rows. This is counterintuitive at first and requires documentation and team onboarding.
 - Bulk operations across all tenants (e.g., a platform-wide backfill) require the `analytics_user` or a dedicated admin connection. This is an intentional constraint but requires awareness.
 - A single large tenant's write volume can degrade performance for other tenants. This is mitigated by indexes, timeouts, and connection limits, but it is a real constraint that does not exist in the database-per-tenant model.
@@ -257,10 +266,10 @@ Migrating away from shared schema + RLS to schema-per-tenant at a later date is 
 
 These questions were surfaced during architecture review and have not yet been resolved. They should be answered before the relevant phase ships.
 
-| ID | Question | Phase |
-|----|----------|-------|
-| **MT-01** | What is the defined SLA for GDPR erasure requests? Who owns this obligation? Tenant deletion is tracked in [issue #5](https://github.com/TinyPhi/OpenWind/issues/5) but the erasure SLA commitment is not yet set. | Phase 2 |
-| **MT-02** | How is `tenant_id` injected when BullMQ workers execute DB queries outside a web request context? Workers receive `tenantId` in the job payload — but is there a signature/verification scheme to prevent a malformed job from assuming an arbitrary tenant context? | Phase 1 |
-| **MT-03** | What is the maximum supported tenant count before the shared-schema model warrants a partitioning or sharding review? Define a concrete row-count threshold that triggers an architecture review (e.g., 10M rows in `entity_instances`). | Phase 3 |
-| **MT-04** | Are platform-wide tables (`entity_types`, `workflow_templates`) versioned? If a platform update changes a shared entity type, how are all tenant instances migrated? | Phase 2 |
+| ID        | Question                                                                                                                                                                                                                                                                                                          | Phase   |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| **MT-01** | What is the defined SLA for GDPR erasure requests? Who owns this obligation? Tenant deletion is tracked in [issue #5](https://github.com/TinyPhi/OpenWind/issues/5) but the erasure SLA commitment is not yet set.                                                                                                | Phase 2 |
+| **MT-02** | How is `tenant_id` injected when BullMQ workers execute DB queries outside a web request context? Workers receive `tenantId` in the job payload — but is there a signature/verification scheme to prevent a malformed job from assuming an arbitrary tenant context?                                              | Phase 1 |
+| **MT-03** | What is the maximum supported tenant count before the shared-schema model warrants a partitioning or sharding review? Define a concrete row-count threshold that triggers an architecture review (e.g., 10M rows in `entity_instances`).                                                                          | Phase 3 |
+| **MT-04** | Are platform-wide tables (`entity_types`, `workflow_templates`) versioned? If a platform update changes a shared entity type, how are all tenant instances migrated?                                                                                                                                              | Phase 2 |
 | **MT-05** | What are the data retention policies for `outbox_events`, `workflow_events`, and `automation_executions`? Are there per-tier differences? Partial answer in [issue #5](https://github.com/TinyPhi/OpenWind/issues/5) (outbox retention), but `workflow_events` and `automation_executions` are not yet addressed. | Phase 2 |

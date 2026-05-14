@@ -1,7 +1,9 @@
-import { z } from 'zod';
+import { z } from "zod";
 
 const EnvSchema = z.object({
-  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  NODE_ENV: z
+    .enum(["development", "test", "production"])
+    .default("development"),
   DATABASE_URL: z.string().url(),
   DATABASE_POOL_MIN: z.coerce.number().int().min(1).default(2),
   DATABASE_POOL_MAX: z.coerce.number().int().min(1).default(10),

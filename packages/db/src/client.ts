@@ -1,7 +1,7 @@
-import { drizzle } from 'drizzle-orm/postgres-js';
-import postgres from 'postgres';
-import { env } from '@platform/config';
-import * as schema from './schema/index.js';
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
+import { env } from "@platform/config";
+import * as schema from "./schema/index.js";
 
 const queryClient = postgres(env.DATABASE_URL, {
   max: env.DATABASE_POOL_MAX,

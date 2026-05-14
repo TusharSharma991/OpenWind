@@ -1,8 +1,10 @@
-import React from 'react';
-import ReactDOM from 'react-dom/client';
+import React from "react";
+import ReactDOM from "react-dom/client";
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
+ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <div><h1>OpenWind Portal</h1></div>
-  </React.StrictMode>
+    <div>
+      <h1>OpenWind Portal</h1>
+    </div>
+  </React.StrictMode>,
 );

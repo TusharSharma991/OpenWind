@@ -1,7 +1,9 @@
 # Prompt: Scaffold a Hono route
 
 ## Template prompt
+
 "Add a [METHOD] /[path] route to apps/api. It should:
+
 - Require auth
 - Require role: [ROLES]
 - Validate input with Zod schema: [SCHEMA DESCRIPTION]

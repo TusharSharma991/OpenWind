@@ -11,7 +11,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@novu/api": "^2.0.0",
+    "@novu/api": "^3.16.0",
     "@platform/config": "workspace:*",
     "@platform/logger": "workspace:*"
   },

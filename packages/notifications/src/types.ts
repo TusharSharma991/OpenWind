@@ -1,4 +1,10 @@
-export type NotificationChannel = 'email' | 'sms' | 'push' | 'slack' | 'whatsapp' | 'in_app';
+export type NotificationChannel =
+  | "email"
+  | "sms"
+  | "push"
+  | "slack"
+  | "whatsapp"
+  | "in_app";
 
 export interface SendNotificationParams {
   tenantId: string;

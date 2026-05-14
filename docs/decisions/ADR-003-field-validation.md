@@ -13,6 +13,7 @@
 The Entity Engine stores all field data in a Postgres `jsonb` column. This provides schema flexibility — adding a custom field to an entity type does not require a DDL migration — but it removes the database's ability to enforce field-level constraints (types, required-ness, enum membership, range limits). Those constraints must be enforced by the application.
 
 This ADR decides:
+
 1. **Where** validation runs: client, API boundary, domain layer, or database layer
 2. **How** validation schemas are constructed at runtime from `entity_fields` configuration
 3. **What** the validation error contract looks like — the format returned to clients
@@ -42,10 +43,12 @@ Enforce field rules via Postgres `CHECK` constraints, `NOT NULL`, and `ENUM` typ
 **How it works:** Rather than storing all field values in a `jsonb` blob, extract core fields into dedicated typed columns. Custom fields remain in `jsonb` but have no database-level constraints.
 
 **Advantages:**
+
 - Database enforces schema integrity. Invalid data cannot be written regardless of how the application behaves.
 - Standard SQL tooling shows constraints clearly.
 
 **Disadvantages:**
+
 - Fundamentally incompatible with the dynamic field model. Adding a custom field requires an `ALTER TABLE` migration — which is exactly what the `jsonb` model was designed to avoid.
 - Can only enforce constraints on dedicated columns, not on `jsonb` attributes without complex expression-based CHECK constraints that are nearly impossible to maintain.
 - Error messages from Postgres constraint violations are not field-granular in a way that can be usefully returned to API clients.
@@ -62,7 +65,7 @@ Each module defines a Zod schema for its entity types in TypeScript. Validation 
 // modules/helpdesk/schemas.ts — hardcoded approach
 const TicketSchema = z.object({
   subject: z.string().min(1).max(500),
-  priority: z.enum(['low', 'medium', 'high', 'critical']),
+  priority: z.enum(["low", "medium", "high", "critical"]),
   assigneeId: z.string().uuid().nullable(),
   // ...
 });
@@ -71,11 +74,13 @@ const TicketSchema = z.object({
 **How it works:** When a ticket is created or updated, its fields are validated against `TicketSchema`. Zod errors are formatted and returned.
 
 **Advantages:**
+
 - Simple. No runtime schema generation. Zod schemas are static TypeScript.
 - Type inference works naturally.
 - Easy to understand and debug.
 
 **Disadvantages:**
+
 - Cannot validate custom tenant fields. A tenant who adds a required `department_code` field to their tickets gets no validation — their required field is silently accepted as null or ignored.
 - Violates the schema-driven requirement. Every field constraint exists in two places: `entity_fields` (for the UI form builder) and the Zod schema (for validation). These must be kept in sync manually.
 - Module code must be updated to change validation rules. A customer wanting a stricter `subject` length limit needs a code deploy.
@@ -91,6 +96,7 @@ Validation schemas are generated at runtime by reading the `entity_fields` table
 **How it works:**
 
 When a create or update operation arrives, the validation layer:
+
 1. Loads all `entity_fields` records for the entity type (including both module-defined and tenant custom fields)
 2. Constructs a Zod schema dynamically from those records
 3. Validates the input payload against the generated schema
@@ -100,12 +106,14 @@ When a create or update operation arrives, the validation layer:
 The generated schema is **cached in Redis** with a short TTL (60 seconds by default, invalidated on any write to `entity_fields` for this entity type). Schema generation from `entity_fields` is fast (~2ms) but is called on every write without caching, making caching a practical necessity at scale.
 
 **Advantages:**
+
 - Single source of truth: `entity_fields` is the only place field rules are defined.
 - Automatically validates tenant custom fields with no extra code.
 - Adding or modifying a field's validation rules takes effect immediately (within TTL).
 - Module code has zero field validation logic — it delegates entirely to the engine.
 
 **Disadvantages:**
+
 - Runtime schema generation requires careful implementation to be fast and correct.
 - Caching introduces a brief window (up to 60 seconds) where a field rule change does not take effect. This is acceptable for a configuration system.
 - Debugging validation failures requires inspecting `entity_fields` data rather than reading TypeScript code. Mitigated by good tooling and logging.
@@ -123,14 +131,13 @@ The generated schema is **cached in Redis** with a short TTL (60 seconds by defa
 ```typescript
 // packages/entity-engine/src/validation/schema-builder.ts
 
-import { z } from 'zod';
-import type { EntityField } from '../types';
+import { z } from "zod";
+import type { EntityField } from "../types";
 
 export function buildZodSchema(
   fields: EntityField[],
-  mode: 'create' | 'update'
+  mode: "create" | "update",
 ): z.ZodObject<Record<string, z.ZodTypeAny>> {
-
   const shape: Record<string, z.ZodTypeAny> = {};
 
   for (const field of fields) {
@@ -138,7 +145,7 @@ export function buildZodSchema(
 
     // In update mode, all fields are optional (PATCH semantics)
     // In create mode, required fields are enforced
-    if (mode === 'update' || !field.isRequired) {
+    if (mode === "update" || !field.isRequired) {
       fieldSchema = fieldSchema.optional();
     }
 
@@ -150,8 +157,7 @@ export function buildZodSchema(
 
 function buildFieldSchema(field: EntityField): z.ZodTypeAny {
   switch (field.fieldType) {
-
-    case 'text': {
+    case "text": {
       let s = z.string();
       if (field.config?.maxLength) s = s.max(field.config.maxLength);
       if (field.config?.pattern) s = s.regex(new RegExp(field.config.pattern));
@@ -159,26 +165,26 @@ function buildFieldSchema(field: EntityField): z.ZodTypeAny {
       return s;
     }
 
-    case 'longtext':
+    case "longtext":
       return z.string();
 
-    case 'number': {
+    case "number": {
       let s = z.number();
       if (field.config?.min !== undefined) s = s.min(field.config.min);
       if (field.config?.max !== undefined) s = s.max(field.config.max);
       if (field.config?.decimalPlaces !== undefined) {
         s = s.refine(
-          v => {
-            const decimals = (v.toString().split('.')[1] ?? '').length;
+          (v) => {
+            const decimals = (v.toString().split(".")[1] ?? "").length;
             return decimals <= field.config.decimalPlaces;
           },
-          { message: `Maximum ${field.config.decimalPlaces} decimal places` }
+          { message: `Maximum ${field.config.decimalPlaces} decimal places` },
         );
       }
       return s;
     }
 
-    case 'currency':
+    case "currency":
       return z.object({
         amount: z.number().nonnegative(),
         currency: field.config?.allowedCurrencies
@@ -186,34 +192,38 @@ function buildFieldSchema(field: EntityField): z.ZodTypeAny {
           : z.string().length(3),
       });
 
-    case 'date':
+    case "date":
       return z.string().date();
 
-    case 'datetime':
+    case "datetime":
       return z.string().datetime({ offset: true });
 
-    case 'boolean':
+    case "boolean":
       return z.boolean();
 
-    case 'enum': {
-      const values = field.config?.options?.map((o: { value: string }) => o.value);
+    case "enum": {
+      const values = field.config?.options?.map(
+        (o: { value: string }) => o.value,
+      );
       if (!values?.length) return z.string();
       return z.enum(values as [string, ...string[]]);
     }
 
-    case 'multi_enum': {
-      const values = field.config?.options?.map((o: { value: string }) => o.value);
+    case "multi_enum": {
+      const values = field.config?.options?.map(
+        (o: { value: string }) => o.value,
+      );
       if (!values?.length) return z.array(z.string());
       return z.array(z.enum(values as [string, ...string[]]));
     }
 
-    case 'user_ref':
+    case "user_ref":
       return z.string().uuid();
 
-    case 'entity_ref':
+    case "entity_ref":
       return z.string().uuid();
 
-    case 'file':
+    case "file":
       return z.object({
         key: z.string(),
         name: z.string(),
@@ -221,15 +231,19 @@ function buildFieldSchema(field: EntityField): z.ZodTypeAny {
         mimeType: z.string(),
       });
 
-    case 'files':
-      return z.array(z.object({
-        key: z.string(),
-        name: z.string(),
-        size: z.number().int().positive(),
-        mimeType: z.string(),
-      })).max(field.config?.maxCount ?? 20);
+    case "files":
+      return z
+        .array(
+          z.object({
+            key: z.string(),
+            name: z.string(),
+            size: z.number().int().positive(),
+            mimeType: z.string(),
+          }),
+        )
+        .max(field.config?.maxCount ?? 20);
 
-    case 'formula':
+    case "formula":
       // Formula fields are computed, never written by clients
       return z.never().optional();
 
@@ -244,17 +258,16 @@ function buildFieldSchema(field: EntityField): z.ZodTypeAny {
 ```typescript
 // packages/entity-engine/src/validation/schema-cache.ts
 
-import { redis } from '../../redis';
-import { db } from '../../db';
+import { redis } from "../../redis";
+import { db } from "../../db";
 
 const CACHE_TTL_SECONDS = 60;
 
 export async function getValidationSchema(
   entityTypeId: string,
   tenantId: string,
-  mode: 'create' | 'update'
+  mode: "create" | "update",
 ): Promise<z.ZodObject<Record<string, z.ZodTypeAny>>> {
-
   const cacheKey = `schema:${entityTypeId}:${tenantId}:${mode}`;
   const cached = await redis.get(cacheKey);
 
@@ -273,10 +286,10 @@ export async function getValidationSchema(
       and(
         eq(entityFields.entityTypeId, entityTypeId),
         or(
-          isNull(entityFields.tenantId),         // module-defined
-          eq(entityFields.tenantId, tenantId)    // tenant custom
-        )
-      )
+          isNull(entityFields.tenantId), // module-defined
+          eq(entityFields.tenantId, tenantId), // tenant custom
+        ),
+      ),
     )
     .orderBy(entityFields.sortOrder);
 
@@ -288,7 +301,7 @@ export async function getValidationSchema(
 // Called when any entity_field record is modified
 export async function invalidateSchemaCache(
   entityTypeId: string,
-  tenantId?: string
+  tenantId?: string,
 ): Promise<void> {
   const pattern = tenantId
     ? `schema:${entityTypeId}:${tenantId}:*`
@@ -305,20 +318,20 @@ Validation failures are returned as a structured `ValidationError` with field-le
 
 ```typescript
 export class ValidationError extends Error {
-  readonly code = 'VALIDATION_ERROR';
+  readonly code = "VALIDATION_ERROR";
   readonly fields: FieldError[];
 
   constructor(fields: FieldError[]) {
-    super('Validation failed');
+    super("Validation failed");
     this.fields = fields;
   }
 }
 
 export interface FieldError {
-  field: string;          // 'amount' | 'contact.email' (nested fields use dot notation)
-  code: string;           // 'REQUIRED' | 'TOO_LONG' | 'INVALID_ENUM' | 'INVALID_FORMAT'
-  message: string;        // Human-readable message
-  meta?: Record<string, unknown>;  // Additional context (e.g., maxLength: 500)
+  field: string; // 'amount' | 'contact.email' (nested fields use dot notation)
+  code: string; // 'REQUIRED' | 'TOO_LONG' | 'INVALID_ENUM' | 'INVALID_FORMAT'
+  message: string; // Human-readable message
+  meta?: Record<string, unknown>; // Additional context (e.g., maxLength: 500)
 }
 ```
 
@@ -326,27 +339,31 @@ Zod errors are transformed into this format before being returned to clients:
 
 ```typescript
 function transformZodErrors(error: z.ZodError): FieldError[] {
-  return error.errors.map(issue => ({
-    field: issue.path.join('.'),
+  return error.errors.map((issue) => ({
+    field: issue.path.join("."),
     code: mapZodCode(issue.code),
     message: issue.message,
-    meta: issue.code === 'too_big' ? { max: issue.maximum } :
-          issue.code === 'too_small' ? { min: issue.minimum } :
-          issue.code === 'invalid_enum_value' ? { options: issue.options } :
-          undefined,
+    meta:
+      issue.code === "too_big"
+        ? { max: issue.maximum }
+        : issue.code === "too_small"
+          ? { min: issue.minimum }
+          : issue.code === "invalid_enum_value"
+            ? { options: issue.options }
+            : undefined,
   }));
 }
 
 function mapZodCode(code: z.ZodIssueCode): string {
   const map: Record<string, string> = {
-    'invalid_type': 'INVALID_TYPE',
-    'too_small': issue.type === 'string' ? 'TOO_SHORT' : 'TOO_SMALL',
-    'too_big': issue.type === 'string' ? 'TOO_LONG' : 'TOO_LARGE',
-    'invalid_enum_value': 'INVALID_ENUM',
-    'invalid_string': 'INVALID_FORMAT',
-    'custom': 'VALIDATION_FAILED',
+    invalid_type: "INVALID_TYPE",
+    too_small: issue.type === "string" ? "TOO_SHORT" : "TOO_SMALL",
+    too_big: issue.type === "string" ? "TOO_LONG" : "TOO_LARGE",
+    invalid_enum_value: "INVALID_ENUM",
+    invalid_string: "INVALID_FORMAT",
+    custom: "VALIDATION_FAILED",
   };
-  return map[code] ?? 'INVALID';
+  return map[code] ?? "INVALID";
 }
 ```
 
@@ -376,18 +393,19 @@ Example error response:
 A `PATCH` request updates only the fields provided. Omitted fields are not validated for presence — only the fields included in the request body are validated.
 
 The mode parameter in `getValidationSchema('create' | 'update')` handles this:
+
 - In `create` mode, all fields marked `is_required = true` must be present in the payload
 - In `update` (PATCH) mode, all fields are optional. Only provided fields are validated against their type/format/range rules
 
 ```typescript
 // Entity update endpoint
-app.patch('/entities/:id', async (c) => {
+app.patch("/entities/:id", async (c) => {
   const { id } = c.req.param();
   const body = await c.req.json();
-  const { entityTypeId, tenantId } = c.get('entityContext');
+  const { entityTypeId, tenantId } = c.get("entityContext");
 
   // Build schema in 'update' mode — all fields optional
-  const schema = await getValidationSchema(entityTypeId, tenantId, 'update');
+  const schema = await getValidationSchema(entityTypeId, tenantId, "update");
   const result = schema.safeParse(body.fields);
 
   if (!result.success) {
@@ -401,7 +419,11 @@ app.patch('/entities/:id', async (c) => {
   // Re-validate merged result as a full 'create' to catch required field
   // violations that would result from this update (e.g., setting a required
   // field to null is caught here)
-  const fullSchema = await getValidationSchema(entityTypeId, tenantId, 'create');
+  const fullSchema = await getValidationSchema(
+    entityTypeId,
+    tenantId,
+    "create",
+  );
   const fullResult = fullSchema.safeParse(mergedFields);
 
   if (!fullResult.success) {
@@ -422,20 +444,24 @@ This is handled via **entity-level validators**: optional TypeScript functions r
 
 ```typescript
 // modules/crm/validators.ts
-entityEngine.registerValidator('contact', (fields, mode) => {
-  if (mode === 'create' && !fields.email && !fields.phone) {
-    return [{
-      field: 'email',
-      code: 'CROSS_FIELD_REQUIRED',
-      message: 'Either email or phone must be provided',
-    }];
+entityEngine.registerValidator("contact", (fields, mode) => {
+  if (mode === "create" && !fields.email && !fields.phone) {
+    return [
+      {
+        field: "email",
+        code: "CROSS_FIELD_REQUIRED",
+        message: "Either email or phone must be provided",
+      },
+    ];
   }
   if (fields.startDate && fields.endDate && fields.endDate < fields.startDate) {
-    return [{
-      field: 'endDate',
-      code: 'INVALID_RANGE',
-      message: 'End date must be after start date',
-    }];
+    return [
+      {
+        field: "endDate",
+        code: "INVALID_RANGE",
+        message: "End date must be after start date",
+      },
+    ];
   }
   return [];
 });
@@ -448,6 +474,7 @@ Cross-field validators run after field-level validation passes. Their errors are
 Formula fields are read-only computed values. They are stored in the `fields` jsonb column but are never written by clients (their Zod schema returns `z.never().optional()`).
 
 Formula fields are recalculated:
+
 - On every entity read (lazy computation)
 - After every write that modifies a field referenced in any formula
 
@@ -456,29 +483,30 @@ Formula expressions are sandboxed JavaScript evaluated with `isolated-vm`:
 ```typescript
 // packages/entity-engine/src/validation/formula-evaluator.ts
 
-import Isolate from 'isolated-vm';
+import Isolate from "isolated-vm";
 
-const isolate = new Isolate({ memoryLimit: 8 });  // 8MB limit
+const isolate = new Isolate({ memoryLimit: 8 }); // 8MB limit
 
 export async function evaluateFormula(
   expression: string,
-  fields: Record<string, unknown>
+  fields: Record<string, unknown>,
 ): Promise<unknown> {
-
   const context = await isolate.createContext();
   const jail = context.global;
 
   // Expose only the field values, no globals
-  await jail.set('fields', new Isolate.ExternalCopy(fields).copyInto());
+  await jail.set("fields", new Isolate.ExternalCopy(fields).copyInto());
 
   try {
-    const script = await isolate.compileScript(`(function() { return (${expression}); })()`);
-    const result = await script.run(context, { timeout: 100 });  // 100ms limit
+    const script = await isolate.compileScript(
+      `(function() { return (${expression}); })()`,
+    );
+    const result = await script.run(context, { timeout: 100 }); // 100ms limit
     return result;
   } catch (err) {
     // Formula evaluation errors do not fail the request — they return null
     // and are logged for the administrator to investigate
-    logger.warn('Formula evaluation failed', { expression, error: err });
+    logger.warn("Formula evaluation failed", { expression, error: err });
     return null;
   } finally {
     context.release();
@@ -532,12 +560,14 @@ case 'set_field': {
 ## Consequences
 
 ### Positive
+
 - Single source of truth for all field rules. A field's constraints are defined once in `entity_fields` and enforced consistently across API calls, automations, and imports.
 - Tenant custom fields are automatically validated. No module code changes needed when a tenant adds or modifies a field.
 - Validation errors are always field-granular. Clients can display inline validation messages alongside the relevant form fields.
 - PATCH semantics are handled correctly: required fields are only enforced for creates and when a PATCH attempts to explicitly clear them.
 
 ### Negative
+
 - Schema cache must be invalidated correctly. A missed invalidation means field rule changes don't take effect for up to 60 seconds. The `invalidateSchemaCache` function is called by the `entity_fields` update handlers — this is a code path that must be tested explicitly.
 - Formula evaluation in `isolated-vm` adds ~5ms per formula field per read. For entities with many formula fields that are read frequently, this can be noticeable. Mitigation: formula results are cached in the `fields` jsonb column and only recomputed when source fields change.
 - The dynamic Zod schema cannot be statically type-checked. TypeScript cannot infer the shape of a schema built at runtime. This means the validated output is typed as `Record<string, unknown>` rather than a specific interface. Mitigation: module code that depends on specific field types uses Zod's `.parse()` on the known fields it cares about after the entity-level validation has passed.
@@ -562,10 +592,10 @@ The validation layer requires a specific test strategy:
 
 These questions were surfaced during architecture review and have not yet been resolved. They should be answered before the relevant phase ships.
 
-| ID | Question | Phase |
-|----|----------|-------|
-| **EV-01** | What is the migration strategy when a tenant changes a field type (e.g. `text` → `enum`)? Existing instances with incompatible values would fail validation on the next update. Is there a backfill job, or are old values grandfathered? | Phase 2 |
+| ID        | Question                                                                                                                                                                                                                                             | Phase   |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| **EV-01** | What is the migration strategy when a tenant changes a field type (e.g. `text` → `enum`)? Existing instances with incompatible values would fail validation on the next update. Is there a backfill job, or are old values grandfathered?            | Phase 2 |
 | **EV-02** | Can a tenant delete a custom field that is referenced by an automation rule, a formula expression, or a workflow condition? What is the cascading behaviour — block deletion, cascade delete references, or allow deletion with orphaned references? | Phase 2 |
-| **EV-03** | When a formula evaluation fails or times out, the client receives `null` for that field. Should the API distinguish between "field is null" and "formula evaluation failed"? Does the UI need to render these differently? | Phase 2 |
-| **EV-04** | Is there a maximum number of custom fields per entity type per tenant? What is the validated performance profile at 50, 100, 200 custom fields for both schema generation and validation execution? | Phase 2 |
-| **EV-05** | Cross-field validators are registered by module code. Can tenants define cross-field validation rules without writing code? If not, this is a known gap in the no-code vision that should be explicitly documented as a limitation. | Phase 3 |
+| **EV-03** | When a formula evaluation fails or times out, the client receives `null` for that field. Should the API distinguish between "field is null" and "formula evaluation failed"? Does the UI need to render these differently?                           | Phase 2 |
+| **EV-04** | Is there a maximum number of custom fields per entity type per tenant? What is the validated performance profile at 50, 100, 200 custom fields for both schema generation and validation execution?                                                  | Phase 2 |
+| **EV-05** | Cross-field validators are registered by module code. Can tenants define cross-field validation rules without writing code? If not, this is a known gap in the no-code vision that should be explicitly documented as a limitation.                  | Phase 3 |

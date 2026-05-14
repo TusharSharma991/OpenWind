@@ -1,4 +1,5 @@
 # Platform Architecture Brief
+
 ## A Modern, AI-First Business Operating System
 
 **Document type:** Engineering leadership kickoff  
@@ -184,23 +185,23 @@ entity_instances (
 
 The following field types are supported natively. New types are added to the engine — never hardcoded into modules.
 
-| Type | Description | Config keys |
-|------|-------------|-------------|
-| `text` | Single-line string | max_length, pattern |
-| `longtext` | Multi-line / rich text | format: plain\|markdown\|html |
-| `number` | Integer or decimal | min, max, decimal_places |
-| `currency` | Monetary amount | allowed_currencies |
-| `date` | Calendar date | min, max |
-| `datetime` | Date + time with timezone | |
-| `boolean` | True/false toggle | |
-| `enum` | Single select from list | options: [{value, label, color}] |
-| `multi_enum` | Multiple select | options: [{value, label, color}] |
-| `user_ref` | Reference to a platform user | roles filter |
-| `entity_ref` | Foreign key to another entity instance | entity_type_id |
-| `file` | Single file attachment | allowed_types, max_size_mb |
-| `files` | Multiple attachments | allowed_types, max_count |
-| `formula` | Computed from other fields | expression (sandboxed JS) |
-| `lookup` | Read from related entity | entity_ref field + path |
+| Type         | Description                            | Config keys                      |
+| ------------ | -------------------------------------- | -------------------------------- |
+| `text`       | Single-line string                     | max_length, pattern              |
+| `longtext`   | Multi-line / rich text                 | format: plain\|markdown\|html    |
+| `number`     | Integer or decimal                     | min, max, decimal_places         |
+| `currency`   | Monetary amount                        | allowed_currencies               |
+| `date`       | Calendar date                          | min, max                         |
+| `datetime`   | Date + time with timezone              |                                  |
+| `boolean`    | True/false toggle                      |                                  |
+| `enum`       | Single select from list                | options: [{value, label, color}] |
+| `multi_enum` | Multiple select                        | options: [{value, label, color}] |
+| `user_ref`   | Reference to a platform user           | roles filter                     |
+| `entity_ref` | Foreign key to another entity instance | entity_type_id                   |
+| `file`       | Single file attachment                 | allowed_types, max_size_mb       |
+| `files`      | Multiple attachments                   | allowed_types, max_count         |
+| `formula`    | Computed from other fields             | expression (sandboxed JS)        |
+| `lookup`     | Read from related entity               | entity_ref field + path          |
 
 #### Field validation
 
@@ -333,29 +334,29 @@ Rules are tenant-scoped, versioned, and executed asynchronously via the event bu
 
 #### Trigger types
 
-| Trigger | Example |
-|---------|---------|
-| `workflow.entered_state` | When ticket enters `escalated` |
-| `workflow.transitioned` | When expense transitions from any state to `approved` |
-| `workflow.sla_breached` | When a deal has been in `negotiation` for > 14 days |
-| `field.changed` | When deal.value exceeds ₹500,000 |
-| `entity.created` | When a new contact is created |
-| `entity.assigned` | When a ticket is assigned to an agent |
-| `schedule.cron` | Every Monday at 9am |
-| `connector.event` | When Stripe fires `payment_intent.succeeded` |
+| Trigger                  | Example                                               |
+| ------------------------ | ----------------------------------------------------- |
+| `workflow.entered_state` | When ticket enters `escalated`                        |
+| `workflow.transitioned`  | When expense transitions from any state to `approved` |
+| `workflow.sla_breached`  | When a deal has been in `negotiation` for > 14 days   |
+| `field.changed`          | When deal.value exceeds ₹500,000                      |
+| `entity.created`         | When a new contact is created                         |
+| `entity.assigned`        | When a ticket is assigned to an agent                 |
+| `schedule.cron`          | Every Monday at 9am                                   |
+| `connector.event`        | When Stripe fires `payment_intent.succeeded`          |
 
 #### Action types
 
-| Action | Description |
-|--------|-------------|
-| `notify` | Send email, in-app, Slack, WhatsApp via Novu |
-| `assign` | Set `assigned_to` using a rule (round-robin, skill-match, load-balance) |
-| `transition` | Move entity to a new state |
-| `set_field` | Update a field value (e.g., set `escalated_at` to now) |
-| `create_entity` | Create a related entity (e.g., create a follow-up task) |
-| `webhook` | POST to an external URL |
-| `connector.action` | Call an action on an installed connector (e.g., create Stripe invoice) |
-| `script` | Run a sandboxed JS function for logic that can't be expressed declaratively |
+| Action             | Description                                                                 |
+| ------------------ | --------------------------------------------------------------------------- |
+| `notify`           | Send email, in-app, Slack, WhatsApp via Novu                                |
+| `assign`           | Set `assigned_to` using a rule (round-robin, skill-match, load-balance)     |
+| `transition`       | Move entity to a new state                                                  |
+| `set_field`        | Update a field value (e.g., set `escalated_at` to now)                      |
+| `create_entity`    | Create a related entity (e.g., create a follow-up task)                     |
+| `webhook`          | POST to an external URL                                                     |
+| `connector.action` | Call an action on an installed connector (e.g., create Stripe invoice)      |
+| `script`           | Run a sandboxed JS function for logic that can't be expressed declaratively |
 
 #### Script sandbox
 
@@ -364,6 +365,7 @@ The `script` action type runs tenant-authored JavaScript in a V8 isolate (via `i
 #### Execution guarantees
 
 Automations are executed as BullMQ jobs. Each job has:
+
 - 3 automatic retries with exponential backoff
 - A dead-letter queue for rules that exhaust retries
 - Per-tenant execution logging for debugging
@@ -412,8 +414,8 @@ The application sets `app.tenant_id` at the start of every request via a Postgre
 
 ```typescript
 // Hono middleware — runs before every handler
-app.use('*', async (c, next) => {
-  const tenantId = c.get('auth').tenantId; // from validated JWT
+app.use("*", async (c, next) => {
+  const tenantId = c.get("auth").tenantId; // from validated JWT
   await db.execute(sql`SELECT set_config('app.tenant_id', ${tenantId}, true)`);
   return next();
 });
@@ -483,14 +485,14 @@ Every event type has a version. Events are never mutated in-place — new versio
 ```typescript
 // Event schema definition (enforced by Zod)
 const WorkflowTransitionedV1 = z.object({
-  eventType: z.literal('workflow.transitioned'),
+  eventType: z.literal("workflow.transitioned"),
   version: z.literal(1),
   tenantId: z.string().uuid(),
   instanceId: z.string().uuid(),
   entityTypeId: z.string().uuid(),
   fromState: z.string(),
   toState: z.string(),
-  triggeredBy: z.enum(['user', 'automation', 'api', 'system']),
+  triggeredBy: z.enum(["user", "automation", "api", "system"]),
   actorId: z.string().uuid().nullable(),
   occurredAt: z.string().datetime(),
 });
@@ -503,9 +505,9 @@ The Connector SDK is the contract that any third-party integration must implemen
 ```typescript
 export interface ConnectorDefinition {
   meta: {
-    id: string;               // '@platform/connector-stripe'
-    name: string;             // 'Stripe'
-    version: string;          // '1.0.0'
+    id: string; // '@platform/connector-stripe'
+    name: string; // 'Stripe'
+    version: string; // '1.0.0'
     iconUrl: string;
     docsUrl: string;
     category: ConnectorCategory;
@@ -513,8 +515,8 @@ export interface ConnectorDefinition {
 
   auth: OAuthConfig | ApiKeyConfig | BasicAuthConfig;
 
-  triggers: TriggerDefinition[];   // inbound events from 3rd party
-  actions: ActionDefinition[];     // outbound calls to 3rd party
+  triggers: TriggerDefinition[]; // inbound events from 3rd party
+  actions: ActionDefinition[]; // outbound calls to 3rd party
 
   // Called once when tenant installs the connector
   onInstall?: (ctx: ConnectorContext) => Promise<void>;
@@ -525,11 +527,13 @@ export interface ConnectorDefinition {
 ```
 
 A trigger definition specifies:
+
 - How to receive the event (webhook URL, polling config)
 - How to validate the incoming payload (HMAC secret, signature header)
 - How to transform the raw payload into a canonical platform event
 
 An action definition specifies:
+
 - The action name and parameters (Zod schema)
 - The function that executes the action using the tenant's stored credentials
 - Retry and rate limit behavior
@@ -563,41 +567,39 @@ Every plugin exports a single manifest file. This is the contract between the pl
 ```typescript
 // plugin.manifest.ts
 export const manifest: PluginManifest = {
-  id: '@acme/hrms',
-  name: 'Human Resources',
-  version: '1.2.0',
-  platformVersion: '>=1.0.0',
+  id: "@acme/hrms",
+  name: "Human Resources",
+  version: "1.2.0",
+  platformVersion: ">=1.0.0",
 
   // Dependency declaration — resolved before install
   requires: [
-    '@platform/core-users@>=1.0.0',
-    '@platform/core-notifications@>=1.0.0',
+    "@platform/core-users@>=1.0.0",
+    "@platform/core-notifications@>=1.0.0",
   ],
 
   // Permissions requested — validated against tenant plan
   permissions: [
-    'db:hrms.*',            // schema namespace
-    'events:employee.*',    // event prefix
-    'slots:sidebar.nav',    // UI injection points
+    "db:hrms.*", // schema namespace
+    "events:employee.*", // event prefix
+    "slots:sidebar.nav", // UI injection points
   ],
 
   // Backend wiring
-  migrations: './migrations',   // Drizzle migration folder
-  routes: './routes',           // Hono router, mounted at /api/{plugin-id}
-  hooks: './hooks',             // Event subscriptions and middleware hooks
-  jobs: './jobs',               // BullMQ worker definitions
+  migrations: "./migrations", // Drizzle migration folder
+  routes: "./routes", // Hono router, mounted at /api/{plugin-id}
+  hooks: "./hooks", // Event subscriptions and middleware hooks
+  jobs: "./jobs", // BullMQ worker definitions
 
   // Frontend wiring
   ui: {
-    remote: 'https://cdn.platform.com/plugins/hrms@1.2.0/remoteEntry.js',
+    remote: "https://cdn.platform.com/plugins/hrms@1.2.0/remoteEntry.js",
     slots: [
-      { name: 'sidebar.nav', component: 'HrmsNavItems' },
-      { name: 'user.profile.tabs', component: 'EmployeeProfileTab' },
-      { name: 'dashboard.widgets', component: 'HrmsWidgets' },
+      { name: "sidebar.nav", component: "HrmsNavItems" },
+      { name: "user.profile.tabs", component: "EmployeeProfileTab" },
+      { name: "dashboard.widgets", component: "HrmsWidgets" },
     ],
-    pages: [
-      { path: '/hrms', component: 'HrmsApp', title: 'HR' },
-    ],
+    pages: [{ path: "/hrms", component: "HrmsApp", title: "HR" }],
   },
 };
 ```
@@ -610,18 +612,20 @@ Each plugin owns its own Drizzle schema under a dedicated Postgres schema namesp
 
 ```typescript
 // @acme/hrms/schema.ts
-import { pgSchema, uuid, text, date } from 'drizzle-orm/pg-core';
-import { users } from '@platform/core/schema';  // ✅ allowed — referencing core
+import { pgSchema, uuid, text, date } from "drizzle-orm/pg-core";
+import { users } from "@platform/core/schema"; // ✅ allowed — referencing core
 
-export const hrms = pgSchema('hrms');
+export const hrms = pgSchema("hrms");
 
-export const employees = hrms.table('employees', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  userId: uuid('user_id').notNull().references(() => users.id),
-  employeeCode: text('employee_code').notNull(),
-  department: text('department'),
-  joiningDate: date('joining_date'),
-  tenantId: uuid('tenant_id').notNull(),
+export const employees = hrms.table("employees", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id),
+  employeeCode: text("employee_code").notNull(),
+  department: text("department"),
+  joiningDate: date("joining_date"),
+  tenantId: uuid("tenant_id").notNull(),
 });
 ```
 
@@ -635,8 +639,8 @@ Plugins communicate with the platform through three hook types:
 // @acme/hrms/hooks.ts
 export const hooks: Hook[] = [
   {
-    type: 'event',
-    event: 'user.invited',
+    type: "event",
+    event: "user.invited",
     handler: async (event, ctx) => {
       // Create employee record when user is invited
       await ctx.db.insert(employees).values({
@@ -689,6 +693,7 @@ A plugin's failure never propagates to the core request lifecycle. The platform 
 Each plugin's frontend is a Webpack/Vite Module Federation remote. The host application (the main React app) declares shared dependencies — React, the design system, routing, auth context — and plugin remotes consume them at runtime without bundling their own copies.
 
 This means:
+
 - Installing a plugin does not require rebuilding the host application
 - Plugins always use the correct version of shared dependencies
 - A plugin UI that throws a JavaScript error is caught by a React error boundary and shows a degraded state — it does not crash the host app
@@ -710,8 +715,8 @@ Plugins register into slots at boot time:
 
 ```typescript
 // @acme/hrms/ui/index.ts
-platform.slots.register('sidebar.nav', HrmsNavItems, { priority: 20 });
-platform.slots.register('user.profile.tabs', EmployeeTab, { priority: 10 });
+platform.slots.register("sidebar.nav", HrmsNavItems, { priority: 20 });
+platform.slots.register("user.profile.tabs", EmployeeTab, { priority: 10 });
 ```
 
 When the host renders `<Slot name="sidebar.nav" />`, it queries the slot registry and renders all registered components in priority order, each wrapped in an error boundary.
@@ -855,6 +860,7 @@ We explicitly avoid Elasticsearch. Its operational overhead (JVM memory, cluster
 Customer-facing analytics are delivered through Metabase's embedding feature. Metabase is deployed as an internal service with access to a read replica of the platform's Postgres database. Per-tenant row-level filters are enforced at the embedding level via Metabase's signed embedding tokens.
 
 This approach provides:
+
 - Full BI capability (custom queries, charts, dashboards) on day one
 - No custom chart development
 - Per-tenant dashboard isolation
@@ -893,6 +899,7 @@ The team adopts Claude as the primary AI development partner. This is not about 
 #### Prompt engineering conventions
 
 The team maintains a `/.claude/` directory at the monorepo root with:
+
 - `CONVENTIONS.md` — platform coding conventions that every Claude prompt includes as context
 - `prompts/` — reusable prompt templates for common tasks (new module, new connector, new workflow config)
 - `context/` — domain context documents that Claude needs for specialized tasks
@@ -922,6 +929,7 @@ Beyond development tooling, AI capabilities are designed into the platform from 
 #### AI architecture
 
 Claude is accessed via the Anthropic API. All AI calls are:
+
 - Logged per tenant for auditability and debugging
 - Rate-limited per tenant to prevent abuse
 - Explicitly disclosed to end users where relevant (agents see when a response is AI-drafted)
@@ -937,33 +945,33 @@ The platform's AI service is a dedicated module that wraps the Anthropic SDK wit
 
 These modules are the platform. They have no customer-facing UI on their own.
 
-| Module | Responsibility |
-|--------|----------------|
-| `@platform/entity-engine` | Entity types, fields, instances, relations |
-| `@platform/workflow-engine` | States, transitions, event log, SLA |
-| `@platform/automation-engine` | Rules, triggers, actions, job execution |
-| `@platform/auth` | Zitadel integration, JWT middleware, RBAC |
-| `@platform/notifications` | Novu integration, template management, preferences |
-| `@platform/files` | S3 integration, presigned URLs, metadata |
-| `@platform/audit` | Append-only event log, compliance export |
-| `@platform/api-gateway` | Route registration, rate limiting, API key management |
-| `@platform/connector-sdk` | Connector interface, credential vault, webhook gateway |
-| `@platform/plugin-sdk` | Plugin lifecycle, slot registry, hook registration |
-| `@platform/search` | Postgres FTS + Typesense sync |
-| `@platform/ai` | Claude API wrapper, prompt management, RAG service |
+| Module                        | Responsibility                                         |
+| ----------------------------- | ------------------------------------------------------ |
+| `@platform/entity-engine`     | Entity types, fields, instances, relations             |
+| `@platform/workflow-engine`   | States, transitions, event log, SLA                    |
+| `@platform/automation-engine` | Rules, triggers, actions, job execution                |
+| `@platform/auth`              | Zitadel integration, JWT middleware, RBAC              |
+| `@platform/notifications`     | Novu integration, template management, preferences     |
+| `@platform/files`             | S3 integration, presigned URLs, metadata               |
+| `@platform/audit`             | Append-only event log, compliance export               |
+| `@platform/api-gateway`       | Route registration, rate limiting, API key management  |
+| `@platform/connector-sdk`     | Connector interface, credential vault, webhook gateway |
+| `@platform/plugin-sdk`        | Plugin lifecycle, slot registry, hook registration     |
+| `@platform/search`            | Postgres FTS + Typesense sync                          |
+| `@platform/ai`                | Claude API wrapper, prompt management, RAG service     |
 
 ### 10.2 Standard modules (pre-built, installed by default in the standard bundle)
 
-| Module | Key entities | Key workflow |
-|--------|-------------|--------------|
-| `@modules/crm` | Contact, Company, Deal, Activity | Lead → Qualified → Proposal → Won/Lost |
-| `@modules/helpdesk` | Ticket, Comment, Article | Open → In Progress → Pending → Resolved |
-| `@modules/hrms` | Employee, Department, Leave Request | Draft → Submitted → Approved/Rejected |
-| `@modules/reimbursements` | Expense Claim, Receipt | Draft → Submitted → Manager Review → Finance Review → Paid |
-| `@modules/projects` | Project, Task, Milestone | Backlog → In Progress → In Review → Done |
-| `@modules/invoicing` | Invoice, Quote, Payment | Draft → Sent → Paid/Overdue/Cancelled |
-| `@modules/inventory` | Item, Warehouse, Stock Movement | Active → Low Stock → Out of Stock |
-| `@modules/procurement` | Purchase Order, Vendor, RFQ | Draft → Approved → Sent → Fulfilled |
+| Module                    | Key entities                        | Key workflow                                               |
+| ------------------------- | ----------------------------------- | ---------------------------------------------------------- |
+| `@modules/crm`            | Contact, Company, Deal, Activity    | Lead → Qualified → Proposal → Won/Lost                     |
+| `@modules/helpdesk`       | Ticket, Comment, Article            | Open → In Progress → Pending → Resolved                    |
+| `@modules/hrms`           | Employee, Department, Leave Request | Draft → Submitted → Approved/Rejected                      |
+| `@modules/reimbursements` | Expense Claim, Receipt              | Draft → Submitted → Manager Review → Finance Review → Paid |
+| `@modules/projects`       | Project, Task, Milestone            | Backlog → In Progress → In Review → Done                   |
+| `@modules/invoicing`      | Invoice, Quote, Payment             | Draft → Sent → Paid/Overdue/Cancelled                      |
+| `@modules/inventory`      | Item, Warehouse, Stock Movement     | Active → Low Stock → Out of Stock                          |
+| `@modules/procurement`    | Purchase Order, Vendor, RFQ         | Draft → Approved → Sent → Fulfilled                        |
 
 ### 10.3 Sector packages (optional, industry-specific installs)
 
@@ -1004,6 +1012,7 @@ The formal decision, consequences, escape hatches, and checklist are in [ADR-004
 **Deliverable:** A running, multi-tenant platform that no customer touches yet, but that every future line of code is built on. Includes infrastructure and tenancy, authentication, the entity engine, the workflow engine, and the automation engine v1.
 
 **Exit criteria:**
+
 - An entity type, fields, workflow, and automation rule can be created via API with **no code changes** — only config rows
 - An entity instance can be created, validated against its field config, and transitioned through its workflow
 - SLA timers fire; automation rules execute on trigger events
@@ -1018,6 +1027,7 @@ The formal decision, consequences, escape hatches, and checklist are in [ADR-004
 **Deliverable:** Platform services complete (notifications, files, audit log, API keys). Helpdesk, reimbursements, and CRM modules live as seed SQL configs. Generic config-driven entity UI in the customer portal and admin UI. No-code automation builder and workflow visual editor shipped. Pilot customer onboarded.
 
 **Exit criteria:**
+
 - Pilot customer submits tickets via portal; agents manage with full SLA enforcement
 - Expense claim approval chain runs end-to-end with correct role gating
 - Installing a new module requires only a seed SQL file — no code deployment
@@ -1029,6 +1039,7 @@ The formal decision, consequences, escape hatches, and checklist are in [ADR-004
 **Deliverable:** Connector marketplace with webhook gateway and connector runtime. Plugin system with Module Federation. AI layer (automation rule generation, workflow suggestion, entity classification). Drag-and-drop visual workflow builder. First sector package.
 
 **Exit criteria:**
+
 - A third-party connector can be installed by a tenant and trigger automations with no code change
 - A plugin can add new entity types, routes, and UI slots without modifying core platform code
 - An administrator can describe an automation in natural language and receive a reviewable rule config
@@ -1308,7 +1319,14 @@ export interface ConnectorDefinition<TCredentials = Record<string, unknown>> {
     description: string;
     iconUrl: string;
     docsUrl?: string;
-    category: 'communication' | 'finance' | 'crm' | 'hr' | 'storage' | 'ecommerce' | 'other';
+    category:
+      | "communication"
+      | "finance"
+      | "crm"
+      | "hr"
+      | "storage"
+      | "ecommerce"
+      | "other";
   };
 
   auth: OAuthConfig | ApiKeyConfig | BasicAuthConfig | CustomAuthConfig;
@@ -1318,14 +1336,16 @@ export interface ConnectorDefinition<TCredentials = Record<string, unknown>> {
 
   onInstall?: (ctx: ConnectorContext<TCredentials>) => Promise<void>;
   onUninstall?: (ctx: ConnectorContext<TCredentials>) => Promise<void>;
-  onCredentialRefresh?: (ctx: ConnectorContext<TCredentials>) => Promise<TCredentials>;
+  onCredentialRefresh?: (
+    ctx: ConnectorContext<TCredentials>,
+  ) => Promise<TCredentials>;
 }
 
 export interface TriggerDefinition {
   id: string;
   name: string;
   description: string;
-  type: 'webhook' | 'polling';
+  type: "webhook" | "polling";
 
   // For webhook triggers
   webhook?: {
@@ -1336,7 +1356,10 @@ export interface TriggerDefinition {
   // For polling triggers
   polling?: {
     intervalMinutes: number;
-    fetch: (ctx: ConnectorContext, cursor?: string) => Promise<{
+    fetch: (
+      ctx: ConnectorContext,
+      cursor?: string,
+    ) => Promise<{
       events: PlatformEvent[];
       nextCursor?: string;
     }>;
@@ -1347,13 +1370,10 @@ export interface ActionDefinition {
   id: string;
   name: string;
   description: string;
-  input: z.ZodSchema;          // validated before execution
+  input: z.ZodSchema; // validated before execution
   output: z.ZodSchema;
 
-  execute: (
-    input: unknown,
-    ctx: ConnectorContext
-  ) => Promise<unknown>;
+  execute: (input: unknown, ctx: ConnectorContext) => Promise<unknown>;
 
   rateLimit?: {
     requestsPerMinute: number;
@@ -1376,7 +1396,11 @@ export interface ConnectorContext<TCredentials = Record<string, unknown>> {
     headers?: Record<string, string>;
     body?: unknown;
   }) => Promise<Response>;
-  log: (level: 'info' | 'warn' | 'error', message: string, meta?: object) => void;
+  log: (
+    level: "info" | "warn" | "error",
+    message: string,
+    meta?: object,
+  ) => void;
 }
 ```
 
@@ -1389,63 +1413,63 @@ export interface ConnectorContext<TCredentials = Record<string, unknown>> {
 
 export interface PluginManifest {
   // Identity
-  id: string;              // scoped package name: '@vendor/plugin-name'
-  name: string;            // display name
-  version: string;         // semver
+  id: string; // scoped package name: '@vendor/plugin-name'
+  name: string; // display name
+  version: string; // semver
   platformVersion: string; // semver range: '>=1.0.0 <2.0.0'
   description?: string;
   authorUrl?: string;
 
   // Dependencies — other plugins that must be installed first
-  requires?: string[];     // ['@platform/core-users@>=1.0.0']
+  requires?: string[]; // ['@platform/core-users@>=1.0.0']
 
   // Permissions — validated against tenant plan at install time
   permissions: PluginPermission[];
 
   // Backend wiring
-  migrations?: string;     // path to Drizzle migrations folder
-  routes?: string;         // path to Hono router export
-  hooks?: string;          // path to Hook[] export
-  jobs?: string;           // path to BullMQ worker definitions
+  migrations?: string; // path to Drizzle migrations folder
+  routes?: string; // path to Hono router export
+  hooks?: string; // path to Hook[] export
+  jobs?: string; // path to BullMQ worker definitions
 
   // Frontend wiring
   ui?: {
-    remote: string;        // Module Federation remoteEntry.js URL
+    remote: string; // Module Federation remoteEntry.js URL
     slots?: SlotRegistration[];
     pages?: PageRegistration[];
   };
 
   // Lifecycle
-  onActivate?: string;     // path to activation handler
-  onDeactivate?: string;   // path to deactivation handler
+  onActivate?: string; // path to activation handler
+  onDeactivate?: string; // path to deactivation handler
 }
 
 export type PluginPermission =
-  | `db:${string}`         // 'db:hrms.*' — schema namespace access
-  | `events:${string}`     // 'events:employee.*' — event prefix subscription
-  | `slots:${string}`      // 'slots:sidebar.nav' — UI slot registration
-  | `api:${string}`        // 'api:external' — make outbound HTTP calls
-  | 'ai:inference'         // — call the platform AI service
-  | 'files:read'
-  | 'files:write';
+  | `db:${string}` // 'db:hrms.*' — schema namespace access
+  | `events:${string}` // 'events:employee.*' — event prefix subscription
+  | `slots:${string}` // 'slots:sidebar.nav' — UI slot registration
+  | `api:${string}` // 'api:external' — make outbound HTTP calls
+  | "ai:inference" // — call the platform AI service
+  | "files:read"
+  | "files:write";
 
 export interface SlotRegistration {
-  name: string;            // 'sidebar.nav'
-  component: string;       // exported component name from the remote
-  priority?: number;       // render order within the slot (lower = earlier)
-  context?: string[];      // context keys this slot needs: ['ticketId']
+  name: string; // 'sidebar.nav'
+  component: string; // exported component name from the remote
+  priority?: number; // render order within the slot (lower = earlier)
+  context?: string[]; // context keys this slot needs: ['ticketId']
 }
 
 export interface PageRegistration {
-  path: string;            // '/hrms'
-  component: string;       // exported component name
-  title: string;           // browser tab title
-  icon?: string;           // Tabler icon name for nav
+  path: string; // '/hrms'
+  component: string; // exported component name
+  title: string; // browser tab title
+  icon?: string; // Tabler icon name for nav
 }
 ```
 
 ---
 
-*This document represents the current architectural thinking and should be treated as a living reference. All sections are subject to revision based on implementation learnings. Significant deviations from this architecture should be recorded as ADRs in `/docs/decisions/`.*
+_This document represents the current architectural thinking and should be treated as a living reference. All sections are subject to revision based on implementation learnings. Significant deviations from this architecture should be recorded as ADRs in `/docs/decisions/`._
 
-*Questions, challenges, and proposed changes to this document are actively encouraged. The goal is a platform that the engineering team owns intellectually, not one handed down from above.*
+_Questions, challenges, and proposed changes to this document are actively encouraged. The goal is a platform that the engineering team owns intellectually, not one handed down from above._

@@ -3,11 +3,11 @@
 <br/>
 
 ```
-  ___                 _    _ _         _ 
+  ___                 _    _ _         _
  / _ \ _ __  ___ _ _| |  | | |_ _ __ __| |
 | (_) | '_ \/ -_) ' \ |/\| | | ' \/ _` |
  \___/| .__/\___|_||_\_/  \_|_|_||_\__,_|
-      |_|                                 
+      |_|
 ```
 
 **A modular, workflow-native business platform.**  
@@ -52,16 +52,19 @@ packages, and custom workflows are all configurations of these engines —
 not new codebases.
 
 ### Entity Engine
+
 Define what your business works with. Contacts, tickets, expenses, assets,
 employees — any entity type, with typed fields, relations, and per-tenant
 custom fields. No migrations needed when a customer adds a field.
 
 ### Workflow Engine
+
 Define how things move. A finite state machine for any entity: states,
 transitions, role-based guards, conditional branching, SLA timers with
 automatic escalation, and an immutable event log for every transition ever made.
 
 ### Automation Engine
+
 Define what happens when things move. An event → condition → action pipeline
 that fires on any state change, field update, or external event. Powers
 notification routing, assignment rules, cross-system integrations, and
@@ -72,24 +75,27 @@ SLA enforcement — all from configuration, no code required.
 ## What's included
 
 ### Core platform
+
 Auth and identity (Zitadel), notifications (Novu), file storage (S3-compatible),
 audit log, API gateway, background job queue (BullMQ), connector SDK, and plugin
 system. Shared by every module — no module reinvents these.
 
 ### Standard modules
+
 Pre-built applications that install on top of the engines:
 
-| Module | What it does |
-|--------|-------------|
-| **CRM** | Contacts, companies, deals, pipeline, activities |
-| **Helpdesk** | Tickets, SLA, assignments, knowledge base, customer portal |
-| **HRMS** | Employees, org chart, leaves, attendance, onboarding |
-| **Reimbursements** | Expense claims, multi-level approvals, receipt management |
-| **Projects** | Tasks, milestones, sprints, kanban, time tracking |
-| **Invoicing** | Invoices, quotes, payment links, recurring billing |
-| **Procurement** | Purchase orders, vendor management, approval chains |
+| Module             | What it does                                               |
+| ------------------ | ---------------------------------------------------------- |
+| **CRM**            | Contacts, companies, deals, pipeline, activities           |
+| **Helpdesk**       | Tickets, SLA, assignments, knowledge base, customer portal |
+| **HRMS**           | Employees, org chart, leaves, attendance, onboarding       |
+| **Reimbursements** | Expense claims, multi-level approvals, receipt management  |
+| **Projects**       | Tasks, milestones, sprints, kanban, time tracking          |
+| **Invoicing**      | Invoices, quotes, payment links, recurring billing         |
+| **Procurement**    | Purchase orders, vendor management, approval chains        |
 
 ### Connectors
+
 First-party integrations: Slack, email (SMTP/IMAP), WhatsApp Business, Stripe,
 and more. Third-party connectors installable per tenant from the connector
 registry. The connector SDK makes building new integrations a single TypeScript
@@ -128,17 +134,17 @@ Full architecture documentation: [`docs/architecture-brief.md`](docs/architectur
 
 ## Tech stack
 
-| Layer | Technology | Why |
-|-------|-----------|-----|
-| API framework | [Hono](https://hono.dev/) | TypeScript-first, Web Standards, runs anywhere |
-| Database | [PostgreSQL 16](https://www.postgresql.org/) | RLS multi-tenancy, JSONB, full-text search |
-| ORM | [Drizzle](https://orm.drizzle.team/) | SQL-transparent, type-safe, great migrations |
-| Queue | [BullMQ](https://bullmq.io/) | Redis-backed, reliable, good observability |
-| Auth | [Zitadel](https://zitadel.com/) | OIDC/SAML, org model maps to multi-tenancy |
-| Notifications | [Novu](https://novu.co/) | Multi-channel, templates, user preferences |
-| Admin UI | [Refine](https://refine.dev/) + [shadcn/ui](https://ui.shadcn.com/) | CRUD framework + polished components |
-| Monorepo | [Turborepo](https://turbo.build/) + [pnpm](https://pnpm.io/) | Cached builds, clean workspace management |
-| AI | [Claude](https://www.anthropic.com/) (Anthropic) | Development tooling + platform AI features |
+| Layer         | Technology                                                          | Why                                            |
+| ------------- | ------------------------------------------------------------------- | ---------------------------------------------- |
+| API framework | [Hono](https://hono.dev/)                                           | TypeScript-first, Web Standards, runs anywhere |
+| Database      | [PostgreSQL 16](https://www.postgresql.org/)                        | RLS multi-tenancy, JSONB, full-text search     |
+| ORM           | [Drizzle](https://orm.drizzle.team/)                                | SQL-transparent, type-safe, great migrations   |
+| Queue         | [BullMQ](https://bullmq.io/)                                        | Redis-backed, reliable, good observability     |
+| Auth          | [Zitadel](https://zitadel.com/)                                     | OIDC/SAML, org model maps to multi-tenancy     |
+| Notifications | [Novu](https://novu.co/)                                            | Multi-channel, templates, user preferences     |
+| Admin UI      | [Refine](https://refine.dev/) + [shadcn/ui](https://ui.shadcn.com/) | CRUD framework + polished components           |
+| Monorepo      | [Turborepo](https://turbo.build/) + [pnpm](https://pnpm.io/)        | Cached builds, clean workspace management      |
+| AI            | [Claude](https://www.anthropic.com/) (Anthropic)                    | Development tooling + platform AI features     |
 
 ---
 
@@ -230,7 +236,7 @@ OpenWind/
 
 OpenWind is in active early development. The build is phased:
 
-**Phase 1 — Foundation** *(current)*
+**Phase 1 — Foundation** _(current)_
 Multi-tenant Postgres, auth, entity engine, workflow engine, automation engine
 v1, API layer, admin shell.
 

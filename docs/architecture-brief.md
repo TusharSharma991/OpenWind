@@ -989,118 +989,54 @@ Each sector package is a standard plugin — it uses the same entity engine, wor
 
 The phasing below is designed around one principle: **the earliest code written is the most consequential**. Multi-tenancy, auth, and the entity/workflow engine shape every subsequent line of code. These are built first and built carefully. Customer-facing features follow.
 
+### The config-first principle
+
+A second principle governs how modules are built on top of the engine: **modules are configuration, not code.** The three engines are written once and interpreted against database rows — entity type definitions, field definitions, workflow states and transitions, automation rules. A new business module (helpdesk, reimbursements, HRMS) ships as a seed SQL file containing INSERT statements against the engine's tables. No module-specific routes, no module-specific validators, no module-specific business logic in TypeScript.
+
+This is not a simplification — it is the architectural bet that makes the platform competitive. Every improvement to the engine benefits every module. Every new entity type gets a functional UI immediately because the UI is driven by field config. Customers modify their workflows and automation rules at runtime without deployments.
+
+The formal decision, consequences, escape hatches, and checklist are in [ADR-004 — Config-First Module Design](decisions/ADR-004-config-first-module-design.md). The detailed phased build plan with per-component classification is in [docs/roadmap.md](roadmap.md). The summary below covers deliverables and exit criteria per phase.
+
+---
+
 ### Phase 1 — The unbreakable foundation (weeks 1–8)
 
-**Deliverable:** A running platform that no customer touches yet, but that the entire future is built on.
+**Deliverable:** A running, multi-tenant platform that no customer touches yet, but that every future line of code is built on. Includes infrastructure and tenancy, authentication, the entity engine, the workflow engine, and the automation engine v1.
 
-**Week 1–2: Infrastructure and tenancy**
-- Turborepo monorepo setup with packages, apps, and modules directories
-- ESLint, Prettier, Husky, commitlint configured
-- Docker Compose with Postgres, Redis, MinIO, Zitadel
-- Multi-tenant Postgres with RLS enabled and verified
-- Zitadel configured: org model, OIDC, JWT claims
-- Hono API server with auth middleware, tenant context middleware
-- Drizzle connected, first migrations running
-
-**Week 3–4: Entity Engine**
-- `entity_types`, `entity_fields`, `entity_instances` schema
-- CRUD API for entity instances with field validation
-- Custom field support (tenant-scoped fields on module-defined types)
-- Entity relation model
-- Full test suite: field validation, RLS isolation, relation integrity
-
-**Week 5–6: Workflow Engine**
-- `workflows`, `workflow_states`, `workflow_transitions`, `workflow_events` schema
-- Transition execution with role guards and conditions
-- SLA timer management (BullMQ delayed jobs)
-- Event log (immutable append-only)
-- Full test suite: transition guards, SLA scheduling, event log integrity
-
-**Week 7–8: Automation Engine v1 + API shell**
-- Event bus with outbox pattern
-- Basic trigger types: `workflow.transitioned`, `workflow.sla_breached`, `entity.created`
-- Basic action types: `notify` (Novu), `set_field`, `transition`
-- Hono API with tRPC for all engine operations
-- Refine admin shell: login, nav, entity list/detail views (engine-connected)
-
-**Exit criteria for Phase 1:**
-- An entity type, workflow, and automation rule can be created via API
-- An entity instance can be created and transitioned through a workflow
-- Transitions respect role guards and conditions
-- SLA timers fire correctly and automation rules execute on breach
-- RLS isolation is verified: tenant A cannot read tenant B's data under any query pattern
-- All core modules have >80% test coverage
+**Exit criteria:**
+- An entity type, fields, workflow, and automation rule can be created via API with **no code changes** — only config rows
+- An entity instance can be created, validated against its field config, and transitioned through its workflow
+- SLA timers fire; automation rules execute on trigger events
+- A new module is fully representable as a seed SQL file — zero new TypeScript required
+- RLS isolation verified: tenant A cannot read tenant B's data under any query pattern
+- Tenant isolation test suite passes on every PR touching `packages/db/` or `apps/api/`
+- Core engine test coverage ≥ 80%
+- OpenBao running in docker-compose dev mode; no plaintext encryption key in environment
 
 ### Phase 2 — First customer-ready apps (weeks 9–16)
 
-**Deliverable:** Helpdesk, reimbursements, and a basic CRM running for 1–2 pilot customers.
+**Deliverable:** Platform services complete (notifications, files, audit log, API keys). Helpdesk, reimbursements, and CRM modules live as seed SQL configs. Generic config-driven entity UI in the customer portal and admin UI. No-code automation builder and workflow visual editor shipped. Pilot customer onboarded.
 
-**Week 9–10: Standard platform services**
-- Notifications: Novu integrated, email templates, in-app notifications
-- Files: S3 upload, presigned URL generation, metadata storage
-- Audit log: append-only event capture for all entity operations
-- API keys: CRUD, hashing, validation middleware
+**Exit criteria:**
+- Pilot customer submits tickets via portal; agents manage with full SLA enforcement
+- Expense claim approval chain runs end-to-end with correct role gating
+- Installing a new module requires only a seed SQL file — no code deployment
+- Notification templates editable in Novu without deployment
+- Penetration test (tenant isolation) passed before pilot customer receives credentials
 
-**Week 11–12: Helpdesk app + connector v1**
-- Helpdesk workflow config: entity type, states, transitions, SLA rules
-- Email-to-ticket connector (SMTP/IMAP polling)
-- Customer portal: ticket submission form, status tracking
-- Agent UI: ticket queue, detail view, response editor, comment system
-- Knowledge base: articles, search, suggested articles in portal
+### Phase 3 — Scale, integrations, and extensibility (weeks 17–28)
 
-**Week 13–14: Reimbursements + CRM app**
-- Expense claim workflow config: states, multi-level approval, finance review
-- Receipt upload and storage
-- CRM: Contact + Company + Deal entities, pipeline board view
-- Activity log on CRM entities
-- Slack connector: notifications for deal and ticket events
+**Deliverable:** Connector marketplace with webhook gateway and connector runtime. Plugin system with Module Federation. AI layer (automation rule generation, workflow suggestion, entity classification). Drag-and-drop visual workflow builder. First sector package.
 
-**Week 15–16: Reporting + Automation builder UI**
-- Metabase embedded: per-tenant dashboards for helpdesk and reimbursements
-- Visual automation rule builder (no-code UI for trigger → condition → action)
-- Workflow visual editor (see states and transitions, edit labels and SLAs)
-- Admin module management (enable/disable modules per tenant)
-
-**Exit criteria for Phase 2:**
-- Pilot customer can submit tickets via email and portal
-- Agents can manage tickets with full workflow and SLA
-- Employees can submit expense claims through the full approval chain
-- CRM pipeline is functional with automation rules
-- Reporting dashboards are live for each app
-
-### Phase 3 — Scale and extensibility (weeks 17–28)
-
-**Deliverable:** Plugin system live, HRMS module, connector marketplace, first sector package.
-
-**Week 17–20: Plugin system**
-- Plugin manifest spec implemented
-- Plugin lifecycle: install, validate, migrate, register, uninstall
-- Module Federation frontend setup
-- Slot registry and error boundaries
-- Plugin SDK published as `@platform/plugin-sdk` and `@platform/ui`
-- Plugin developer documentation
-
-**Week 21–24: HRMS module + connector marketplace**
-- HRMS: employees, org chart, leave management, attendance, document storage
-- Payroll connector framework (leave calculation feeds payroll)
-- Connector marketplace UI: browse, install, configure connectors
-- First-party connectors: Stripe, QuickBooks, Xero, WhatsApp Business
-
-**Week 25–28: Workflow builder + first sector package**
-- Full visual workflow builder (drag-and-drop state machine editor)
-- Workflow template library (clone and customize pre-built templates)
-- First sector package (chosen based on pilot customer vertical)
-- AI-assisted workflow creation from natural language description
-- White-label: per-tenant branding, custom domain support
+**Exit criteria:**
+- A third-party connector can be installed by a tenant and trigger automations with no code change
+- A plugin can add new entity types, routes, and UI slots without modifying core platform code
+- An administrator can describe an automation in natural language and receive a reviewable rule config
+- First sector package ships as config — no bespoke backend code
 
 ### Phase 4 — Customer-driven refinement (ongoing)
 
-From Phase 3 onwards, the roadmap is driven by customer feedback, not internal assumptions. The operating rhythm shifts to:
-
-- Two-week sprint cycles
-- Feature requests triaged into: "config change" (days), "new module" (weeks), "engine change" (months, requires design review)
-- Engine changes are rare and go through a formal design review with the full engineering team
-- Config changes and new module configs are shipped as often as daily
+From Phase 3 onwards, the roadmap is driven by customer feedback. Feature requests triage into: config change (days), new module (1–2 weeks), engine extension (4–8 weeks with ADR). Engine changes are rare, deliberate, and benefit all tenants. Config changes ship continuously.
 
 ---
 

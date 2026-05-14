@@ -94,7 +94,9 @@ jobs:
       DATABASE_MIGRATION_URL: postgresql://platform:platform_test_password@localhost:5432/platform_test
       REDIS_URL: redis://localhost:6379
       NODE_ENV: test
-      ENCRYPTION_KEY: 0000000000000000000000000000000000000000000000000000000000000000
+      OPENBAO_ADDR: http://localhost:8200
+      OPENBAO_TRANSIT_KEY: platform-test
+      OPENBAO_TOKEN: dev-root-token
       ANTHROPIC_API_KEY: test_key_not_used_in_tests
       S3_ENDPOINT: http://localhost:9000
       S3_BUCKET: test-bucket

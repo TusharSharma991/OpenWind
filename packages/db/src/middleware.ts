@@ -1,9 +1,24 @@
 import { sql } from "drizzle-orm";
+import type { PgTransaction } from "drizzle-orm/pg-core";
+import type {
+  PostgresJsQueryResultHKT,
+  PostgresJsDatabase,
+} from "drizzle-orm/postgres-js";
+import type { ExtractTablesWithRelations } from "drizzle-orm";
+import type * as schema from "./schema/index.js";
 import { db } from "./client.js";
+
+type Tx = PgTransaction<
+  PostgresJsQueryResultHKT,
+  typeof schema,
+  ExtractTablesWithRelations<typeof schema>
+>;
+
+export type DbOrTx = PostgresJsDatabase<typeof schema> | Tx;
 
 export async function withTenantContext<T>(
   tenantId: string,
-  fn: (tx: typeof db) => Promise<T>,
+  fn: (tx: Tx) => Promise<T>,
 ): Promise<T> {
   return db.transaction(async (tx) => {
     await tx.execute(

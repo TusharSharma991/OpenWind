@@ -14,31 +14,7 @@
  * withTenantContext, which sets app.tenant_id for the transaction.
  */
 
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
-
-// ── Config mock must be hoisted before any @platform/* imports ────────────────
-vi.mock("@platform/config", () => ({
-  env: {
-    DATABASE_URL:
-      process.env["DATABASE_URL"] ??
-      "postgresql://platform:platform_test_password@localhost:5432/platform_test",
-    DATABASE_POOL_MIN: 1,
-    DATABASE_POOL_MAX: 3,
-    REDIS_URL: process.env["REDIS_URL"] ?? "redis://localhost:6379",
-    NODE_ENV: "test",
-    ZITADEL_ISSUER: "http://localhost:8080",
-    ZITADEL_AUDIENCE: "platform-api",
-    NOVU_API_KEY: "test",
-    NOVU_API_URL: "http://localhost:3010",
-    S3_ENDPOINT: "http://localhost:9000",
-    S3_BUCKET: "test",
-    S3_ACCESS_KEY: "test",
-    S3_SECRET_KEY: "test",
-    ANTHROPIC_API_KEY: "test",
-    ENCRYPTION_KEY: "a".repeat(64),
-  },
-}));
-
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { eq, and } from "drizzle-orm";
 import { db, withTenantContext } from "@platform/db";
 import { entityInstances, entityTypes, entityRelations } from "@platform/db";

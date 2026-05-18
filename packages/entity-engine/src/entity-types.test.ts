@@ -123,19 +123,35 @@ describe("getEntityType", () => {
 describe("listEntityTypes", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("returns a list of entity types visible to the tenant", async () => {
+  it("returns a cursor page of entity types visible to the tenant", async () => {
     dbMock.select.mockReturnValue(makeQueryBuilder(() => [fakeEntityType]));
-    const results = await listEntityTypes(dbMock as never, TENANT_ID);
-    expect(results).toHaveLength(1);
-    expect(results[0]?.name).toBe("ticket");
+    const page = await listEntityTypes(dbMock as never, TENANT_ID);
+    expect(page.data).toHaveLength(1);
+    expect(page.data[0]?.name).toBe("ticket");
+    expect(page.nextCursor).toBeNull();
   });
 
-  it("returns empty array when none found", async () => {
+  it("returns empty page when none found", async () => {
     dbMock.select.mockReturnValue(makeQueryBuilder(() => []));
-    const results = await listEntityTypes(dbMock as never, TENANT_ID, {
+    const page = await listEntityTypes(dbMock as never, TENANT_ID, {
       moduleId: "unknown-module",
     });
-    expect(results).toHaveLength(0);
+    expect(page.data).toHaveLength(0);
+    expect(page.nextCursor).toBeNull();
+  });
+
+  it("sets nextCursor when more results exist beyond the limit", async () => {
+    const rows = Array.from({ length: 3 }, (_, i) => ({
+      ...fakeEntityType,
+      id: `type-${i}`,
+      createdAt: new Date(Date.now() + i * 1000),
+    }));
+    dbMock.select.mockReturnValue(makeQueryBuilder(() => rows));
+    const page = await listEntityTypes(dbMock as never, TENANT_ID, {
+      limit: 2,
+    });
+    expect(page.data).toHaveLength(2);
+    expect(page.nextCursor).not.toBeNull();
   });
 });
 

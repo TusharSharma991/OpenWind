@@ -1,9 +1,16 @@
-import { eq, and, or, isNull, count } from "drizzle-orm";
+import { eq, and, asc, gt, or, isNull, count } from "drizzle-orm";
 import type { DbOrTx } from "@platform/db";
 import { entityTypes, entityInstances } from "@platform/db";
 import { logger } from "@platform/logger";
 import type { EntityType } from "./types.js";
 import { EntityError } from "./errors.js";
+import {
+  encodeCursor,
+  decodeCursor,
+  DEFAULT_PAGE_SIZE,
+  MAX_PAGE_SIZE,
+} from "./pagination.js";
+import type { CursorPage } from "./pagination.js";
 
 export type CreateEntityTypeInput = {
   name: string;
@@ -22,6 +29,8 @@ export type UpdateEntityTypeInput = {
 
 export type ListEntityTypesInput = {
   moduleId?: string;
+  limit?: number;
+  cursor?: string;
 };
 
 export async function createEntityType(
@@ -76,7 +85,9 @@ export async function listEntityTypes(
   db: DbOrTx,
   tenantId: string,
   input: ListEntityTypesInput = {},
-): Promise<EntityType[]> {
+): Promise<CursorPage<EntityType>> {
+  const limit = Math.min(input.limit ?? DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
+
   const conditions = [
     or(isNull(entityTypes.tenantId), eq(entityTypes.tenantId, tenantId)),
   ];
@@ -84,14 +95,35 @@ export async function listEntityTypes(
   if (input.moduleId !== undefined) {
     conditions.push(eq(entityTypes.moduleId, input.moduleId));
   }
+  if (input.cursor) {
+    const decoded = decodeCursor(input.cursor);
+    if (decoded) {
+      conditions.push(
+        or(
+          gt(entityTypes.createdAt, decoded.createdAt),
+          and(
+            eq(entityTypes.createdAt, decoded.createdAt),
+            gt(entityTypes.id, decoded.id),
+          ),
+        ),
+      );
+    }
+  }
 
   const rows = await db
     .select()
     .from(entityTypes)
     .where(and(...conditions))
-    .orderBy(entityTypes.name);
+    .orderBy(asc(entityTypes.createdAt), asc(entityTypes.id))
+    .limit(limit + 1);
 
-  return rows.map(rowToEntityType);
+  const hasMore = rows.length > limit;
+  const data = hasMore ? rows.slice(0, limit) : rows;
+  const last = data[data.length - 1];
+  const nextCursor =
+    hasMore && last ? encodeCursor(last.createdAt, last.id) : null;
+
+  return { data: data.map(rowToEntityType), nextCursor };
 }
 
 export async function updateEntityType(

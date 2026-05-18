@@ -2,12 +2,14 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { requireAuth, requireRole } from "@platform/auth";
 import { db } from "@platform/db";
-import { listEntityTypes } from "@platform/entity-engine";
+import { listEntityTypes, MAX_PAGE_SIZE } from "@platform/entity-engine";
 import { factory } from "./factory.js";
 import { handleEntityError } from "../../lib/handle-entity-error.js";
 
 const ListEntityTypesQuerySchema = z.object({
   moduleId: z.string().uuid().optional(),
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(MAX_PAGE_SIZE).default(50),
 });
 
 export const listEntityTypesHandler = factory.createHandlers(
@@ -15,12 +17,16 @@ export const listEntityTypesHandler = factory.createHandlers(
   requireRole("admin"),
   zValidator("query", ListEntityTypesQuerySchema),
   async (c) => {
-    const { moduleId } = c.req.valid("query");
+    const { moduleId, cursor, limit } = c.req.valid("query");
     const { tenantId } = c.get("auth");
 
     try {
-      const entityTypesList = await listEntityTypes(db, tenantId, { moduleId });
-      return c.json({ data: entityTypesList });
+      const page = await listEntityTypes(db, tenantId, {
+        moduleId,
+        cursor,
+        limit,
+      });
+      return c.json(page);
     } catch (err) {
       return handleEntityError(c, err);
     }

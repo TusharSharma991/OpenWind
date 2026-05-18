@@ -66,6 +66,6 @@ export type ListEntitiesInput = {
   state?: string;
   assignedTo?: string;
   limit?: number;
-  offset?: number;
+  cursor?: string;
   includeDeleted?: boolean;
 };

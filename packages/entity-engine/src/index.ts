@@ -1,6 +1,8 @@
 export * from "./types.js";
 export * from "./errors.js";
 export * from "./field-types.js";
+export type { CursorPage } from "./pagination.js";
+export { encodeCursor, decodeCursor, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from "./pagination.js";
 export {
   createEntity,
   getEntity,

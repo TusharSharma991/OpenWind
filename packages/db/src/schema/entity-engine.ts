@@ -82,6 +82,12 @@ export const entityInstances = pgTable(
       t.tenantId,
       t.deletedAt,
     ),
+    cursorIdx: index("entity_instances_cursor_idx").on(
+      t.tenantId,
+      t.entityTypeId,
+      t.createdAt,
+      t.id,
+    ),
   }),
 );
 

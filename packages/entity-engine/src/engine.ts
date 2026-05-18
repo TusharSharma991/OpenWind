@@ -1,4 +1,4 @@
-import { eq, and, desc, isNull, or } from "drizzle-orm";
+import { eq, and, asc, gt, isNull, or } from "drizzle-orm";
 import type { DbOrTx } from "@platform/db";
 import { entityInstances, entityTypes, entityFields } from "@platform/db";
 import { logger } from "@platform/logger";
@@ -10,6 +10,13 @@ import type {
   UpdateEntityInput,
   ListEntitiesInput,
 } from "./types.js";
+import {
+  encodeCursor,
+  decodeCursor,
+  DEFAULT_PAGE_SIZE,
+  MAX_PAGE_SIZE,
+} from "./pagination.js";
+import type { CursorPage } from "./pagination.js";
 import { EntityError, ValidationError } from "./errors.js";
 import {
   getValidationSchema,
@@ -272,7 +279,9 @@ export async function listEntities(
   db: DbOrTx,
   tenantId: string,
   input: ListEntitiesInput,
-): Promise<EntityInstance[]> {
+): Promise<CursorPage<EntityInstance>> {
+  const limit = Math.min(input.limit ?? DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
+
   const conditions = [
     eq(entityInstances.tenantId, tenantId),
     eq(entityInstances.entityTypeId, input.entityTypeId),
@@ -287,16 +296,35 @@ export async function listEntities(
   if (input.assignedTo !== undefined) {
     conditions.push(eq(entityInstances.assignedTo, input.assignedTo));
   }
+  if (input.cursor) {
+    const decoded = decodeCursor(input.cursor);
+    if (decoded) {
+      conditions.push(
+        or(
+          gt(entityInstances.createdAt, decoded.createdAt),
+          and(
+            eq(entityInstances.createdAt, decoded.createdAt),
+            gt(entityInstances.id, decoded.id),
+          ),
+        ),
+      );
+    }
+  }
 
   const rows = await db
     .select()
     .from(entityInstances)
     .where(and(...conditions))
-    .orderBy(desc(entityInstances.createdAt))
-    .limit(input.limit ?? 50)
-    .offset(input.offset ?? 0);
+    .orderBy(asc(entityInstances.createdAt), asc(entityInstances.id))
+    .limit(limit + 1);
 
-  return rows.map((r) => rowToInstance(r));
+  const hasMore = rows.length > limit;
+  const data = hasMore ? rows.slice(0, limit) : rows;
+  const last = data[data.length - 1];
+  const nextCursor =
+    hasMore && last ? encodeCursor(last.createdAt, last.id) : null;
+
+  return { data: data.map(rowToInstance), nextCursor };
 }
 
 export async function addEntityField(

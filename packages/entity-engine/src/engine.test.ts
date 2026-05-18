@@ -326,22 +326,40 @@ describe("deleteEntity", () => {
 });
 
 describe("listEntities", () => {
-  it("returns a list of entity instances", async () => {
+  it("returns a cursor page of entity instances", async () => {
     dbMock.select.mockReturnValue(makeQueryBuilder(() => [fakeInstance]));
-    const results = await listEntities(dbMock as never, TENANT_ID, {
+    const page = await listEntities(dbMock as never, TENANT_ID, {
       entityTypeId: ENTITY_TYPE_ID,
     });
-    expect(results).toHaveLength(1);
-    expect(results[0]?.id).toBe(INSTANCE_ID);
+    expect(page.data).toHaveLength(1);
+    expect(page.data[0]?.id).toBe(INSTANCE_ID);
+    expect(page.nextCursor).toBeNull();
   });
 
-  it("returns empty array when no matches", async () => {
+  it("returns empty page when no matches", async () => {
     dbMock.select.mockReturnValue(makeQueryBuilder(() => []));
-    const results = await listEntities(dbMock as never, TENANT_ID, {
+    const page = await listEntities(dbMock as never, TENANT_ID, {
       entityTypeId: ENTITY_TYPE_ID,
       state: "closed",
     });
-    expect(results).toHaveLength(0);
+    expect(page.data).toHaveLength(0);
+    expect(page.nextCursor).toBeNull();
+  });
+
+  it("sets nextCursor when more results exist beyond the limit", async () => {
+    // Return limit+1 rows to trigger hasMore
+    const rows = Array.from({ length: 3 }, (_, i) => ({
+      ...fakeInstance,
+      id: `instance-${i}`,
+      createdAt: new Date(Date.now() + i * 1000),
+    }));
+    dbMock.select.mockReturnValue(makeQueryBuilder(() => rows));
+    const page = await listEntities(dbMock as never, TENANT_ID, {
+      entityTypeId: ENTITY_TYPE_ID,
+      limit: 2,
+    });
+    expect(page.data).toHaveLength(2);
+    expect(page.nextCursor).not.toBeNull();
   });
 
   it("adds isNull(deletedAt) filter by default", async () => {
@@ -361,12 +379,12 @@ describe("listEntities", () => {
     dbMock.select.mockReturnValue(
       makeQueryBuilder(() => [fakeSoftDeletedInstance]),
     );
-    const results = await listEntities(dbMock as never, TENANT_ID, {
+    const page = await listEntities(dbMock as never, TENANT_ID, {
       entityTypeId: ENTITY_TYPE_ID,
       includeDeleted: true,
     });
     expect(isNull).not.toHaveBeenCalled();
-    expect(results).toHaveLength(1);
-    expect(results[0]?.deletedAt).not.toBeNull();
+    expect(page.data).toHaveLength(1);
+    expect(page.data[0]?.deletedAt).not.toBeNull();
   });
 });

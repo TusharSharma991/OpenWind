@@ -184,7 +184,7 @@ export default [
   // vitest, not tsc). Disabling type-checked rules avoids "file not in project"
   // errors while still linting test code for obvious mistakes.
   {
-    files: ["**/*.test.ts", "**/*.spec.ts", "tests/**/*.ts"],
+    files: ["**/*.test.ts", "**/*.spec.ts", "tests/**/*.ts", "**/vitest.config.ts"],
     languageOptions: {
       parserOptions: {
         project: false,

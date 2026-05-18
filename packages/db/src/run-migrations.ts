@@ -5,29 +5,31 @@
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
-import { fileURLToPath } from "url";
 import path from "path";
 
-const url = process.env["DATABASE_URL"];
-if (!url) {
-  console.error("DATABASE_URL is not set");
-  process.exit(1);
-}
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const migrationsFolder = path.join(__dirname, "../migrations");
 
-const client = postgres(url, { max: 1 });
-const db = drizzle(client);
+async function main(): Promise<void> {
+  const url = process.env["DATABASE_URL"];
+  if (!url) {
+    console.error("DATABASE_URL is not set");
+    process.exit(1);
+  }
 
-console.error("Running migrations from:", migrationsFolder);
+  const client = postgres(url, { max: 1 });
+  const db = drizzle(client);
 
-try {
-  await migrate(db, { migrationsFolder });
-  console.error("All migrations applied successfully.");
-} catch (err) {
-  console.error("Migration failed:", err);
-  process.exit(1);
-} finally {
-  await client.end();
+  console.error("Running migrations from:", migrationsFolder);
+
+  try {
+    await migrate(db, { migrationsFolder });
+    console.error("All migrations applied successfully.");
+  } catch (err) {
+    console.error("Migration failed:", err);
+    process.exit(1);
+  } finally {
+    await client.end();
+  }
 }
+
+void main();

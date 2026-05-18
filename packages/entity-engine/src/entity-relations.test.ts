@@ -55,9 +55,8 @@ vi.mock("@platform/logger", () => ({
 
 // ── Import AFTER mocks ────────────────────────────────────────────────────────
 
-const { createRelation, listRelations, deleteRelation } = await import(
-  "./entity-relations.js"
-);
+const { createRelation, listRelations, deleteRelation } =
+  await import("./entity-relations.js");
 
 const TENANT_ID = "tenant-aaa";
 const FROM_ID = "instance-from";
@@ -179,7 +178,9 @@ describe("deleteRelation", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("deletes the relation when it belongs to the tenant", async () => {
-    dbMock.select.mockReturnValue(makeQueryBuilder(() => [{ id: RELATION_ID }]));
+    dbMock.select.mockReturnValue(
+      makeQueryBuilder(() => [{ id: RELATION_ID }]),
+    );
 
     await expect(
       deleteRelation(dbMock as never, TENANT_ID, RELATION_ID),

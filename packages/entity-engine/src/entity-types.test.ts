@@ -94,7 +94,9 @@ describe("createEntityType", () => {
   });
 
   it("creates a system-level type when tenantId is null", async () => {
-    mockInsertReturning.mockResolvedValue([{ ...fakeEntityType, tenantId: null }]);
+    mockInsertReturning.mockResolvedValue([
+      { ...fakeEntityType, tenantId: null },
+    ]);
     const result = await createEntityType(dbMock as never, null, {
       name: "ticket",
       plural: "tickets",
@@ -170,7 +172,12 @@ describe("updateEntityType", () => {
 
   it("returns existing type unchanged when input is empty", async () => {
     dbMock.select.mockReturnValue(makeQueryBuilder(() => [fakeEntityType]));
-    const result = await updateEntityType(dbMock as never, TENANT_ID, TYPE_ID, {});
+    const result = await updateEntityType(
+      dbMock as never,
+      TENANT_ID,
+      TYPE_ID,
+      {},
+    );
     expect(result.id).toBe(TYPE_ID);
     expect(dbMock.update).not.toHaveBeenCalled();
   });
@@ -178,7 +185,9 @@ describe("updateEntityType", () => {
   it("throws EntityError when entity type not found", async () => {
     dbMock.select.mockReturnValue(makeQueryBuilder(() => []));
     await expect(
-      updateEntityType(dbMock as never, TENANT_ID, "nonexistent", { name: "x" }),
+      updateEntityType(dbMock as never, TENANT_ID, "nonexistent", {
+        name: "x",
+      }),
     ).rejects.toBeInstanceOf(EntityError);
   });
 });

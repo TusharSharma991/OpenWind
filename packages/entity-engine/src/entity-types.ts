@@ -142,7 +142,8 @@ export async function updateEntityType(
     )
     .limit(1);
 
-  if (!existing) throw new EntityError("ENTITY_TYPE_NOT_FOUND", { entityTypeId });
+  if (!existing)
+    throw new EntityError("ENTITY_TYPE_NOT_FOUND", { entityTypeId });
 
   const updates: Partial<typeof entityTypes.$inferInsert> = {};
   if (input.name !== undefined) updates.name = input.name;
@@ -183,7 +184,8 @@ export async function deleteEntityType(
     )
     .limit(1);
 
-  if (!existing) throw new EntityError("ENTITY_TYPE_NOT_FOUND", { entityTypeId });
+  if (!existing)
+    throw new EntityError("ENTITY_TYPE_NOT_FOUND", { entityTypeId });
 
   const [instanceCount] = await db
     .select({ count: count() })

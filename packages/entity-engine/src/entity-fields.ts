@@ -146,9 +146,7 @@ export async function deleteEntityField(
   logger.info({ tenantId, entityTypeId, fieldId }, "Entity field deleted");
 }
 
-function rowToEntityField(
-  row: typeof entityFields.$inferSelect,
-): EntityField {
+function rowToEntityField(row: typeof entityFields.$inferSelect): EntityField {
   return {
     id: row.id,
     entityTypeId: row.entityTypeId,

@@ -61,9 +61,8 @@ vi.mock("./validation/index.js", () => ({
 
 // ── Import AFTER mocks ────────────────────────────────────────────────────────
 
-const { listEntityFields, updateEntityField, deleteEntityField } = await import(
-  "./entity-fields.js"
-);
+const { listEntityFields, updateEntityField, deleteEntityField } =
+  await import("./entity-fields.js");
 const { invalidateSchemaCache } = await import("./validation/index.js");
 
 const TENANT_ID = "tenant-aaa";
@@ -184,7 +183,12 @@ describe("deleteEntityField", () => {
   it("throws SYSTEM_FIELD_IMMUTABLE when attempting to delete a system field", async () => {
     dbMock.select.mockReturnValue(makeQueryBuilder(() => [fakeSystemField]));
     await expect(
-      deleteEntityField(dbMock as never, TENANT_ID, TYPE_ID, fakeSystemField.id),
+      deleteEntityField(
+        dbMock as never,
+        TENANT_ID,
+        TYPE_ID,
+        fakeSystemField.id,
+      ),
     ).rejects.toMatchObject({ code: "SYSTEM_FIELD_IMMUTABLE" });
     expect(dbMock.delete).not.toHaveBeenCalled();
     expect(invalidateSchemaCache).not.toHaveBeenCalled();

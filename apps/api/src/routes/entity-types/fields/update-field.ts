@@ -28,7 +28,13 @@ export const updateEntityFieldHandler = factory.createHandlers(
     const { tenantId } = c.get("auth");
 
     try {
-      const field = await updateEntityField(db, tenantId, typeId, fieldId, input);
+      const field = await updateEntityField(
+        db,
+        tenantId,
+        typeId,
+        fieldId,
+        input,
+      );
       return c.json({ data: field });
     } catch (err) {
       return handleEntityError(c, err);

@@ -4,7 +4,12 @@ import { entityRelations, entityInstances } from "@platform/db";
 import { logger } from "@platform/logger";
 import type { EntityRelation } from "./types.js";
 import { EntityError } from "./errors.js";
-import { encodeCursor, decodeCursor, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from "./pagination.js";
+import {
+  encodeCursor,
+  decodeCursor,
+  DEFAULT_PAGE_SIZE,
+  MAX_PAGE_SIZE,
+} from "./pagination.js";
 import type { CursorPage } from "./pagination.js";
 
 export type CreateRelationInput = {
@@ -29,21 +34,35 @@ export async function createRelation(
   const [fromInstance] = await db
     .select({ id: entityInstances.id })
     .from(entityInstances)
-    .where(and(eq(entityInstances.id, input.fromInstanceId), eq(entityInstances.tenantId, tenantId)))
+    .where(
+      and(
+        eq(entityInstances.id, input.fromInstanceId),
+        eq(entityInstances.tenantId, tenantId),
+      ),
+    )
     .limit(1);
 
   if (!fromInstance) {
-    throw new EntityError("RELATION_TARGET_NOT_FOUND", { instanceId: input.fromInstanceId });
+    throw new EntityError("RELATION_TARGET_NOT_FOUND", {
+      instanceId: input.fromInstanceId,
+    });
   }
 
   const [toInstance] = await db
     .select({ id: entityInstances.id })
     .from(entityInstances)
-    .where(and(eq(entityInstances.id, input.toInstanceId), eq(entityInstances.tenantId, tenantId)))
+    .where(
+      and(
+        eq(entityInstances.id, input.toInstanceId),
+        eq(entityInstances.tenantId, tenantId),
+      ),
+    )
     .limit(1);
 
   if (!toInstance) {
-    throw new EntityError("RELATION_TARGET_NOT_FOUND", { instanceId: input.toInstanceId });
+    throw new EntityError("RELATION_TARGET_NOT_FOUND", {
+      instanceId: input.toInstanceId,
+    });
   }
 
   const [row] = await db
@@ -58,7 +77,10 @@ export async function createRelation(
 
   if (!row) throw new EntityError("RELATION_NOT_FOUND", {});
 
-  logger.info({ tenantId, relationId: row.id, relationType: input.relationType }, "Entity relation created");
+  logger.info(
+    { tenantId, relationId: row.id, relationType: input.relationType },
+    "Entity relation created",
+  );
 
   return rowToRelation(row);
 }
@@ -114,7 +136,8 @@ export async function listRelations(
   const hasMore = rows.length > limit;
   const data = hasMore ? rows.slice(0, limit) : rows;
   const last = data[data.length - 1];
-  const nextCursor = hasMore && last ? encodeCursor(last.createdAt, last.id) : null;
+  const nextCursor =
+    hasMore && last ? encodeCursor(last.createdAt, last.id) : null;
 
   return { data: data.map(rowToRelation), nextCursor };
 }
@@ -127,7 +150,12 @@ export async function deleteRelation(
   const [existing] = await db
     .select({ id: entityRelations.id })
     .from(entityRelations)
-    .where(and(eq(entityRelations.id, relationId), eq(entityRelations.tenantId, tenantId)))
+    .where(
+      and(
+        eq(entityRelations.id, relationId),
+        eq(entityRelations.tenantId, tenantId),
+      ),
+    )
     .limit(1);
 
   if (!existing) throw new EntityError("RELATION_NOT_FOUND", { relationId });
@@ -137,7 +165,9 @@ export async function deleteRelation(
   logger.info({ tenantId, relationId }, "Entity relation deleted");
 }
 
-function rowToRelation(row: typeof entityRelations.$inferSelect): EntityRelation {
+function rowToRelation(
+  row: typeof entityRelations.$inferSelect,
+): EntityRelation {
   return {
     id: row.id,
     tenantId: row.tenantId,

@@ -2,7 +2,11 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { requireAuth } from "@platform/auth";
 import { db } from "@platform/db";
-import { listRelations, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from "@platform/entity-engine";
+import {
+  listRelations,
+  DEFAULT_PAGE_SIZE,
+  MAX_PAGE_SIZE,
+} from "@platform/entity-engine";
 import { factory } from "./factory.js";
 import { handleEntityError } from "../../lib/handle-entity-error.js";
 

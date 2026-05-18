@@ -40,10 +40,12 @@ export async function getValidationSchema(
   const key = cacheKey(entityTypeId, tenantId, mode);
 
   try {
-    const cached = await redis.get(key);
-    if (cached) {
-      const fields = JSON.parse(cached) as EntityField[];
-      return buildZodSchema(fields, mode);
+    if (redis.isReady) {
+      const cached = await redis.get(key);
+      if (cached) {
+        const fields = JSON.parse(cached) as EntityField[];
+        return buildZodSchema(fields, mode);
+      }
     }
   } catch {
     // Cache miss on Redis error — fall through to DB
@@ -62,12 +64,14 @@ export async function getValidationSchema(
 
   const fields: EntityField[] = rows.map((r) => ({
     ...r,
-    config: (r.config as Record<string, unknown>) ?? {},
+    config: r.config as Record<string, unknown>,
     fieldType: r.fieldType as EntityField["fieldType"],
   }));
 
   try {
-    await redis.set(key, JSON.stringify(fields), { EX: CACHE_TTL_SECONDS });
+    if (redis.isReady) {
+      await redis.set(key, JSON.stringify(fields), { EX: CACHE_TTL_SECONDS });
+    }
   } catch {
     // Non-fatal: proceed without caching
   }
@@ -85,8 +89,10 @@ export async function invalidateSchemaCache(
     : `schema:${entityTypeId}:*`;
 
   try {
-    const keys = await redis.keys(pattern);
-    if (keys.length > 0) await redis.del(keys);
+    if (redis.isReady) {
+      const keys = await redis.keys(pattern);
+      if (keys.length > 0) await redis.del(keys);
+    }
   } catch {
     // Non-fatal
   }

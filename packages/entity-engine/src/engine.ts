@@ -105,6 +105,7 @@ export async function getEntity(
       and(
         eq(entityInstances.id, instanceId),
         eq(entityInstances.tenantId, tenantId),
+        isNull(entityInstances.deletedAt),
       ),
     )
     .limit(1);
@@ -136,6 +137,7 @@ export async function updateEntity(
       and(
         eq(entityInstances.id, instanceId),
         eq(entityInstances.tenantId, tenantId),
+        isNull(entityInstances.deletedAt),
       ),
     )
     .limit(1);
@@ -239,21 +241,31 @@ export async function deleteEntity(
   tenantId: string,
   instanceId: string,
 ): Promise<void> {
-  const deleted = await db
-    .delete(entityInstances)
+  const [row] = await db
+    .select({ id: entityInstances.id })
+    .from(entityInstances)
+    .where(
+      and(
+        eq(entityInstances.id, instanceId),
+        eq(entityInstances.tenantId, tenantId),
+        isNull(entityInstances.deletedAt),
+      ),
+    )
+    .limit(1);
+
+  if (!row) throw new EntityError("ENTITY_NOT_FOUND", { instanceId });
+
+  await db
+    .update(entityInstances)
+    .set({ deletedAt: new Date() })
     .where(
       and(
         eq(entityInstances.id, instanceId),
         eq(entityInstances.tenantId, tenantId),
       ),
-    )
-    .returning({ id: entityInstances.id });
+    );
 
-  if (deleted.length === 0) {
-    throw new EntityError("ENTITY_NOT_FOUND", { instanceId });
-  }
-
-  logger.info({ tenantId, instanceId }, "Entity deleted");
+  logger.info({ tenantId, instanceId }, "Entity soft-deleted");
 }
 
 export async function listEntities(
@@ -266,6 +278,9 @@ export async function listEntities(
     eq(entityInstances.entityTypeId, input.entityTypeId),
   ];
 
+  if (!input.includeDeleted) {
+    conditions.push(isNull(entityInstances.deletedAt));
+  }
   if (input.state !== undefined) {
     conditions.push(eq(entityInstances.currentState, input.state));
   }
@@ -392,5 +407,6 @@ function rowToInstance(
     assignedTo: row.assignedTo ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    deletedAt: row.deletedAt ?? null,
   };
 }

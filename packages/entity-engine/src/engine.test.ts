@@ -47,6 +47,7 @@ vi.mock("@platform/db", () => ({
     id: "id",
     tenantId: "tenant_id",
     entityTypeId: "entity_type_id",
+    deletedAt: "deleted_at",
     $inferSelect: {},
     $inferInsert: {},
   },
@@ -122,7 +123,10 @@ const fakeInstance = {
   assignedTo: null,
   createdAt: new Date(),
   updatedAt: new Date(),
+  deletedAt: null,
 };
+
+const fakeSoftDeletedInstance = { ...fakeInstance, deletedAt: new Date() };
 
 function makePassingSchema(data: Record<string, unknown> = {}) {
   return {
@@ -213,6 +217,22 @@ describe("getEntity", () => {
       getEntity(dbMock as never, TENANT_ID, "missing-id"),
     ).rejects.toBeInstanceOf(EntityError);
   });
+
+  it("throws EntityError for a soft-deleted entity", async () => {
+    // The isNull(deletedAt) filter means the DB returns no rows for deleted instances
+    dbMock.select.mockReturnValue(makeQueryBuilder(() => []));
+    await expect(
+      getEntity(dbMock as never, TENANT_ID, INSTANCE_ID),
+    ).rejects.toBeInstanceOf(EntityError);
+  });
+
+  it("exposes deletedAt as null on active instances", async () => {
+    dbMock.select
+      .mockReturnValueOnce(makeQueryBuilder(() => [fakeInstance]))
+      .mockReturnValue(makeQueryBuilder(() => []));
+    const result = await getEntity(dbMock as never, TENANT_ID, INSTANCE_ID);
+    expect(result.deletedAt).toBeNull();
+  });
 });
 
 describe("updateEntity", () => {
@@ -259,20 +279,48 @@ describe("updateEntity", () => {
       }),
     ).rejects.toBeInstanceOf(EntityError);
   });
+
+  it("throws EntityError when entity is soft-deleted", async () => {
+    // isNull(deletedAt) in the WHERE means soft-deleted rows return empty
+    dbMock.select.mockReset();
+    dbMock.select.mockReturnValue(makeQueryBuilder(() => []));
+    await expect(
+      updateEntity(dbMock as never, TENANT_ID, INSTANCE_ID, {
+        fields: { subject: "x" },
+      }),
+    ).rejects.toBeInstanceOf(EntityError);
+  });
 });
 
 describe("deleteEntity", () => {
-  it("resolves when entity is deleted", async () => {
-    mockDeleteReturning.mockResolvedValue([{ id: INSTANCE_ID }]);
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("soft-deletes by setting deleted_at rather than removing the row", async () => {
+    dbMock.select.mockReturnValue(
+      makeQueryBuilder(() => [{ id: INSTANCE_ID }]),
+    );
     await expect(
       deleteEntity(dbMock as never, TENANT_ID, INSTANCE_ID),
     ).resolves.toBeUndefined();
+    expect(dbMock.update).toHaveBeenCalledTimes(1);
+    expect(dbMock.delete).not.toHaveBeenCalled();
   });
 
   it("throws EntityError when entity not found", async () => {
-    mockDeleteReturning.mockResolvedValue([]);
+    dbMock.select.mockReturnValue(makeQueryBuilder(() => []));
     await expect(
       deleteEntity(dbMock as never, TENANT_ID, "missing"),
+    ).rejects.toBeInstanceOf(EntityError);
+    expect(dbMock.update).not.toHaveBeenCalled();
+  });
+
+  it("throws EntityError when entity is already soft-deleted", async () => {
+    // isNull(deletedAt) filter causes already-deleted rows to return empty
+    dbMock.select.mockReturnValue(makeQueryBuilder(() => []));
+    await expect(
+      deleteEntity(dbMock as never, TENANT_ID, INSTANCE_ID),
     ).rejects.toBeInstanceOf(EntityError);
   });
 });
@@ -294,5 +342,31 @@ describe("listEntities", () => {
       state: "closed",
     });
     expect(results).toHaveLength(0);
+  });
+
+  it("adds isNull(deletedAt) filter by default", async () => {
+    const { isNull } = await import("drizzle-orm");
+    dbMock.select.mockReturnValue(makeQueryBuilder(() => []));
+    await listEntities(dbMock as never, TENANT_ID, {
+      entityTypeId: ENTITY_TYPE_ID,
+    });
+    expect(isNull).toHaveBeenCalledWith(
+      expect.objectContaining({ deleted_at: "deleted_at" }),
+    );
+  });
+
+  it("omits isNull filter when includeDeleted is true", async () => {
+    const { isNull } = await import("drizzle-orm");
+    vi.mocked(isNull).mockClear();
+    dbMock.select.mockReturnValue(
+      makeQueryBuilder(() => [fakeSoftDeletedInstance]),
+    );
+    const results = await listEntities(dbMock as never, TENANT_ID, {
+      entityTypeId: ENTITY_TYPE_ID,
+      includeDeleted: true,
+    });
+    expect(isNull).not.toHaveBeenCalled();
+    expect(results).toHaveLength(1);
+    expect(results[0]?.deletedAt).not.toBeNull();
   });
 });

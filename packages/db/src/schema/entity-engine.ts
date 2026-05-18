@@ -67,6 +67,7 @@ export const entityInstances = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
   (t) => ({
     tenantTypeIdx: index("entity_instances_tenant_type_idx").on(
@@ -76,6 +77,10 @@ export const entityInstances = pgTable(
     tenantStateIdx: index("entity_instances_tenant_state_idx").on(
       t.tenantId,
       t.currentState,
+    ),
+    tenantDeletedIdx: index("entity_instances_tenant_deleted_idx").on(
+      t.tenantId,
+      t.deletedAt,
     ),
   }),
 );

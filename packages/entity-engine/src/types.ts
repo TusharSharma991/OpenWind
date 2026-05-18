@@ -36,6 +36,7 @@ export interface EntityInstance {
   assignedTo: string | null;
   createdAt: Date;
   updatedAt: Date;
+  deletedAt: Date | null;
 }
 
 export interface EntityRelation {
@@ -66,4 +67,5 @@ export type ListEntitiesInput = {
   assignedTo?: string;
   limit?: number;
   offset?: number;
+  includeDeleted?: boolean;
 };

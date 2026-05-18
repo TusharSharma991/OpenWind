@@ -96,9 +96,10 @@ export const entityInstances = pgTable(
       t.createdAt,
       t.id,
     ),
-    searchIdx: index("entity_instances_search_idx")
-      .using("gin")
-      .on(t.searchVector),
+    searchIdx: index("entity_instances_search_idx").using(
+      "gin",
+      t.searchVector,
+    ),
   }),
 );
 

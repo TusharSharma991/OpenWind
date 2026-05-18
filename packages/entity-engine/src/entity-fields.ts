@@ -41,15 +41,14 @@ export async function listEntityFields(
   if (input.cursor) {
     const decoded = decodeCursor(input.cursor);
     if (decoded) {
-      conditions.push(
-        or(
-          gt(entityFields.createdAt, decoded.createdAt),
-          and(
-            eq(entityFields.createdAt, decoded.createdAt),
-            gt(entityFields.id, decoded.id),
-          ),
+      const cursorCond = or(
+        gt(entityFields.createdAt, decoded.createdAt),
+        and(
+          eq(entityFields.createdAt, decoded.createdAt),
+          gt(entityFields.id, decoded.id),
         ),
       );
+      if (cursorCond) conditions.push(cursorCond);
     }
   }
 

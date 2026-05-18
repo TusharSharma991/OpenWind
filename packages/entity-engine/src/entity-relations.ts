@@ -72,20 +72,19 @@ export async function listRelations(
   const limit = Math.min(input.limit ?? DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
   const direction = input.direction ?? "both";
 
-  // Build direction filter
-  let directionCondition;
+  const conditions = [eq(entityRelations.tenantId, tenantId)];
+
   if (direction === "from") {
-    directionCondition = eq(entityRelations.fromInstanceId, instanceId);
+    conditions.push(eq(entityRelations.fromInstanceId, instanceId));
   } else if (direction === "to") {
-    directionCondition = eq(entityRelations.toInstanceId, instanceId);
+    conditions.push(eq(entityRelations.toInstanceId, instanceId));
   } else {
-    directionCondition = or(
+    const dirCond = or(
       eq(entityRelations.fromInstanceId, instanceId),
       eq(entityRelations.toInstanceId, instanceId),
     );
+    if (dirCond) conditions.push(dirCond);
   }
-
-  const conditions = [eq(entityRelations.tenantId, tenantId), directionCondition];
 
   if (input.relationType) {
     conditions.push(eq(entityRelations.relationType, input.relationType));
@@ -94,15 +93,14 @@ export async function listRelations(
   if (input.cursor) {
     const decoded = decodeCursor(input.cursor);
     if (decoded) {
-      conditions.push(
-        or(
-          gt(entityRelations.createdAt, decoded.createdAt),
-          and(
-            eq(entityRelations.createdAt, decoded.createdAt),
-            gt(entityRelations.id, decoded.id),
-          ),
+      const cursorCond = or(
+        gt(entityRelations.createdAt, decoded.createdAt),
+        and(
+          eq(entityRelations.createdAt, decoded.createdAt),
+          gt(entityRelations.id, decoded.id),
         ),
       );
+      if (cursorCond) conditions.push(cursorCond);
     }
   }
 

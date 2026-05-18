@@ -98,15 +98,14 @@ export async function listEntityTypes(
   if (input.cursor) {
     const decoded = decodeCursor(input.cursor);
     if (decoded) {
-      conditions.push(
-        or(
-          gt(entityTypes.createdAt, decoded.createdAt),
-          and(
-            eq(entityTypes.createdAt, decoded.createdAt),
-            gt(entityTypes.id, decoded.id),
-          ),
+      const cursorCond = or(
+        gt(entityTypes.createdAt, decoded.createdAt),
+        and(
+          eq(entityTypes.createdAt, decoded.createdAt),
+          gt(entityTypes.id, decoded.id),
         ),
       );
+      if (cursorCond) conditions.push(cursorCond);
     }
   }
 

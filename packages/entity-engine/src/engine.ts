@@ -299,15 +299,14 @@ export async function listEntities(
   if (input.cursor) {
     const decoded = decodeCursor(input.cursor);
     if (decoded) {
-      conditions.push(
-        or(
-          gt(entityInstances.createdAt, decoded.createdAt),
-          and(
-            eq(entityInstances.createdAt, decoded.createdAt),
-            gt(entityInstances.id, decoded.id),
-          ),
+      const cursorCond = or(
+        gt(entityInstances.createdAt, decoded.createdAt),
+        and(
+          eq(entityInstances.createdAt, decoded.createdAt),
+          gt(entityInstances.id, decoded.id),
         ),
       );
+      if (cursorCond) conditions.push(cursorCond);
     }
   }
 

@@ -8,7 +8,14 @@ import {
   timestamp,
   unique,
   index,
+  customType,
 } from "drizzle-orm/pg-core";
+
+const tsvector = customType<{ data: string }>({
+  dataType() {
+    return "tsvector";
+  },
+});
 
 export const entityTypes = pgTable("entity_types", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -68,6 +75,7 @@ export const entityInstances = pgTable(
       .defaultNow()
       .notNull(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    searchVector: tsvector("search_vector"),
   },
   (t) => ({
     tenantTypeIdx: index("entity_instances_tenant_type_idx").on(
@@ -88,6 +96,9 @@ export const entityInstances = pgTable(
       t.createdAt,
       t.id,
     ),
+    searchIdx: index("entity_instances_search_idx")
+      .using("gin")
+      .on(t.searchVector),
   }),
 );
 

@@ -70,3 +70,10 @@ export type ListEntitiesInput = {
   cursor?: string;
   includeDeleted?: boolean;
 };
+
+export type SearchEntitiesInput = {
+  entityTypeId: string;
+  query: string;
+  limit?: number | undefined;
+  cursor?: string | undefined;
+};

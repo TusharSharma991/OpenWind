@@ -47,6 +47,7 @@ export type {
   CreateRelationInput,
   ListRelationsInput,
 } from "./entity-relations.js";
+export { searchEntities } from "./search.js";
 export {
   buildZodSchema,
   transformZodErrors,

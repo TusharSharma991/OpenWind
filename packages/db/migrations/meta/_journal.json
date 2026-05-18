@@ -14,28 +14,28 @@
       "version": "7",
       "when": 1778749338300,
       "tag": "0001_rls_and_tenancy",
-      "breakpoints": true
+      "breakpoints": false
     },
     {
       "idx": 2,
       "version": "7",
       "when": 1778749338301,
       "tag": "0001_entity_instances_soft_delete",
-      "breakpoints": true
+      "breakpoints": false
     },
     {
       "idx": 3,
       "version": "7",
       "when": 1778749338302,
       "tag": "0002_entity_instances_cursor_idx",
-      "breakpoints": true
+      "breakpoints": false
     },
     {
       "idx": 4,
       "version": "7",
       "when": 1778749338303,
       "tag": "0002_entity_instances_search_vector",
-      "breakpoints": true
+      "breakpoints": false
     }
   ]
 }

@@ -18,17 +18,22 @@ import {
 } from "./pagination.js";
 import type { CursorPage } from "./pagination.js";
 import { EntityError, ValidationError } from "./errors.js";
+import type { FieldError } from "./errors.js";
 import {
   getValidationSchema,
   invalidateSchemaCache,
   transformZodErrors,
   applyFormulaFields,
 } from "./validation/index.js";
+import {
+  resolveLookupFields,
+  resolveLookupFieldsBatch,
+} from "./lookup-resolver.js";
 
 type EntityValidator = (
   fields: Record<string, unknown>,
   mode: "create" | "update",
-) => import("./errors.js").FieldError[];
+) => FieldError[];
 
 const crossFieldValidators = new Map<string, EntityValidator[]>();
 
@@ -119,11 +124,19 @@ export async function getEntity(
 
   if (!row) throw new EntityError("ENTITY_NOT_FOUND", { instanceId });
 
-  // Recompute formula fields on read
+  // Recompute computed fields on read: lookups first, then formulas
+  // (formulas may reference lookup-resolved values)
   const allFields = await loadEntityFields(db, row.entityTypeId, tenantId);
-  const fieldsWithFormulas = await applyFormulaFields(
+  const fieldsWithLookups = await resolveLookupFields(
+    db,
+    tenantId,
+    row.id,
     allFields,
     row.fields as Record<string, unknown>,
+  );
+  const fieldsWithFormulas = await applyFormulaFields(
+    allFields,
+    fieldsWithLookups,
   );
 
   const instanceWithFormulas = rowToInstance(row);
@@ -323,7 +336,32 @@ export async function listEntities(
   const nextCursor =
     hasMore && last ? encodeCursor(last.createdAt, last.id) : null;
 
-  return { data: data.map(rowToInstance), nextCursor };
+  // Batch-resolve lookup fields (two queries per relationType, no N+1),
+  // then apply formula fields with lookup values already present.
+  const allFields = await loadEntityFields(db, input.entityTypeId, tenantId);
+  const instances = data.map((r) => ({
+    id: r.id,
+    fields: r.fields as Record<string, unknown>,
+  }));
+  const resolvedMap = await resolveLookupFieldsBatch(
+    db,
+    tenantId,
+    instances,
+    allFields,
+  );
+
+  const resolvedData = await Promise.all(
+    data.map(async (row) => {
+      const withLookups =
+        resolvedMap.get(row.id) ?? (row.fields as Record<string, unknown>);
+      const withFormulas = await applyFormulaFields(allFields, withLookups);
+      const instance = rowToInstance(row);
+      instance.fields = withFormulas;
+      return instance;
+    }),
+  );
+
+  return { data: resolvedData, nextCursor };
 }
 
 export async function addEntityField(
@@ -360,7 +398,7 @@ export async function addEntityField(
 
   return {
     ...row,
-    config: (row.config as Record<string, unknown>) ?? {},
+    config: row.config as Record<string, unknown>,
     fieldType: row.fieldType as EntityField["fieldType"],
   };
 }
@@ -406,7 +444,7 @@ async function loadEntityFields(
 
   return rows.map((r) => ({
     ...r,
-    config: (r.config as Record<string, unknown>) ?? {},
+    config: r.config as Record<string, unknown>,
     fieldType: r.fieldType as EntityField["fieldType"],
   }));
 }
@@ -415,7 +453,7 @@ function runCrossFieldValidators(
   entityTypeName: string,
   fields: Record<string, unknown>,
   mode: "create" | "update",
-): import("./errors.js").FieldError[] {
+): FieldError[] {
   const validators = crossFieldValidators.get(entityTypeName) ?? [];
   return validators.flatMap((v) => v(fields, mode));
 }
@@ -429,7 +467,7 @@ function rowToInstance(
     tenantId: row.tenantId,
     workflowId: row.workflowId ?? null,
     currentState: row.currentState,
-    fields: (row.fields as Record<string, unknown>) ?? {},
+    fields: row.fields as Record<string, unknown>,
     createdBy: row.createdBy ?? null,
     assignedTo: row.assignedTo ?? null,
     createdAt: row.createdAt,

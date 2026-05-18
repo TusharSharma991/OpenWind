@@ -46,6 +46,10 @@ export type {
 } from "./entity-relations.js";
 export { searchEntities } from "./search.js";
 export {
+  resolveLookupFields,
+  resolveLookupFieldsBatch,
+} from "./lookup-resolver.js";
+export {
   buildZodSchema,
   transformZodErrors,
   getValidationSchema,

@@ -1,4 +1,4 @@
-import { eq, and, asc, gt, isNull, or, inArray } from "drizzle-orm";
+import { eq, and, asc, gt, isNull, or, inArray, sql } from "drizzle-orm";
 import type { DbOrTx } from "@platform/db";
 import { entityInstances, entityTypes, entityFields } from "@platform/db";
 import { logger } from "@platform/logger";
@@ -311,6 +311,14 @@ export async function listEntities(
   }
   if (input.assignedTo !== undefined) {
     conditions.push(eq(entityInstances.assignedTo, input.assignedTo));
+  }
+  if (
+    input.fieldFilters !== undefined &&
+    Object.keys(input.fieldFilters).length > 0
+  ) {
+    conditions.push(
+      sql`${entityInstances.fields} @> ${JSON.stringify(input.fieldFilters)}::jsonb`,
+    );
   }
   if (input.cursor) {
     const decoded = decodeCursor(input.cursor);

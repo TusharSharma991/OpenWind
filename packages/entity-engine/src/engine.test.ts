@@ -70,6 +70,8 @@ vi.mock("drizzle-orm", () => ({
   desc: vi.fn((col) => ({ col, op: "desc" })),
   asc: vi.fn((col) => ({ col, op: "asc" })),
   gt: vi.fn((col, val) => ({ col, val, op: "gt" })),
+  inArray: vi.fn((col, vals) => ({ col, vals, op: "inArray" })),
+  sql: vi.fn((..._args: unknown[]) => ({ op: "sql" })),
 }));
 
 // ── Mock validation layer ─────────────────────────────────────────────────────
@@ -533,5 +535,31 @@ describe("listEntities", () => {
     });
 
     expect(eq).toHaveBeenCalledWith(expect.anything(), "user-xyz");
+  });
+
+  it("applies JSONB containment filter when fieldFilters is provided", async () => {
+    const { sql } = await import("drizzle-orm");
+    vi.mocked(sql).mockClear();
+    dbMock.select.mockReturnValue(makeQueryBuilder(() => [fakeInstance]));
+
+    await listEntities(dbMock as never, TENANT_ID, {
+      entityTypeId: ENTITY_TYPE_ID,
+      fieldFilters: { priority: "high" },
+    });
+
+    expect(sql).toHaveBeenCalled();
+  });
+
+  it("skips JSONB filter when fieldFilters is an empty object", async () => {
+    const { sql } = await import("drizzle-orm");
+    vi.mocked(sql).mockClear();
+    dbMock.select.mockReturnValue(makeQueryBuilder(() => []));
+
+    await listEntities(dbMock as never, TENANT_ID, {
+      entityTypeId: ENTITY_TYPE_ID,
+      fieldFilters: {},
+    });
+
+    expect(sql).not.toHaveBeenCalled();
   });
 });

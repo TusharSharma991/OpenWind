@@ -145,4 +145,38 @@ describe("GET /entities", () => {
 
     expect(json.nextCursor).toBe("cursor-token-xyz");
   });
+
+  it("passes fieldFilters to the engine when a valid fields JSON object is provided", async () => {
+    mockListEntities.mockResolvedValue({ data: [], nextCursor: null });
+
+    const fieldsParam = encodeURIComponent(
+      JSON.stringify({ priority: "high" }),
+    );
+    await makeApp().request(`/?entityTypeId=${TYPE_ID}&fields=${fieldsParam}`);
+
+    expect(mockListEntities).toHaveBeenCalledWith(
+      {},
+      "t-aaa",
+      expect.objectContaining({ fieldFilters: { priority: "high" } }),
+    );
+  });
+
+  it("returns 400 when the fields param is not valid JSON", async () => {
+    const res = await makeApp().request(
+      `/?entityTypeId=${TYPE_ID}&fields=not-json`,
+    );
+
+    expect(res.status).toBe(400);
+    expect(mockListEntities).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when the fields param is a JSON array, not an object", async () => {
+    const fieldsParam = encodeURIComponent(JSON.stringify([1, 2, 3]));
+    const res = await makeApp().request(
+      `/?entityTypeId=${TYPE_ID}&fields=${fieldsParam}`,
+    );
+
+    expect(res.status).toBe(400);
+    expect(mockListEntities).not.toHaveBeenCalled();
+  });
 });

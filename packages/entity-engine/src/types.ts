@@ -67,6 +67,7 @@ export type ListEntitiesInput = {
   entityTypeId: string;
   state?: string | undefined;
   assignedTo?: string | undefined;
+  fieldFilters?: Record<string, unknown> | undefined;
   limit?: number | undefined;
   cursor?: string | undefined;
   includeDeleted?: boolean | undefined;

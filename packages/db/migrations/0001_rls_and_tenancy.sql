@@ -199,7 +199,15 @@ CREATE POLICY tenant_write ON api_keys
   USING      (tenant_id = current_setting('app.tenant_id', true)::UUID)
   WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::UUID);
 
--- ── 13. Grant api_keys table to app roles ────────────────────────────────
+-- ── 13. Grant api_keys table to app roles (no-op if roles don't exist) ──────
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON api_keys TO app_user;
-GRANT SELECT ON api_keys TO analytics_user;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_user') THEN
+    GRANT SELECT, INSERT, UPDATE, DELETE ON api_keys TO app_user;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'analytics_user') THEN
+    GRANT SELECT ON api_keys TO analytics_user;
+  END IF;
+END
+$$;

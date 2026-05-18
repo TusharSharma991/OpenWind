@@ -65,11 +65,11 @@ export type UpdateEntityInput = {
 
 export type ListEntitiesInput = {
   entityTypeId: string;
-  state?: string;
-  assignedTo?: string;
-  limit?: number;
-  cursor?: string;
-  includeDeleted?: boolean;
+  state?: string | undefined;
+  assignedTo?: string | undefined;
+  limit?: number | undefined;
+  cursor?: string | undefined;
+  includeDeleted?: boolean | undefined;
 };
 
 export type SearchEntitiesInput = {

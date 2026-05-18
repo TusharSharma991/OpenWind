@@ -13,6 +13,7 @@ export {
   getEntity,
   updateEntity,
   deleteEntity,
+  setEntityState,
   listEntities,
   addEntityField,
   registerValidator,

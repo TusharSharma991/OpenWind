@@ -754,3 +754,40 @@ export async function bulkSetState(
 
   return { updatedIds, errors };
 }
+
+export async function setEntityState(
+  db: DbOrTx,
+  tenantId: string,
+  instanceId: string,
+  state: string,
+): Promise<EntityInstance> {
+  const [existing] = await db
+    .select({ id: entityInstances.id })
+    .from(entityInstances)
+    .where(
+      and(
+        eq(entityInstances.id, instanceId),
+        eq(entityInstances.tenantId, tenantId),
+        isNull(entityInstances.deletedAt),
+      ),
+    )
+    .limit(1);
+
+  if (!existing) throw new EntityError("ENTITY_NOT_FOUND", { instanceId });
+
+  const [row] = await db
+    .update(entityInstances)
+    .set({ currentState: state, updatedAt: new Date() })
+    .where(
+      and(
+        eq(entityInstances.id, instanceId),
+        eq(entityInstances.tenantId, tenantId),
+      ),
+    )
+    .returning();
+
+  if (!row) throw new EntityError("ENTITY_NOT_FOUND", { instanceId });
+
+  logger.info({ tenantId, instanceId, state }, "Entity state set");
+  return rowToInstance(row);
+}

@@ -50,6 +50,8 @@ vi.mock("drizzle-orm", () => ({
   or: vi.fn((...args) => ({ args, op: "or" })),
   isNull: vi.fn((col) => ({ col, op: "isNull" })),
   count: vi.fn(() => ({ op: "count" })),
+  asc: vi.fn((col) => ({ col, op: "asc" })),
+  gt: vi.fn((col, val) => ({ col, val, op: "gt" })),
 }));
 
 vi.mock("@platform/logger", () => ({

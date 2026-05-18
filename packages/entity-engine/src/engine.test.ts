@@ -66,6 +66,8 @@ vi.mock("drizzle-orm", () => ({
   or: vi.fn((...args) => ({ args, op: "or" })),
   isNull: vi.fn((col) => ({ col, op: "isNull" })),
   desc: vi.fn((col) => ({ col, op: "desc" })),
+  asc: vi.fn((col) => ({ col, op: "asc" })),
+  gt: vi.fn((col, val) => ({ col, val, op: "gt" })),
 }));
 
 // ── Mock validation layer ─────────────────────────────────────────────────────

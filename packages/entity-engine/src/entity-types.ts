@@ -15,22 +15,22 @@ import type { CursorPage } from "./pagination.js";
 export type CreateEntityTypeInput = {
   name: string;
   plural: string;
-  icon?: string;
-  moduleId?: string;
-  allowCustomFields?: boolean;
+  icon?: string | undefined;
+  moduleId?: string | undefined;
+  allowCustomFields?: boolean | undefined;
 };
 
 export type UpdateEntityTypeInput = {
-  name?: string;
-  plural?: string;
-  icon?: string | null;
-  allowCustomFields?: boolean;
+  name?: string | undefined;
+  plural?: string | undefined;
+  icon?: string | null | undefined;
+  allowCustomFields?: boolean | undefined;
 };
 
 export type ListEntityTypesInput = {
-  moduleId?: string;
-  limit?: number;
-  cursor?: string;
+  moduleId?: string | undefined;
+  limit?: number | undefined;
+  cursor?: string | undefined;
 };
 
 export async function createEntityType(

@@ -22,7 +22,7 @@ export const updateEntityTypeHandler = factory.createHandlers(
   requireRole("admin"),
   zValidator("json", UpdateEntityTypeSchema),
   async (c) => {
-    const id = c.req.param("id");
+    const id = c.req.param("id")!;
     const input = c.req.valid("json");
     const { tenantId } = c.get("auth");
 

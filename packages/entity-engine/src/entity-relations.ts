@@ -14,10 +14,10 @@ export type CreateRelationInput = {
 };
 
 export type ListRelationsInput = {
-  direction?: "from" | "to" | "both";
-  relationType?: string;
-  cursor?: string;
-  limit?: number;
+  direction?: "from" | "to" | "both" | undefined;
+  relationType?: string | undefined;
+  cursor?: string | undefined;
+  limit?: number | undefined;
 };
 
 export async function createRelation(

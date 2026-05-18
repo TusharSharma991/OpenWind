@@ -16,7 +16,7 @@ export const listEntityFieldsHandler = factory.createHandlers(
   requireRole("admin"),
   zValidator("query", ListFieldsQuerySchema),
   async (c) => {
-    const typeId = c.req.param("typeId");
+    const typeId = c.req.param("typeId")!;
     const { cursor, limit } = c.req.valid("query");
     const { tenantId } = c.get("auth");
 

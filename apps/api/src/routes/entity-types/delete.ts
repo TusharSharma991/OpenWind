@@ -8,7 +8,7 @@ export const deleteEntityTypeHandler = factory.createHandlers(
   requireAuth(),
   requireRole("admin"),
   async (c) => {
-    const id = c.req.param("id");
+    const id = c.req.param("id")!;
     const { tenantId } = c.get("auth");
 
     try {

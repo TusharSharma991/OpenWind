@@ -14,15 +14,15 @@ import {
 import type { CursorPage } from "./pagination.js";
 
 export type UpdateEntityFieldInput = {
-  label?: string;
-  config?: Record<string, unknown>;
-  isRequired?: boolean;
-  sortOrder?: number;
+  label?: string | undefined;
+  config?: Record<string, unknown> | undefined;
+  isRequired?: boolean | undefined;
+  sortOrder?: number | undefined;
 };
 
 export type ListEntityFieldsInput = {
-  cursor?: string;
-  limit?: number;
+  cursor?: string | undefined;
+  limit?: number | undefined;
 };
 
 export async function listEntityFields(

@@ -4,6 +4,7 @@ import { env } from "@platform/config";
 import { correlationId } from "./middleware/correlation-id.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { rateLimit } from "./middleware/rate-limit.js";
+import { entityTypesRouter } from "./routes/entity-types/index.js";
 
 export function createApp(): Hono {
   const app = new Hono();
@@ -19,6 +20,8 @@ export function createApp(): Hono {
   app.use("*", errorHandler());
 
   app.get("/health", (c) => c.json({ status: "ok", env: env.NODE_ENV }));
+
+  app.route("/entity-types", entityTypesRouter);
 
   return app;
 }

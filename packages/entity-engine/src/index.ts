@@ -11,6 +11,18 @@ export {
   registerValidator,
 } from "./engine.js";
 export {
+  createEntityType,
+  getEntityType,
+  listEntityTypes,
+  updateEntityType,
+  deleteEntityType,
+} from "./entity-types.js";
+export type {
+  CreateEntityTypeInput,
+  UpdateEntityTypeInput,
+  ListEntityTypesInput,
+} from "./entity-types.js";
+export {
   buildZodSchema,
   transformZodErrors,
   getValidationSchema,

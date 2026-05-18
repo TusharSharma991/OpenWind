@@ -47,7 +47,7 @@ vi.mock("@platform/db", () => ({
     id: "id",
     tenantId: "tenant_id",
     entityTypeId: "entity_type_id",
-    deletedAt: "deleted_at",
+    deletedAt: { deleted_at: "deleted_at" },
     $inferSelect: {},
     $inferInsert: {},
   },

@@ -45,8 +45,6 @@
 --
 -- ============================================================
 
-BEGIN;
-
 -- ── 1. workflow_events: add tenant_id ─────────────────────────────────────
 -- The column was omitted from migration 0000. It must exist before RLS
 -- can filter it. Fresh schema — no backfill needed.
@@ -205,5 +203,3 @@ CREATE POLICY tenant_write ON api_keys
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON api_keys TO app_user;
 GRANT SELECT ON api_keys TO analytics_user;
-
-COMMIT;

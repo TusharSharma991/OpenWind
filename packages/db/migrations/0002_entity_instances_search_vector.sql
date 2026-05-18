@@ -4,8 +4,6 @@
 -- DROP INDEX IF EXISTS entity_instances_search_idx;
 -- ALTER TABLE "entity_instances" DROP COLUMN "search_vector";
 
-BEGIN;
-
 ALTER TABLE "entity_instances"
   ADD COLUMN "search_vector" tsvector;
 
@@ -47,5 +45,3 @@ SET search_vector = to_tsvector(
     ''
   )
 );
-
-COMMIT;

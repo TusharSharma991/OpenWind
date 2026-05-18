@@ -23,6 +23,7 @@ export interface EntityField {
   isIndexed: boolean;
   isSystem: boolean;
   sortOrder: number;
+  createdAt: Date;
 }
 
 export interface EntityInstance {

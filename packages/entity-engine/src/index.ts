@@ -25,6 +25,15 @@ export type {
   ListEntityTypesInput,
 } from "./entity-types.js";
 export {
+  listEntityFields,
+  updateEntityField,
+  deleteEntityField,
+} from "./entity-fields.js";
+export type {
+  UpdateEntityFieldInput,
+  ListEntityFieldsInput,
+} from "./entity-fields.js";
+export {
   buildZodSchema,
   transformZodErrors,
   getValidationSchema,

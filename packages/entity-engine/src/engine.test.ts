@@ -385,7 +385,11 @@ describe("listEntities", () => {
       entityTypeId: ENTITY_TYPE_ID,
       includeDeleted: true,
     });
-    expect(isNull).not.toHaveBeenCalled();
+    // isNull is called for entity-field tenant scoping — but must NOT be
+    // called with deletedAt, which would incorrectly filter deleted entities
+    expect(isNull).not.toHaveBeenCalledWith(
+      expect.objectContaining({ deleted_at: "deleted_at" }),
+    );
     expect(page.data).toHaveLength(1);
     expect(page.data[0]?.deletedAt).not.toBeNull();
   });

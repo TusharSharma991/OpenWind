@@ -16,6 +16,9 @@ export {
   listEntities,
   addEntityField,
   registerValidator,
+  bulkCreateEntities,
+  bulkUpdateEntities,
+  bulkSetState,
 } from "./engine.js";
 export {
   createEntityType,

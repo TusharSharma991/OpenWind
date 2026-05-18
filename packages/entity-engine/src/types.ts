@@ -1,4 +1,5 @@
 import type { FieldType } from "./field-types.js";
+import type { FieldError } from "./errors.js";
 
 export interface EntityType {
   id: string;
@@ -76,4 +77,26 @@ export type SearchEntitiesInput = {
   query: string;
   limit?: number | undefined;
   cursor?: string | undefined;
+};
+
+export const BULK_MAX_ITEMS = 100;
+
+export type BulkCreateResult = {
+  created: EntityInstance[];
+  errors: Array<{ index: number; fields: FieldError[] }>;
+};
+
+export type BulkUpdateResult = {
+  updated: EntityInstance[];
+  errors: Array<{
+    index: number;
+    id: string;
+    code: string;
+    fields?: FieldError[];
+  }>;
+};
+
+export type BulkSetStateResult = {
+  updatedIds: string[];
+  errors: Array<{ index: number; id: string; code: string }>;
 };

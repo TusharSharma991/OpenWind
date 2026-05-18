@@ -1,4 +1,4 @@
-import { eq, and, asc, gt, isNull, or } from "drizzle-orm";
+import { eq, and, asc, gt, isNull, or, inArray } from "drizzle-orm";
 import type { DbOrTx } from "@platform/db";
 import { entityInstances, entityTypes, entityFields } from "@platform/db";
 import { logger } from "@platform/logger";
@@ -9,6 +9,9 @@ import type {
   CreateEntityInput,
   UpdateEntityInput,
   ListEntitiesInput,
+  BulkCreateResult,
+  BulkUpdateResult,
+  BulkSetStateResult,
 } from "./types.js";
 import {
   encodeCursor,
@@ -474,4 +477,280 @@ function rowToInstance(
     updatedAt: row.updatedAt,
     deletedAt: row.deletedAt ?? null,
   };
+}
+
+// ── Bulk operations ───────────────────────────────────────────────────────────
+
+export async function bulkCreateEntities(
+  db: DbOrTx,
+  tenantId: string,
+  inputs: CreateEntityInput[],
+): Promise<BulkCreateResult> {
+  const errors: BulkCreateResult["errors"] = [];
+  const toInsert: Array<typeof entityInstances.$inferInsert> = [];
+
+  for (const [i, input] of inputs.entries()) {
+    const schema = await getValidationSchema(
+      db,
+      input.entityTypeId,
+      tenantId,
+      "create",
+    );
+    const result = schema.safeParse(input.fields);
+
+    if (!result.success) {
+      errors.push({ index: i, fields: transformZodErrors(result.error) });
+      continue;
+    }
+
+    const entityType = await loadEntityType(db, input.entityTypeId);
+    const crossErrors = runCrossFieldValidators(
+      entityType.name,
+      result.data as Record<string, unknown>,
+      "create",
+    );
+    if (crossErrors.length > 0) {
+      errors.push({ index: i, fields: crossErrors });
+      continue;
+    }
+
+    const allFields = await loadEntityFields(db, input.entityTypeId, tenantId);
+    const fieldsWithFormulas = await applyFormulaFields(
+      allFields,
+      result.data as Record<string, unknown>,
+    );
+
+    toInsert.push({
+      entityTypeId: input.entityTypeId,
+      tenantId,
+      workflowId: input.workflowId ?? null,
+      currentState: "initial",
+      fields: fieldsWithFormulas,
+      createdBy: input.createdBy ?? null,
+      assignedTo: input.assignedTo ?? null,
+    });
+  }
+
+  if (toInsert.length === 0) {
+    return { created: [], errors };
+  }
+
+  const rows = await db.insert(entityInstances).values(toInsert).returning();
+
+  const created = rows.map(rowToInstance);
+
+  logger.info(
+    { tenantId, count: created.length, errorCount: errors.length },
+    "Bulk create completed",
+  );
+
+  return { created, errors };
+}
+
+export async function bulkUpdateEntities(
+  db: DbOrTx,
+  tenantId: string,
+  updates: Array<{ id: string; input: UpdateEntityInput }>,
+): Promise<BulkUpdateResult> {
+  const updated: EntityInstance[] = [];
+  const errors: BulkUpdateResult["errors"] = [];
+
+  await Promise.all(
+    updates.map(async ({ id, input }, i) => {
+      const [existing] = await db
+        .select()
+        .from(entityInstances)
+        .where(
+          and(
+            eq(entityInstances.id, id),
+            eq(entityInstances.tenantId, tenantId),
+            isNull(entityInstances.deletedAt),
+          ),
+        )
+        .limit(1);
+
+      if (!existing) {
+        errors.push({ index: i, id, code: "ENTITY_NOT_FOUND" });
+        return;
+      }
+
+      if (input.fields !== undefined) {
+        const partialSchema = await getValidationSchema(
+          db,
+          existing.entityTypeId,
+          tenantId,
+          "update",
+        );
+        const partialResult = partialSchema.safeParse(input.fields);
+        if (!partialResult.success) {
+          errors.push({
+            index: i,
+            id,
+            code: "VALIDATION_ERROR",
+            fields: transformZodErrors(partialResult.error),
+          });
+          return;
+        }
+
+        const merged = {
+          ...(existing.fields as Record<string, unknown>),
+          ...(partialResult.data as Record<string, unknown>),
+        };
+        const fullSchema = await getValidationSchema(
+          db,
+          existing.entityTypeId,
+          tenantId,
+          "create",
+        );
+        const fullResult = fullSchema.safeParse(merged);
+        if (!fullResult.success) {
+          errors.push({
+            index: i,
+            id,
+            code: "VALIDATION_ERROR",
+            fields: transformZodErrors(fullResult.error),
+          });
+          return;
+        }
+
+        const entityType = await loadEntityType(db, existing.entityTypeId);
+        const crossErrors = runCrossFieldValidators(
+          entityType.name,
+          fullResult.data as Record<string, unknown>,
+          "update",
+        );
+        if (crossErrors.length > 0) {
+          errors.push({
+            index: i,
+            id,
+            code: "VALIDATION_ERROR",
+            fields: crossErrors,
+          });
+          return;
+        }
+
+        const allFields = await loadEntityFields(
+          db,
+          existing.entityTypeId,
+          tenantId,
+        );
+        const fieldsWithFormulas = await applyFormulaFields(
+          allFields,
+          fullResult.data as Record<string, unknown>,
+        );
+
+        const updateValues: Partial<typeof entityInstances.$inferInsert> = {
+          fields: fieldsWithFormulas,
+          updatedAt: new Date(),
+        };
+        if (input.assignedTo !== undefined) {
+          updateValues.assignedTo = input.assignedTo;
+        }
+
+        const [row] = await db
+          .update(entityInstances)
+          .set(updateValues)
+          .where(
+            and(
+              eq(entityInstances.id, id),
+              eq(entityInstances.tenantId, tenantId),
+            ),
+          )
+          .returning();
+
+        if (row) updated.push(rowToInstance(row));
+      } else if (input.assignedTo !== undefined) {
+        const [row] = await db
+          .update(entityInstances)
+          .set({ assignedTo: input.assignedTo, updatedAt: new Date() })
+          .where(
+            and(
+              eq(entityInstances.id, id),
+              eq(entityInstances.tenantId, tenantId),
+            ),
+          )
+          .returning();
+
+        if (row) updated.push(rowToInstance(row));
+      } else {
+        updated.push(rowToInstance(existing));
+      }
+    }),
+  );
+
+  logger.info(
+    { tenantId, count: updated.length, errorCount: errors.length },
+    "Bulk update completed",
+  );
+
+  return { updated, errors };
+}
+
+export async function bulkSetState(
+  db: DbOrTx,
+  tenantId: string,
+  items: Array<{ id: string; state: string }>,
+): Promise<BulkSetStateResult> {
+  if (items.length === 0) return { updatedIds: [], errors: [] };
+
+  const ids = items.map((item) => item.id);
+
+  // Load all matching instances in one query to verify tenant ownership
+  const existing = await db
+    .select({ id: entityInstances.id })
+    .from(entityInstances)
+    .where(
+      and(
+        inArray(entityInstances.id, ids),
+        eq(entityInstances.tenantId, tenantId),
+        isNull(entityInstances.deletedAt),
+      ),
+    );
+
+  const foundIds = new Set(existing.map((r) => r.id));
+
+  const errors: BulkSetStateResult["errors"] = [];
+  const validItems: Array<{ id: string; state: string }> = [];
+
+  for (const [i, item] of items.entries()) {
+    if (!foundIds.has(item.id)) {
+      errors.push({ index: i, id: item.id, code: "ENTITY_NOT_FOUND" });
+    } else {
+      validItems.push(item);
+    }
+  }
+
+  if (validItems.length === 0) return { updatedIds: [], errors };
+
+  // Group by target state — one UPDATE per unique state value
+  const byState = new Map<string, string[]>();
+  for (const item of validItems) {
+    const bucket = byState.get(item.state) ?? [];
+    bucket.push(item.id);
+    byState.set(item.state, bucket);
+  }
+
+  const updatedIds: string[] = [];
+
+  for (const [state, stateIds] of byState) {
+    const rows = await db
+      .update(entityInstances)
+      .set({ currentState: state, updatedAt: new Date() })
+      .where(
+        and(
+          inArray(entityInstances.id, stateIds),
+          eq(entityInstances.tenantId, tenantId),
+        ),
+      )
+      .returning({ id: entityInstances.id });
+
+    updatedIds.push(...rows.map((r) => r.id));
+  }
+
+  logger.info(
+    { tenantId, count: updatedIds.length, errorCount: errors.length },
+    "Bulk state-set completed",
+  );
+
+  return { updatedIds, errors };
 }

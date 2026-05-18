@@ -20,14 +20,18 @@ import { db, withTenantContext } from "@platform/db";
 import { entityInstances, entityTypes, entityRelations } from "@platform/db";
 import {
   createEntityType,
+  getEntityType,
   createEntity,
   getEntity,
   updateEntity,
   deleteEntity,
+  setEntityState,
   listEntities,
   createRelation,
   listRelations,
   searchEntities,
+  bulkUpdateEntities,
+  bulkSetState,
   EntityError,
 } from "@platform/entity-engine";
 import type { EntityType, EntityInstance } from "@platform/entity-engine";
@@ -40,6 +44,7 @@ const TENANT_B = "bbbbbbbb-0000-4000-b000-000000000002";
 // ── Shared state seeded in beforeAll ─────────────────────────────────────────
 
 let entityType: EntityType;
+let tenantBType: EntityType; // tenant-scoped type owned by Tenant B
 let instanceA: EntityInstance;
 let instanceB: EntityInstance;
 let instanceA2: EntityInstance; // second A instance for list/relation tests
@@ -52,6 +57,13 @@ beforeAll(async () => {
   entityType = await createEntityType(db, null, {
     name: `isolation_ticket_${Date.now()}`,
     plural: "isolation_tickets",
+    allowCustomFields: true,
+  });
+
+  // Tenant-scoped entity type owned exclusively by Tenant B.
+  tenantBType = await createEntityType(db, TENANT_B, {
+    name: `isolation_b_type_${Date.now()}`,
+    plural: "isolation_b_types",
     allowCustomFields: true,
   });
 
@@ -91,7 +103,11 @@ afterAll(async () => {
   await db
     .delete(entityInstances)
     .where(eq(entityInstances.entityTypeId, entityType.id));
+  await db
+    .delete(entityInstances)
+    .where(eq(entityInstances.entityTypeId, tenantBType.id));
   await db.delete(entityTypes).where(eq(entityTypes.id, entityType.id));
+  await db.delete(entityTypes).where(eq(entityTypes.id, tenantBType.id));
 });
 
 // ── GET isolation ─────────────────────────────────────────────────────────────
@@ -331,5 +347,119 @@ describe("RLS — direct query isolation within tenant context", () => {
         );
       expect(rows.length).toBeGreaterThan(0);
     });
+  });
+});
+
+// ── ENTITY TYPE isolation ─────────────────────────────────────────────────────
+
+describe("getEntityType — tenant-scoped type isolation", () => {
+  it("Tenant A cannot read a type scoped to Tenant B", async () => {
+    const err = await getEntityType(db, TENANT_A, tenantBType.id).catch(
+      (e) => e,
+    );
+    expect(err).toBeInstanceOf(EntityError);
+    expect((err as EntityError).code).toBe("ENTITY_TYPE_NOT_FOUND");
+  });
+
+  it("Tenant B can read its own scoped type", async () => {
+    const result = await getEntityType(db, TENANT_B, tenantBType.id);
+    expect(result.id).toBe(tenantBType.id);
+    expect(result.tenantId).toBe(TENANT_B);
+  });
+
+  it("both tenants can read system types (tenantId=null)", async () => {
+    const [resultA, resultB] = await Promise.all([
+      getEntityType(db, TENANT_A, entityType.id),
+      getEntityType(db, TENANT_B, entityType.id),
+    ]);
+    expect(resultA.id).toBe(entityType.id);
+    expect(resultB.id).toBe(entityType.id);
+  });
+});
+
+// ── SET STATE isolation ───────────────────────────────────────────────────────
+
+describe("setEntityState — cross-tenant state isolation", () => {
+  it("throws EntityError when Tenant A sets state on Tenant B instance", async () => {
+    await withTenantContext(TENANT_A, async (tx) => {
+      await expect(
+        setEntityState(tx, TENANT_A, instanceB.id, "hacked"),
+      ).rejects.toBeInstanceOf(EntityError);
+    });
+  });
+
+  it("Tenant B instance state is unchanged after Tenant A's failed attempt", async () => {
+    const stateBefore = instanceB.currentState;
+    await withTenantContext(TENANT_A, async (tx) => {
+      await setEntityState(tx, TENANT_A, instanceB.id, "hacked").catch(
+        () => undefined,
+      );
+    });
+    await withTenantContext(TENANT_B, async (tx) => {
+      const result = await getEntity(tx, TENANT_B, instanceB.id);
+      expect(result.currentState).toBe(stateBefore);
+    });
+  });
+
+  it("Tenant A can set state on its own instance", async () => {
+    await withTenantContext(TENANT_A, async (tx) => {
+      const result = await setEntityState(tx, TENANT_A, instanceA.id, "open");
+      expect(result.id).toBe(instanceA.id);
+    });
+  });
+});
+
+// ── BULK operations isolation ─────────────────────────────────────────────────
+
+describe("bulkUpdateEntities — cross-tenant write isolation", () => {
+  it("returns ENTITY_NOT_FOUND error for Tenant B instances, does not update them", async () => {
+    const result = await bulkUpdateEntities(db, TENANT_A, [
+      { id: instanceB.id, input: { fields: { hacked: true } } },
+    ]);
+    expect(result.updated).toHaveLength(0);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]?.code).toBe("ENTITY_NOT_FOUND");
+    expect(result.errors[0]?.id).toBe(instanceB.id);
+  });
+
+  it("valid Tenant A items succeed even when Tenant B IDs are included", async () => {
+    const result = await bulkUpdateEntities(db, TENANT_A, [
+      { id: instanceB.id, input: { fields: {} } },
+      { id: instanceA.id, input: { fields: {} } },
+    ]);
+    expect(result.updated.map((i) => i.id)).toContain(instanceA.id);
+    expect(result.updated.map((i) => i.id)).not.toContain(instanceB.id);
+    expect(result.errors[0]?.id).toBe(instanceB.id);
+  });
+});
+
+describe("bulkSetState — cross-tenant state isolation", () => {
+  it("returns ENTITY_NOT_FOUND for Tenant B instances without changing their state", async () => {
+    const stateBefore = instanceB.currentState;
+
+    const result = await bulkSetState(db, TENANT_A, [
+      { id: instanceB.id, state: "hacked" },
+    ]);
+
+    expect(result.updatedIds).not.toContain(instanceB.id);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]?.code).toBe("ENTITY_NOT_FOUND");
+
+    // Verify Tenant B's instance state is truly unchanged
+    await withTenantContext(TENANT_B, async (tx) => {
+      const check = await getEntity(tx, TENANT_B, instanceB.id);
+      expect(check.currentState).toBe(stateBefore);
+    });
+  });
+
+  it("processes Tenant A instances while rejecting Tenant B instances in the same batch", async () => {
+    const result = await bulkSetState(db, TENANT_A, [
+      { id: instanceB.id, state: "hacked" },
+      { id: instanceA2.id, state: "closed" },
+    ]);
+
+    expect(result.updatedIds).toContain(instanceA2.id);
+    expect(result.updatedIds).not.toContain(instanceB.id);
+    expect(result.errors[0]?.id).toBe(instanceB.id);
   });
 });

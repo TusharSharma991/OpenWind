@@ -1,4 +1,4 @@
-import { eq, and, or, asc, gt } from "drizzle-orm";
+import { eq, and, or, asc, gt, isNull } from "drizzle-orm";
 import type { DbOrTx } from "@platform/db";
 import { entityRelations, entityInstances } from "@platform/db";
 import { logger } from "@platform/logger";
@@ -30,7 +30,7 @@ export async function createRelation(
   tenantId: string,
   input: CreateRelationInput,
 ): Promise<EntityRelation> {
-  // Verify both instances exist and belong to this tenant
+  // Verify both instances exist, belong to this tenant, and are not soft-deleted
   const [fromInstance] = await db
     .select({ id: entityInstances.id })
     .from(entityInstances)
@@ -38,6 +38,7 @@ export async function createRelation(
       and(
         eq(entityInstances.id, input.fromInstanceId),
         eq(entityInstances.tenantId, tenantId),
+        isNull(entityInstances.deletedAt),
       ),
     )
     .limit(1);
@@ -55,6 +56,7 @@ export async function createRelation(
       and(
         eq(entityInstances.id, input.toInstanceId),
         eq(entityInstances.tenantId, tenantId),
+        isNull(entityInstances.deletedAt),
       ),
     )
     .limit(1);

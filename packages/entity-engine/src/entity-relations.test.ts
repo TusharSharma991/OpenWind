@@ -38,6 +38,7 @@ vi.mock("@platform/db", () => ({
   entityInstances: {
     id: "id",
     tenantId: "tenant_id",
+    deletedAt: { deleted_at: "deleted_at" },
   },
 }));
 
@@ -45,6 +46,7 @@ vi.mock("drizzle-orm", () => ({
   eq: vi.fn((col, val) => ({ col, val, op: "eq" })),
   and: vi.fn((...args) => ({ args, op: "and" })),
   or: vi.fn((...args) => ({ args, op: "or" })),
+  isNull: vi.fn((col) => ({ col, op: "isNull" })),
   asc: vi.fn((col) => ({ col, op: "asc" })),
   gt: vi.fn((col, val) => ({ col, val, op: "gt" })),
 }));
@@ -114,6 +116,37 @@ describe("createRelation", () => {
       createRelation(dbMock as never, TENANT_ID, {
         fromInstanceId: FROM_ID,
         toInstanceId: "nonexistent",
+        relationType: "parent",
+      }),
+    ).rejects.toMatchObject({ code: "RELATION_TARGET_NOT_FOUND" });
+
+    expect(dbMock.insert).not.toHaveBeenCalled();
+  });
+
+  it("throws RELATION_TARGET_NOT_FOUND when fromInstance is soft-deleted", async () => {
+    // isNull(deletedAt) filter causes soft-deleted instances to return empty
+    dbMock.select.mockReturnValueOnce(makeQueryBuilder(() => []));
+
+    await expect(
+      createRelation(dbMock as never, TENANT_ID, {
+        fromInstanceId: FROM_ID,
+        toInstanceId: TO_ID,
+        relationType: "parent",
+      }),
+    ).rejects.toMatchObject({ code: "RELATION_TARGET_NOT_FOUND" });
+
+    expect(dbMock.insert).not.toHaveBeenCalled();
+  });
+
+  it("throws RELATION_TARGET_NOT_FOUND when toInstance is soft-deleted", async () => {
+    dbMock.select
+      .mockReturnValueOnce(makeQueryBuilder(() => [{ id: FROM_ID }]))
+      .mockReturnValueOnce(makeQueryBuilder(() => []));
+
+    await expect(
+      createRelation(dbMock as never, TENANT_ID, {
+        fromInstanceId: FROM_ID,
+        toInstanceId: TO_ID,
         relationType: "parent",
       }),
     ).rejects.toMatchObject({ code: "RELATION_TARGET_NOT_FOUND" });

@@ -34,10 +34,7 @@ export {
   updateEntityField,
   deleteEntityField,
 } from "./entity-fields.js";
-export type {
-  UpdateEntityFieldInput,
-  ListEntityFieldsInput,
-} from "./entity-fields.js";
+export type { UpdateEntityFieldInput } from "./entity-fields.js";
 export {
   createRelation,
   listRelations,

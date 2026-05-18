@@ -48,7 +48,6 @@ vi.mock("drizzle-orm", () => ({
   or: vi.fn((...args) => ({ args, op: "or" })),
   isNull: vi.fn((col) => ({ col, op: "isNull" })),
   asc: vi.fn((col) => ({ col, op: "asc" })),
-  gt: vi.fn((col, val) => ({ col, val, op: "gt" })),
 }));
 
 vi.mock("@platform/logger", () => ({
@@ -95,33 +94,29 @@ const fakeSystemField = {
 describe("listEntityFields", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("returns a cursor page of fields for the entity type", async () => {
+  it("returns all fields for the entity type", async () => {
     dbMock.select.mockReturnValue(makeQueryBuilder(() => [fakeField]));
-    const page = await listEntityFields(dbMock as never, TENANT_ID, TYPE_ID);
-    expect(page.data).toHaveLength(1);
-    expect(page.data[0]?.name).toBe("subject");
-    expect(page.nextCursor).toBeNull();
+    const fields = await listEntityFields(dbMock as never, TENANT_ID, TYPE_ID);
+    expect(fields).toHaveLength(1);
+    expect(fields[0]?.name).toBe("subject");
   });
 
-  it("returns empty page when no fields found", async () => {
+  it("returns empty array when no fields found", async () => {
     dbMock.select.mockReturnValue(makeQueryBuilder(() => []));
-    const page = await listEntityFields(dbMock as never, TENANT_ID, TYPE_ID);
-    expect(page.data).toHaveLength(0);
-    expect(page.nextCursor).toBeNull();
+    const fields = await listEntityFields(dbMock as never, TENANT_ID, TYPE_ID);
+    expect(fields).toHaveLength(0);
   });
 
-  it("sets nextCursor when more results exist beyond the limit", async () => {
-    const rows = Array.from({ length: 3 }, (_, i) => ({
-      ...fakeField,
-      id: `field-${i}`,
-      createdAt: new Date(Date.now() + i * 1000),
-    }));
+  it("returns multiple fields in sortOrder order", async () => {
+    const rows = [
+      { ...fakeField, id: "field-1", sortOrder: 2 },
+      { ...fakeField, id: "field-2", sortOrder: 0 },
+      { ...fakeField, id: "field-3", sortOrder: 1 },
+    ];
     dbMock.select.mockReturnValue(makeQueryBuilder(() => rows));
-    const page = await listEntityFields(dbMock as never, TENANT_ID, TYPE_ID, {
-      limit: 2,
-    });
-    expect(page.data).toHaveLength(2);
-    expect(page.nextCursor).not.toBeNull();
+    const fields = await listEntityFields(dbMock as never, TENANT_ID, TYPE_ID);
+    // ordering is done by DB; mock returns as-is, but we verify all 3 come back
+    expect(fields).toHaveLength(3);
   });
 });
 
@@ -164,6 +159,20 @@ describe("updateEntityField", () => {
         label: "x",
       }),
     ).rejects.toMatchObject({ code: "FIELD_NOT_FOUND" });
+    expect(dbMock.update).not.toHaveBeenCalled();
+  });
+
+  it("throws SYSTEM_FIELD_IMMUTABLE when attempting to update a system field", async () => {
+    dbMock.select.mockReturnValue(makeQueryBuilder(() => [fakeSystemField]));
+    await expect(
+      updateEntityField(
+        dbMock as never,
+        TENANT_ID,
+        TYPE_ID,
+        fakeSystemField.id,
+        { label: "New Label" },
+      ),
+    ).rejects.toMatchObject({ code: "SYSTEM_FIELD_IMMUTABLE" });
     expect(dbMock.update).not.toHaveBeenCalled();
   });
 });

@@ -1,17 +1,10 @@
-import { eq, and, asc, gt, or, isNull } from "drizzle-orm";
+import { eq, and, asc, or, isNull } from "drizzle-orm";
 import type { DbOrTx } from "@platform/db";
 import { entityFields } from "@platform/db";
 import { logger } from "@platform/logger";
 import type { EntityField } from "./types.js";
 import { EntityError } from "./errors.js";
 import { invalidateSchemaCache } from "./validation/index.js";
-import {
-  encodeCursor,
-  decodeCursor,
-  DEFAULT_PAGE_SIZE,
-  MAX_PAGE_SIZE,
-} from "./pagination.js";
-import type { CursorPage } from "./pagination.js";
 
 export type UpdateEntityFieldInput = {
   label?: string | undefined;
@@ -20,52 +13,25 @@ export type UpdateEntityFieldInput = {
   sortOrder?: number | undefined;
 };
 
-export type ListEntityFieldsInput = {
-  cursor?: string | undefined;
-  limit?: number | undefined;
-};
-
+// Fields per entity type are bounded in size, so we return all sorted by
+// sortOrder rather than paginating — this is the natural form-layout order.
 export async function listEntityFields(
   db: DbOrTx,
   tenantId: string,
   entityTypeId: string,
-  input: ListEntityFieldsInput = {},
-): Promise<CursorPage<EntityField>> {
-  const limit = Math.min(input.limit ?? DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
-
-  const conditions = [
-    eq(entityFields.entityTypeId, entityTypeId),
-    or(isNull(entityFields.tenantId), eq(entityFields.tenantId, tenantId)),
-  ];
-
-  if (input.cursor) {
-    const decoded = decodeCursor(input.cursor);
-    if (decoded) {
-      const cursorCond = or(
-        gt(entityFields.createdAt, decoded.createdAt),
-        and(
-          eq(entityFields.createdAt, decoded.createdAt),
-          gt(entityFields.id, decoded.id),
-        ),
-      );
-      if (cursorCond) conditions.push(cursorCond);
-    }
-  }
-
+): Promise<EntityField[]> {
   const rows = await db
     .select()
     .from(entityFields)
-    .where(and(...conditions))
-    .orderBy(asc(entityFields.createdAt), asc(entityFields.id))
-    .limit(limit + 1);
+    .where(
+      and(
+        eq(entityFields.entityTypeId, entityTypeId),
+        or(isNull(entityFields.tenantId), eq(entityFields.tenantId, tenantId)),
+      ),
+    )
+    .orderBy(asc(entityFields.sortOrder), asc(entityFields.id));
 
-  const hasMore = rows.length > limit;
-  const data = hasMore ? rows.slice(0, limit) : rows;
-  const last = data[data.length - 1];
-  const nextCursor =
-    hasMore && last ? encodeCursor(last.createdAt, last.id) : null;
-
-  return { data: data.map(rowToEntityField), nextCursor };
+  return rows.map(rowToEntityField);
 }
 
 export async function updateEntityField(
@@ -88,6 +54,10 @@ export async function updateEntityField(
     .limit(1);
 
   if (!existing) throw new EntityError("FIELD_NOT_FOUND", { fieldId });
+
+  if (existing.isSystem) {
+    throw new EntityError("SYSTEM_FIELD_IMMUTABLE", { fieldId });
+  }
 
   const updates: Partial<typeof entityFields.$inferInsert> = {};
   if (input.label !== undefined) updates.label = input.label;

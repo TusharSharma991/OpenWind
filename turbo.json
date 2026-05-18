@@ -27,7 +27,7 @@
     "test": {
       "dependsOn": ["^build"],
       "inputs": ["src/**", "tests/**", "vitest.config.*"],
-      "outputs": ["coverage/**"],
+      "outputs": [],
       "env": ["DATABASE_URL", "REDIS_URL", "NODE_ENV"]
     },
     "test:isolation": {

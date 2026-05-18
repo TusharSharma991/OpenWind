@@ -1,4 +1,5 @@
 import type { FieldType } from "./field-types.js";
+import type { FieldError } from "./errors.js";
 
 export interface EntityType {
   id: string;
@@ -23,6 +24,7 @@ export interface EntityField {
   isIndexed: boolean;
   isSystem: boolean;
   sortOrder: number;
+  createdAt: Date;
 }
 
 export interface EntityInstance {
@@ -36,6 +38,7 @@ export interface EntityInstance {
   assignedTo: string | null;
   createdAt: Date;
   updatedAt: Date;
+  deletedAt: Date | null;
 }
 
 export interface EntityRelation {
@@ -50,20 +53,51 @@ export interface EntityRelation {
 export type CreateEntityInput = {
   entityTypeId: string;
   fields: Record<string, unknown>;
-  createdBy?: string;
-  assignedTo?: string;
-  workflowId?: string;
+  createdBy?: string | undefined;
+  assignedTo?: string | undefined;
+  workflowId?: string | undefined;
 };
 
 export type UpdateEntityInput = {
-  fields?: Record<string, unknown>;
-  assignedTo?: string | null;
+  fields?: Record<string, unknown> | undefined;
+  assignedTo?: string | null | undefined;
 };
 
 export type ListEntitiesInput = {
   entityTypeId: string;
-  state?: string;
-  assignedTo?: string;
-  limit?: number;
-  offset?: number;
+  state?: string | undefined;
+  assignedTo?: string | undefined;
+  fieldFilters?: Record<string, unknown> | undefined;
+  limit?: number | undefined;
+  cursor?: string | undefined;
+  includeDeleted?: boolean | undefined;
+};
+
+export type SearchEntitiesInput = {
+  entityTypeId: string;
+  query: string;
+  limit?: number | undefined;
+  cursor?: string | undefined;
+};
+
+export const BULK_MAX_ITEMS = 100;
+
+export type BulkCreateResult = {
+  created: EntityInstance[];
+  errors: Array<{ index: number; fields: FieldError[] }>;
+};
+
+export type BulkUpdateResult = {
+  updated: EntityInstance[];
+  errors: Array<{
+    index: number;
+    id: string;
+    code: string;
+    fields?: FieldError[];
+  }>;
+};
+
+export type BulkSetStateResult = {
+  updatedIds: string[];
+  errors: Array<{ index: number; id: string; code: string }>;
 };

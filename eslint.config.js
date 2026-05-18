@@ -2,7 +2,6 @@ import js from "@eslint/js";
 import tsPlugin from "@typescript-eslint/eslint-plugin";
 import tsParser from "@typescript-eslint/parser";
 import importPlugin from "eslint-plugin-import";
-import noRestrictedImports from "eslint-plugin-no-relative-import-paths";
 import globals from "globals";
 
 /**
@@ -85,6 +84,10 @@ export default [
       "@typescript-eslint/no-non-null-assertion": "error",
 
       // ── General quality ───────────────────────────────────────────────
+      // Disabled in favour of @typescript-eslint/no-unused-vars (which
+      // understands TypeScript type-only parameter names and has the
+      // correct argsIgnorePattern config).
+      "no-unused-vars": "off",
       "no-console": ["error", { allow: ["warn", "error"] }],
       "no-debugger": "error",
       "prefer-const": "error",
@@ -184,7 +187,7 @@ export default [
   // vitest, not tsc). Disabling type-checked rules avoids "file not in project"
   // errors while still linting test code for obvious mistakes.
   {
-    files: ["**/*.test.ts", "**/*.spec.ts", "tests/**/*.ts"],
+    files: ["**/*.test.ts", "**/*.spec.ts", "tests/**/*.ts", "**/vitest.config.ts"],
     languageOptions: {
       parserOptions: {
         project: false,

@@ -8,7 +8,7 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "typecheck": "tsc --noEmit",
-    "db:migrate": "drizzle-kit migrate",
+    "db:migrate": "tsx src/run-migrations.ts",
     "db:migrate:create": "drizzle-kit generate",
     "db:seed": "tsx src/seed.ts",
     "db:studio": "drizzle-kit studio",

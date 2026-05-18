@@ -153,7 +153,9 @@ describe("updateEntity — cross-tenant write isolation", () => {
   it("throws EntityError when Tenant A updates Tenant B instance", async () => {
     await withTenantContext(TENANT_A, async (tx) => {
       await expect(
-        updateEntity(tx, TENANT_A, instanceB.id, { fields: { note: "hacked" } }),
+        updateEntity(tx, TENANT_A, instanceB.id, {
+          fields: { note: "hacked" },
+        }),
       ).rejects.toBeInstanceOf(EntityError);
     });
   });

@@ -15,6 +15,8 @@ export function handleEntityError(c: Context, err: unknown): Response {
       case "ENTITY_TYPE_NOT_FOUND":
       case "ENTITY_NOT_FOUND":
       case "FIELD_NOT_FOUND":
+      case "RELATION_NOT_FOUND":
+      case "RELATION_TARGET_NOT_FOUND":
         return c.json({ error: err.code, message: "Not found" }, 404) as Response;
       case "ENTITY_TYPE_HAS_INSTANCES":
         return c.json(

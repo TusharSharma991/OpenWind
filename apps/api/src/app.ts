@@ -5,6 +5,7 @@ import { correlationId } from "./middleware/correlation-id.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { rateLimit } from "./middleware/rate-limit.js";
 import { entityTypesRouter } from "./routes/entity-types/index.js";
+import { entitiesRouter } from "./routes/entities/index.js";
 
 export function createApp(): Hono {
   const app = new Hono();
@@ -22,6 +23,7 @@ export function createApp(): Hono {
   app.get("/health", (c) => c.json({ status: "ok", env: env.NODE_ENV }));
 
   app.route("/entity-types", entityTypesRouter);
+  app.route("/entities", entitiesRouter);
 
   return app;
 }

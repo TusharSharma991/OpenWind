@@ -34,6 +34,15 @@ export type {
   ListEntityFieldsInput,
 } from "./entity-fields.js";
 export {
+  createRelation,
+  listRelations,
+  deleteRelation,
+} from "./entity-relations.js";
+export type {
+  CreateRelationInput,
+  ListRelationsInput,
+} from "./entity-relations.js";
+export {
   buildZodSchema,
   transformZodErrors,
   getValidationSchema,

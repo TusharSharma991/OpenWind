@@ -53,14 +53,14 @@ export interface EntityRelation {
 export type CreateEntityInput = {
   entityTypeId: string;
   fields: Record<string, unknown>;
-  createdBy?: string;
-  assignedTo?: string;
-  workflowId?: string;
+  createdBy?: string | undefined;
+  assignedTo?: string | undefined;
+  workflowId?: string | undefined;
 };
 
 export type UpdateEntityInput = {
-  fields?: Record<string, unknown>;
-  assignedTo?: string | null;
+  fields?: Record<string, unknown> | undefined;
+  assignedTo?: string | null | undefined;
 };
 
 export type ListEntitiesInput = {

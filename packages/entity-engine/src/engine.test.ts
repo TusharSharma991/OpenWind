@@ -47,6 +47,8 @@ vi.mock("@platform/db", () => ({
     id: "id",
     tenantId: "tenant_id",
     entityTypeId: "entity_type_id",
+    currentState: "current_state",
+    assignedTo: "assigned_to",
     deletedAt: { deleted_at: "deleted_at" },
     $inferSelect: {},
     $inferInsert: {},
@@ -96,8 +98,15 @@ vi.mock("@platform/config", () => ({
 
 // ── Import engine AFTER mocks ─────────────────────────────────────────────────
 
-const { createEntity, getEntity, updateEntity, deleteEntity, listEntities } =
-  await import("./engine.js");
+const {
+  createEntity,
+  getEntity,
+  updateEntity,
+  deleteEntity,
+  listEntities,
+  setEntityState,
+  addEntityField,
+} = await import("./engine.js");
 
 const TENANT_ID = "tenant-aaa";
 const ENTITY_TYPE_ID = "type-bbb";
@@ -327,6 +336,125 @@ describe("deleteEntity", () => {
   });
 });
 
+describe("setEntityState", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("updates the state and returns the updated instance", async () => {
+    dbMock.select.mockReturnValue(
+      makeQueryBuilder(() => [{ id: INSTANCE_ID }]),
+    );
+    mockUpdateReturning.mockResolvedValue([
+      { ...fakeInstance, currentState: "closed" },
+    ]);
+
+    const result = await setEntityState(
+      dbMock as never,
+      TENANT_ID,
+      INSTANCE_ID,
+      "closed",
+    );
+
+    expect(result.currentState).toBe("closed");
+    expect(dbMock.update).toHaveBeenCalledTimes(1);
+  });
+
+  it("throws EntityError when the entity does not exist", async () => {
+    dbMock.select.mockReturnValue(makeQueryBuilder(() => []));
+
+    await expect(
+      setEntityState(dbMock as never, TENANT_ID, "missing-id", "open"),
+    ).rejects.toBeInstanceOf(EntityError);
+    expect(dbMock.update).not.toHaveBeenCalled();
+  });
+
+  it("throws EntityError for a soft-deleted entity (isNull filter returns empty)", async () => {
+    dbMock.select.mockReturnValue(makeQueryBuilder(() => []));
+
+    await expect(
+      setEntityState(dbMock as never, TENANT_ID, INSTANCE_ID, "open"),
+    ).rejects.toBeInstanceOf(EntityError);
+    expect(dbMock.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("addEntityField", () => {
+  const fakeField = {
+    id: "field-1",
+    entityTypeId: ENTITY_TYPE_ID,
+    tenantId: TENANT_ID,
+    name: "priority",
+    label: "Priority",
+    fieldType: "text" as const,
+    config: {},
+    isRequired: false,
+    isIndexed: false,
+    isSystem: false,
+    sortOrder: 0,
+    createdAt: new Date(),
+  };
+
+  const fieldInput = {
+    entityTypeId: ENTITY_TYPE_ID,
+    name: "priority",
+    label: "Priority",
+    fieldType: "text" as const,
+    config: {},
+    isRequired: false,
+    isIndexed: false,
+    isSystem: false,
+    sortOrder: 0,
+    createdAt: new Date(),
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("inserts the field, invalidates schema cache, and returns the new field", async () => {
+    dbMock.select.mockReturnValue(makeQueryBuilder(() => [fakeEntityType]));
+    mockInsertReturning.mockResolvedValue([fakeField]);
+    const { invalidateSchemaCache } = await import("./validation/index.js");
+
+    const result = await addEntityField(
+      dbMock as never,
+      TENANT_ID,
+      ENTITY_TYPE_ID,
+      fieldInput,
+    );
+
+    expect(result.name).toBe("priority");
+    expect(dbMock.insert).toHaveBeenCalledTimes(1);
+    expect(invalidateSchemaCache).toHaveBeenCalledWith(
+      ENTITY_TYPE_ID,
+      TENANT_ID,
+    );
+  });
+
+  it("throws EntityError when the entity type is not found", async () => {
+    dbMock.select.mockReturnValue(makeQueryBuilder(() => []));
+
+    await expect(
+      addEntityField(dbMock as never, TENANT_ID, "nonexistent", fieldInput),
+    ).rejects.toBeInstanceOf(EntityError);
+    expect(dbMock.insert).not.toHaveBeenCalled();
+  });
+
+  it("throws EntityError when the entity type forbids custom fields", async () => {
+    dbMock.select.mockReturnValue(
+      makeQueryBuilder(() => [
+        { ...fakeEntityType, tenantId: TENANT_ID, allowCustomFields: false },
+      ]),
+    );
+
+    await expect(
+      addEntityField(dbMock as never, TENANT_ID, ENTITY_TYPE_ID, fieldInput),
+    ).rejects.toBeInstanceOf(EntityError);
+    expect(dbMock.insert).not.toHaveBeenCalled();
+  });
+});
+
 describe("listEntities", () => {
   it("returns a cursor page of entity instances", async () => {
     dbMock.select.mockReturnValue(makeQueryBuilder(() => [fakeInstance]));
@@ -392,5 +520,18 @@ describe("listEntities", () => {
     );
     expect(page.data).toHaveLength(1);
     expect(page.data[0]?.deletedAt).not.toBeNull();
+  });
+
+  it("filters by assignedTo when provided", async () => {
+    const { eq } = await import("drizzle-orm");
+    vi.mocked(eq).mockClear();
+    dbMock.select.mockReturnValue(makeQueryBuilder(() => [fakeInstance]));
+
+    await listEntities(dbMock as never, TENANT_ID, {
+      entityTypeId: ENTITY_TYPE_ID,
+      assignedTo: "user-xyz",
+    });
+
+    expect(eq).toHaveBeenCalledWith(expect.anything(), "user-xyz");
   });
 });

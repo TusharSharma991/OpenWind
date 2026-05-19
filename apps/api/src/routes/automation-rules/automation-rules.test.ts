@@ -1,0 +1,239 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { Hono } from "hono";
+import type { Context, Next } from "hono";
+import type { AuthContext } from "@platform/auth";
+import type * as AutomationEngine from "@platform/automation-engine";
+
+const mockCreate = vi.fn();
+const mockList = vi.fn();
+const mockGet = vi.fn();
+const mockUpdate = vi.fn();
+const mockDelete = vi.fn();
+
+vi.mock("@platform/auth", () => ({
+  requireAuth:
+    () =>
+    async (c: Context<{ Variables: { auth: AuthContext } }>, next: Next) => {
+      c.set("auth", {
+        tenantId: "t-aaa",
+        userId: "u-bbb",
+        roles: ["admin"],
+        email: "test@example.com",
+      });
+      await next();
+    },
+  requireRole: () => async (_c: Context, next: Next) => {
+    await next();
+  },
+}));
+
+vi.mock("@platform/db", () => ({ db: {} }));
+
+vi.mock("@platform/automation-engine", async (importOriginal) => {
+  const real = await importOriginal<typeof AutomationEngine>();
+  return {
+    ...real,
+    createAutomationRule: (...args: unknown[]) => mockCreate(...args),
+    listAutomationRules: (...args: unknown[]) => mockList(...args),
+    getAutomationRule: (...args: unknown[]) => mockGet(...args),
+    updateAutomationRule: (...args: unknown[]) => mockUpdate(...args),
+    deleteAutomationRule: (...args: unknown[]) => mockDelete(...args),
+  };
+});
+
+vi.mock("@platform/logger", () => ({
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+
+const { createAutomationRuleHandler } = await import("./create.js");
+const { listAutomationRulesHandler } = await import("./list.js");
+const { getAutomationRuleHandler } = await import("./get.js");
+const { updateAutomationRuleHandler } = await import("./update.js");
+const { deleteAutomationRuleHandler } = await import("./delete.js");
+
+const RULE_ID = "00000000-0000-0000-0000-000000000020";
+
+const fakeRule = {
+  id: RULE_ID,
+  tenantId: "t-aaa",
+  name: "Close on transition",
+  isEnabled: true,
+  triggerType: "workflow.transitioned" as const,
+  triggerConfig: {},
+  conditions: null,
+  actions: [{ type: "notify" as const, config: { channel: "email" } }],
+  priority: 0,
+  createdAt: new Date("2026-01-01"),
+  updatedAt: new Date("2026-01-01"),
+};
+
+function makeApp() {
+  const app = new Hono<{ Variables: { auth: AuthContext } }>();
+  app.post("/", ...createAutomationRuleHandler);
+  app.get("/", ...listAutomationRulesHandler);
+  app.get("/:id", ...getAutomationRuleHandler);
+  app.patch("/:id", ...updateAutomationRuleHandler);
+  app.delete("/:id", ...deleteAutomationRuleHandler);
+  return app;
+}
+
+describe("POST /automation-rules", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("returns 201 with created rule", async () => {
+    mockCreate.mockResolvedValue(fakeRule);
+
+    const res = await makeApp().request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Close on transition",
+        triggerType: "workflow.transitioned",
+        triggerConfig: {},
+        actions: [{ type: "notify", config: { channel: "email" } }],
+      }),
+    });
+
+    expect(res.status).toBe(201);
+    const json = await res.json();
+    expect(json.data.id).toBe(RULE_ID);
+    expect(mockCreate).toHaveBeenCalledWith(
+      {},
+      "t-aaa",
+      expect.objectContaining({
+        name: "Close on transition",
+        triggerType: "workflow.transitioned",
+      }),
+    );
+  });
+
+  it("returns 400 when triggerType is unknown", async () => {
+    const res = await makeApp().request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "x",
+        triggerType: "not.a.valid.trigger",
+        triggerConfig: {},
+        actions: [{ type: "notify", config: {} }],
+      }),
+    });
+    expect(res.status).toBe(400);
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when actions array is empty", async () => {
+    const res = await makeApp().request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "x",
+        triggerType: "entity.created",
+        triggerConfig: {},
+        actions: [],
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("GET /automation-rules", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("returns 200 with list of rules", async () => {
+    mockList.mockResolvedValue([fakeRule]);
+
+    const res = await makeApp().request("/");
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.data).toHaveLength(1);
+    expect(mockList).toHaveBeenCalledWith({}, "t-aaa", {
+      triggerType: undefined,
+      isEnabled: undefined,
+    });
+  });
+
+  it("passes triggerType and enabled filters", async () => {
+    mockList.mockResolvedValue([]);
+
+    await makeApp().request("/?triggerType=entity.created&enabled=true");
+
+    expect(mockList).toHaveBeenCalledWith({}, "t-aaa", {
+      triggerType: "entity.created",
+      isEnabled: true,
+    });
+  });
+});
+
+describe("GET /automation-rules/:id", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("returns 200 with rule", async () => {
+    mockGet.mockResolvedValue(fakeRule);
+
+    const res = await makeApp().request(`/${RULE_ID}`);
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.data.id).toBe(RULE_ID);
+  });
+
+  it("returns 404 when rule not found", async () => {
+    const { AutomationError } = await import("@platform/automation-engine");
+    mockGet.mockRejectedValue(new AutomationError("RULE_NOT_FOUND"));
+
+    const res = await makeApp().request(`/${RULE_ID}`);
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("PATCH /automation-rules/:id", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("returns 200 with updated rule", async () => {
+    mockUpdate.mockResolvedValue({ ...fakeRule, isEnabled: false });
+
+    const res = await makeApp().request(`/${RULE_ID}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ isEnabled: false }),
+    });
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.data.isEnabled).toBe(false);
+  });
+
+  it("returns 404 when rule not found", async () => {
+    const { AutomationError } = await import("@platform/automation-engine");
+    mockUpdate.mockRejectedValue(new AutomationError("RULE_NOT_FOUND"));
+
+    const res = await makeApp().request(`/${RULE_ID}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "x" }),
+    });
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("DELETE /automation-rules/:id", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("returns 204 on success", async () => {
+    mockDelete.mockResolvedValue(undefined);
+
+    const res = await makeApp().request(`/${RULE_ID}`, { method: "DELETE" });
+    expect(res.status).toBe(204);
+    expect(mockDelete).toHaveBeenCalledWith({}, "t-aaa", RULE_ID);
+  });
+
+  it("returns 404 when rule not found", async () => {
+    const { AutomationError } = await import("@platform/automation-engine");
+    mockDelete.mockRejectedValue(new AutomationError("RULE_NOT_FOUND"));
+
+    const res = await makeApp().request(`/${RULE_ID}`, { method: "DELETE" });
+    expect(res.status).toBe(404);
+  });
+});

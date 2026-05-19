@@ -61,6 +61,7 @@ export class AutomationError extends Error {
   constructor(
     public readonly code:
       | "RULE_NOT_FOUND"
+      | "RULE_CREATE_FAILED"
       | "MAX_DEPTH_EXCEEDED"
       | "ACTION_FAILED"
       | "INVALID_EVENT_PAYLOAD",

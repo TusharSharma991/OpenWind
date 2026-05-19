@@ -1,3 +1,9 @@
+-- Down migration (rollback):
+-- DROP POLICY IF EXISTS "dead_letter_events_tenant_isolation" ON "dead_letter_events";
+-- ALTER TABLE "dead_letter_events" DISABLE ROW LEVEL SECURITY;
+-- DROP INDEX IF EXISTS "dead_letter_events_tenant_created_idx";
+-- DROP TABLE IF EXISTS "dead_letter_events";
+
 CREATE TABLE "dead_letter_events" (
   "id"                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   "tenant_id"         uuid NOT NULL,
@@ -12,3 +18,9 @@ CREATE TABLE "dead_letter_events" (
 
 CREATE INDEX "dead_letter_events_tenant_created_idx"
   ON "dead_letter_events" ("tenant_id", "created_at");
+
+ALTER TABLE "dead_letter_events" ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "dead_letter_events_tenant_isolation"
+  ON "dead_letter_events"
+  USING (tenant_id = current_setting('app.tenant_id')::uuid);

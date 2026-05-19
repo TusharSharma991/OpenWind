@@ -27,13 +27,20 @@ export async function executeTransitionAction(
     ...(config.comment !== undefined && { comment: config.comment }),
   });
 
+  // Propagate entityTypeId from the triggering event when available (all four
+  // TriggerEvent variants carry entityTypeId). When config.instanceId targets
+  // a different entity than the one that fired the rule, the entityTypeId will
+  // be wrong; a full fix requires a DB lookup which is deferred.
+  const entityTypeId =
+    "entityTypeId" in event ? (event.entityTypeId as string) : instanceId;
+
   // Recursively execute rules triggered by this transition (depth + 1 for guard)
   const followUpEvent = {
     version: 1 as const,
     eventType: "workflow.transitioned" as const,
     tenantId,
     instanceId,
-    entityTypeId: workflowEvent.instanceId, // placeholder — full event from DB would be needed
+    entityTypeId,
     workflowId: workflowEvent.workflowId,
     fromState: workflowEvent.fromState,
     toState: workflowEvent.toState,

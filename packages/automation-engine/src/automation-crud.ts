@@ -45,7 +45,7 @@ export async function createAutomationRule(
     })
     .returning();
 
-  if (!row) throw new AutomationError("RULE_NOT_FOUND");
+  if (!row) throw new AutomationError("RULE_CREATE_FAILED");
   return rowToRule(row);
 }
 

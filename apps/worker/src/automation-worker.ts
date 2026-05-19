@@ -5,7 +5,9 @@ import { executeAutomationRules } from "@platform/automation-engine";
 import { env } from "@platform/config";
 import { logger } from "@platform/logger";
 
-const connection = new Redis(env.REDIS_URL);
+// maxRetriesPerRequest must be null for BullMQ worker connections;
+// without it a transient Redis blip throws MaxRetriesPerRequestError and drops jobs.
+const connection = new Redis(env.REDIS_URL, { maxRetriesPerRequest: null });
 
 interface AutomationJobData {
   outboxEventId: string;

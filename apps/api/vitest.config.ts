@@ -4,7 +4,18 @@ export default defineConfig({
   test: {
     environment: "node",
     deps: {
-      inline: ["@platform/logger"],
+      // Inline workspace packages so Vitest uses a single module instance
+      // for both the test file and the module under test. Without this,
+      // the test's import and the handler's import resolve through different
+      // loaders, producing separate class objects that fail instanceof checks.
+      inline: [
+        "@platform/workflow-engine",
+        "@platform/entity-engine",
+        "@platform/logger",
+        "@platform/auth",
+        "@platform/db",
+        "@platform/config",
+      ],
     },
     // Provide all required @platform/config env vars so tests don't need to
     // vi.mock the config module. CI job env vars take precedence over these

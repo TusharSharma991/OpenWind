@@ -1,8 +1,9 @@
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { requireAuth, requireRole } from "@platform/auth";
-import { db, withTenantContext } from "@platform/db";
+import { withTenantContext } from "@platform/db";
 import { executeTransition } from "@platform/workflow-engine";
+import type { TransitionRequest } from "@platform/workflow-engine";
 import { factory } from "./factory.js";
 import { handleWorkflowError } from "../../lib/handle-workflow-error.js";
 
@@ -24,17 +25,18 @@ export const executeTransitionHandler = factory.createHandlers(
       c.req.valid("json");
 
     try {
+      const request: TransitionRequest = {
+        instanceId,
+        transitionId,
+        actorId: userId,
+        actorRoles: roles,
+        triggeredBy: "user",
+        ...(comment !== undefined && { comment }),
+        ...(idempotencyKey !== undefined && { idempotencyKey }),
+        ...(metadata !== undefined && { metadata }),
+      };
       const event = await withTenantContext(tenantId, (tx) =>
-        executeTransition(tx, tenantId, {
-          instanceId,
-          transitionId,
-          actorId: userId,
-          actorRoles: roles,
-          comment,
-          idempotencyKey,
-          metadata,
-          triggeredBy: "user",
-        }),
+        executeTransition(tx, tenantId, request),
       );
       return c.json({ data: event });
     } catch (err) {

@@ -15,6 +15,7 @@ vi.mock("@platform/logger", () => ({
 function makeApp(thrownError: unknown) {
   const app = new Hono();
   app.onError(handleError);
+
   app.get("/test", () => {
     throw thrownError;
   });

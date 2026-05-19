@@ -35,10 +35,12 @@ export const executeTransitionHandler = factory.createHandlers(
         ...(idempotencyKey !== undefined && { idempotencyKey }),
         ...(metadata !== undefined && { metadata }),
       };
+
       const event = await withTenantContext(tenantId, (tx) =>
         executeTransition(tx, tenantId, request),
       );
-      return c.json({ data: event });
+
+      return c.json({ data: event }, 201);
     } catch (err) {
       return handleWorkflowError(c, err);
     }

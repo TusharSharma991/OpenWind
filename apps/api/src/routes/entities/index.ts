@@ -15,6 +15,7 @@ import { bulkUpdateHandler } from "./bulk-update.js";
 import { bulkSetStateHandler } from "./bulk-set-state.js";
 import { executeTransitionHandler } from "./execute-transition.js";
 import { listTransitionsHandler } from "./list-transitions.js";
+import { listWorkflowEventsHandler } from "./list-workflow-events.js";
 import { listEventsHandler } from "./list-events.js";
 
 const router = new Hono<{ Variables: { auth: AuthContext } }>();
@@ -34,12 +35,15 @@ router.patch("/:id", ...updateEntityHandler);
 router.delete("/:id", ...deleteEntityHandler);
 router.post("/:id/state", ...setEntityStateHandler);
 
+// Workflow transition routes — history must be registered before the bare transitions route
+router.get("/:id/transitions/history", ...listWorkflowEventsHandler);
+router.get("/:id/transitions", ...listTransitionsHandler);
+router.post("/:id/transitions", ...executeTransitionHandler);
+
+router.get("/:id/events", ...listEventsHandler);
+
 router.post("/:id/relations", ...createRelationHandler);
 router.get("/:id/relations", ...listRelationsHandler);
 router.delete("/:id/relations/:relationId", ...deleteRelationHandler);
-
-router.post("/:id/transitions", ...executeTransitionHandler);
-router.get("/:id/transitions", ...listTransitionsHandler);
-router.get("/:id/events", ...listEventsHandler);
 
 export { router as entitiesRouter };

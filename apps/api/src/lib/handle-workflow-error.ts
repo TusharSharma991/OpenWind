@@ -66,17 +66,31 @@ export function handleWorkflowError(c: Context, err: unknown): Response {
 
       case "TRANSITION_FORBIDDEN":
         return c.json(
-          { error: err.code, message: "Forbidden" },
+          {
+            error: err.code,
+            message: "You do not have permission to execute this transition",
+          },
           403,
         ) as Response;
 
       case "CONDITION_NOT_MET":
-      case "REQUIRED_FIELDS_MISSING":
         return c.json(
           {
             error: err.code,
             message: "Transition conditions not met",
             meta: err.meta,
+          },
+          422,
+        ) as Response;
+
+      case "REQUIRED_FIELDS_MISSING":
+        return c.json(
+          {
+            error: err.code,
+            message: "Required fields are missing",
+            fields: Array.isArray(err.meta?.missing)
+              ? err.meta.missing
+              : undefined,
           },
           422,
         ) as Response;

@@ -21,8 +21,8 @@ export const listAutomationRulesHandler = factory.createHandlers(
 
     try {
       const rules = await listAutomationRules(db, tenantId, {
-        triggerType,
-        isEnabled,
+        ...(triggerType !== undefined && { triggerType }),
+        ...(isEnabled !== undefined && { isEnabled }),
       });
       return c.json({ data: rules });
     } catch (err) {

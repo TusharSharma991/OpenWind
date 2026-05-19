@@ -24,17 +24,6 @@ export const executeTransitionHandler = factory.createHandlers(
     const { transitionId, comment, idempotencyKey, metadata } =
       c.req.valid("json");
 
-    const request: TransitionRequest = {
-      instanceId,
-      transitionId,
-      actorId: userId,
-      actorRoles: roles,
-      triggeredBy: "user",
-      ...(comment !== undefined && { comment }),
-      ...(idempotencyKey !== undefined && { idempotencyKey }),
-      ...(metadata !== undefined && { metadata }),
-    };
-
     try {
       const request: TransitionRequest = {
         instanceId,

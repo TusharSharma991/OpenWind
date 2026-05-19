@@ -63,7 +63,19 @@ describe("errorHandler — WorkflowError mapping", () => {
   });
 });
 
-describe("errorHandler — Postgres lock error (55P03)", () => {
+describe("errorHandler — WorkflowError TRANSITION_LOCKED", () => {
+  it("returns 409 with Retry-After: 5 for TRANSITION_LOCKED", async () => {
+    const res = await makeApp(new WorkflowError("TRANSITION_LOCKED")).request(
+      "/test",
+    );
+    expect(res.status).toBe(409);
+    expect(res.headers.get("Retry-After")).toBe("5");
+    const json = await res.json();
+    expect(json.error).toBe("TRANSITION_LOCKED");
+  });
+});
+
+describe("errorHandler — Postgres lock error (55P03) fallback", () => {
   it("returns 409 TRANSITION_CONFLICT when lock_not_available error has code on error", async () => {
     const lockError = Object.assign(new Error("lock_not_available"), {
       code: "55P03",

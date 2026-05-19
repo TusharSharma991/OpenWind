@@ -55,6 +55,8 @@ vi.mock("drizzle-orm", () => ({
   eq: vi.fn((col, val) => ({ col, val, op: "eq" })),
   and: vi.fn((...args) => ({ args, op: "and" })),
   isNotNull: vi.fn((col) => ({ col, op: "isNotNull" })),
+  isNull: vi.fn((col) => ({ col, op: "isNull" })),
+  inArray: vi.fn((col, vals) => ({ col, vals, op: "inArray" })),
   sql: vi.fn((..._args: unknown[]) => ({ op: "sql" })),
 }));
 
@@ -327,7 +329,7 @@ describe("executeTransition", () => {
     expect(event.toState).toBe("in_progress");
   });
 
-  it("propagates Postgres 55P03 lock error when row is already locked", async () => {
+  it("throws TRANSITION_LOCKED when Postgres 55P03 is raised by FOR UPDATE NOWAIT", async () => {
     const lockError = Object.assign(new Error("lock_not_available"), {
       code: "55P03",
     });
@@ -339,11 +341,48 @@ describe("executeTransition", () => {
         instanceId: INSTANCE_ID,
         transitionId: TRANSITION_ID,
       }),
-    ).rejects.toMatchObject({ code: "55P03" });
+    ).rejects.toMatchObject({
+      name: "WorkflowError",
+      code: "TRANSITION_LOCKED",
+    });
 
     // No state update or event insert should have occurred
     expect(mockUpdate).not.toHaveBeenCalled();
     expect(mockInsertValues).not.toHaveBeenCalled();
+  });
+
+  it("re-throws non-lock Postgres errors unchanged", async () => {
+    const dbError = Object.assign(new Error("connection refused"), {
+      code: "08006",
+    });
+    selectResults = [() => [fakeInstance]];
+    mockExecute.mockRejectedValueOnce(dbError);
+
+    await expect(
+      executeTransition(dbMock as never, TENANT_ID, {
+        instanceId: INSTANCE_ID,
+        transitionId: TRANSITION_ID,
+      }),
+    ).rejects.toMatchObject({ code: "08006" });
+  });
+
+  it("cancels pending SLA timers for the state being left on successful transition", async () => {
+    selectResults = [
+      () => [fakeInstance],
+      () => [fakeWorkflow],
+      () => [fakeTransition],
+      () => [], // no SLA on new state
+    ];
+
+    await executeTransition(dbMock as never, TENANT_ID, {
+      instanceId: INSTANCE_ID,
+      transitionId: TRANSITION_ID,
+    });
+
+    // db.update should have been called twice:
+    // 1. entity instance state update
+    // 2. SLA timer cancellation (outbox events)
+    expect(mockUpdate).toHaveBeenCalledTimes(2);
   });
 
   it("returns existing event without re-executing when idempotency key matches", async () => {

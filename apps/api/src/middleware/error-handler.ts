@@ -32,6 +32,7 @@ const WORKFLOW_STATUS: Record<string, number> = {
   INSTANCE_NOT_FOUND: 404,
   TRANSITION_NOT_AVAILABLE: 409,
   TRANSITION_FORBIDDEN: 403,
+  TRANSITION_LOCKED: 409,
   CONDITION_NOT_MET: 422,
   REQUIRED_FIELDS_MISSING: 422,
   SLA_TIMER_FAILED: 500,
@@ -91,6 +92,19 @@ export function handleError(err: unknown, c: Context): Response {
   }
 
   if (isWorkflowError(err)) {
+    // TRANSITION_LOCKED gets a Retry-After header so clients know when to retry.
+    if (err.code === "TRANSITION_LOCKED") {
+      return new Response(
+        JSON.stringify({
+          error: err.code,
+          message: "Another transition is in progress — retry after 5 seconds",
+        }),
+        {
+          status: 409,
+          headers: { "Content-Type": "application/json", "Retry-After": "5" },
+        },
+      );
+    }
     return c.json(
       { error: err.code, message: err.code },
       toStatus(WORKFLOW_STATUS, err.code),

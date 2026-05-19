@@ -2,6 +2,15 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    include: ["src/outbox-poller.test.ts", "src/automation-worker.test.ts"],
+    environment: "node",
+    include: ["src/**/*.test.ts"],
+    server: {
+      deps: {
+        // Inline all @platform/* packages so vitest resolves them from source
+        // rather than requiring a pre-built dist/ — without this, instanceof
+        // checks and module-boundary types fail across the loader boundary.
+        inline: [/^@platform\//],
+      },
+    },
   },
 });

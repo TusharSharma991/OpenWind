@@ -31,7 +31,7 @@ async function handleFailedJob(
   job: Job<AutomationJobData> | undefined,
   err: Error,
 ): Promise<void> {
-  if (!job || job.opts.attempts > job.attemptsMade) return;
+  if (!job || (job.opts.attempts ?? 1) > job.attemptsMade) return;
 
   const { outboxEventId, tenantId, eventType, payload, ruleId } =
     job.data as AutomationJobData;

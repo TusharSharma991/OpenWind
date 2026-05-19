@@ -2,14 +2,13 @@ import { describe, it, expect, vi } from "vitest";
 import { Hono } from "hono";
 import { WorkflowError } from "@platform/workflow-engine";
 import { EntityError, ValidationError } from "@platform/entity-engine";
+import { errorHandler } from "./error-handler.js";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
 vi.mock("@platform/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
-
-const { errorHandler } = await import("./error-handler.js");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

@@ -70,6 +70,11 @@ export async function executeAutomationRules(
     if (!execRow) continue;
 
     try {
+      // NOTE: Actions within a rule execute sequentially but are NOT transactional.
+      // If action K fails, actions 0…K-1 (e.g. set_field, transition) have already
+      // been applied and are not rolled back. The execution is marked "failed" and
+      // the error is logged, but the entity may be left in a partially-modified state.
+      // Full rollback would require saga/compensating-action support and is deferred.
       for (const action of rule.actions as ActionConfig[]) {
         await runAction(db, tenantId, event, action, depth, redis);
       }

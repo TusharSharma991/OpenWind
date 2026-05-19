@@ -3,6 +3,12 @@ import type { Redis } from "ioredis";
 const DEFAULT_THRESHOLD = 5;
 const DEFAULT_TTL_SECONDS = 300;
 
+// NOTE: This is a simple open/closed circuit breaker with no half-open state.
+// When the TTL expires the counter key is deleted and the circuit closes cold —
+// all traffic resumes immediately on the next request rather than being probed
+// gradually. A proper half-open probe (let one request through to test recovery)
+// would require an additional Redis key and is deferred as a future improvement.
+
 function key(tenantId: string, actionType: string): string {
   return `circuit:${tenantId}:${actionType}`;
 }

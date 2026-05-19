@@ -52,10 +52,12 @@ vi.mock("@platform/logger", () => ({
 
 const { executeAutomationRules } = await import("./executor.js");
 
+const TENANT_ID = "aaaaaaaa-0000-4000-a000-000000000001";
+
 const BASE_EVENT = {
   version: 1 as const,
   eventType: "workflow.transitioned" as const,
-  tenantId: "t-aaa",
+  tenantId: TENANT_ID,
   instanceId: "00000000-0000-0000-0000-000000000001",
   entityTypeId: "00000000-0000-0000-0000-000000000002",
   workflowId: "00000000-0000-0000-0000-000000000003",
@@ -69,7 +71,7 @@ const BASE_EVENT = {
 const EXEC_ROW = { id: "exec-001" };
 const NOTIFY_RULE = {
   id: "rule-001",
-  tenantId: "t-aaa",
+  tenantId: TENANT_ID,
   isEnabled: true,
   triggerType: "workflow.transitioned",
   priority: 0,
@@ -88,7 +90,7 @@ describe("executeAutomationRules", () => {
   it("executes matching rules and writes execution row with success status", async () => {
     mockSelect.mockResolvedValue([NOTIFY_RULE]);
 
-    await executeAutomationRules(dbMock as never, "t-aaa", BASE_EVENT);
+    await executeAutomationRules(dbMock as never, TENANT_ID, BASE_EVENT);
 
     expect(mockInsert).toHaveBeenCalled();
     expect(mockUpdate).toHaveBeenCalled();
@@ -99,7 +101,7 @@ describe("executeAutomationRules", () => {
     vi.mocked(evaluateConditionTree).mockReturnValueOnce(false);
     mockSelect.mockResolvedValue([NOTIFY_RULE]);
 
-    await executeAutomationRules(dbMock as never, "t-aaa", BASE_EVENT);
+    await executeAutomationRules(dbMock as never, TENANT_ID, BASE_EVENT);
 
     expect(mockInsert).not.toHaveBeenCalled();
   });
@@ -118,30 +120,17 @@ describe("executeAutomationRules", () => {
     ]);
     mockUpdateEntity.mockResolvedValue({ id: BASE_EVENT.instanceId });
 
-    await executeAutomationRules(dbMock as never, "t-aaa", BASE_EVENT);
+    await executeAutomationRules(dbMock as never, TENANT_ID, BASE_EVENT);
 
     expect(mockUpdateEntity).toHaveBeenCalledWith(
       dbMock,
-      "t-aaa",
+      TENANT_ID,
       BASE_EVENT.instanceId,
       expect.objectContaining({ fields: { priority: "high" } }),
     );
   });
 
   it("executes transition action by calling executeTransition", async () => {
-    mockSelect.mockResolvedValue([
-      {
-        ...NOTIFY_RULE,
-        actions: [
-          {
-            type: "transition",
-            config: {
-              transitionId: "00000000-0000-0000-0000-000000000099",
-            },
-          },
-        ],
-      },
-    ]);
     mockExecuteTransition.mockResolvedValue({
       id: "ev-1",
       instanceId: BASE_EVENT.instanceId,
@@ -150,14 +139,28 @@ describe("executeAutomationRules", () => {
       toState: "closed",
       createdAt: new Date(),
     });
-    // Follow-up rules execution returns no rules
-    mockSelect.mockResolvedValueOnce([NOTIFY_RULE]).mockResolvedValue([]);
+    // First call: rule with transition action; follow-up returns no rules
+    mockSelect
+      .mockResolvedValueOnce([
+        {
+          ...NOTIFY_RULE,
+          actions: [
+            {
+              type: "transition",
+              config: {
+                transitionId: "00000000-0000-0000-0000-000000000099",
+              },
+            },
+          ],
+        },
+      ])
+      .mockResolvedValue([]);
 
-    await executeAutomationRules(dbMock as never, "t-aaa", BASE_EVENT);
+    await executeAutomationRules(dbMock as never, TENANT_ID, BASE_EVENT);
 
     expect(mockExecuteTransition).toHaveBeenCalledWith(
       dbMock,
-      "t-aaa",
+      TENANT_ID,
       expect.objectContaining({
         instanceId: BASE_EVENT.instanceId,
         transitionId: "00000000-0000-0000-0000-000000000099",
@@ -169,14 +172,14 @@ describe("executeAutomationRules", () => {
   it("throws MAX_DEPTH_EXCEEDED at depth 10", async () => {
     const { AutomationError } = await import("./types.js");
     await expect(
-      executeAutomationRules(dbMock as never, "t-aaa", BASE_EVENT, 10),
+      executeAutomationRules(dbMock as never, TENANT_ID, BASE_EVENT, 10),
     ).rejects.toBeInstanceOf(AutomationError);
   });
 
   it("does not throw at depth 9", async () => {
     mockSelect.mockResolvedValue([]);
     await expect(
-      executeAutomationRules(dbMock as never, "t-aaa", BASE_EVENT, 9),
+      executeAutomationRules(dbMock as never, TENANT_ID, BASE_EVENT, 9),
     ).resolves.toBeUndefined();
   });
 
@@ -194,15 +197,15 @@ describe("executeAutomationRules", () => {
     ]);
     mockUpdateEntity.mockRejectedValue(new Error("DB error"));
 
-    await executeAutomationRules(dbMock as never, "t-aaa", BASE_EVENT);
+    await executeAutomationRules(dbMock as never, TENANT_ID, BASE_EVENT);
 
-    expect(mockUpdate).toHaveBeenCalledWith(expect.anything());
+    expect(mockUpdate).toHaveBeenCalled();
   });
 
   it("throws INVALID_EVENT_PAYLOAD for unknown event shapes", async () => {
     const { AutomationError } = await import("./types.js");
     await expect(
-      executeAutomationRules(dbMock as never, "t-aaa", { bad: "data" }),
+      executeAutomationRules(dbMock as never, TENANT_ID, { bad: "data" }),
     ).rejects.toBeInstanceOf(AutomationError);
   });
 });

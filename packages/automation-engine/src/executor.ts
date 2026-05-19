@@ -1,4 +1,5 @@
 import { eq, and } from "drizzle-orm";
+import type { Redis } from "ioredis";
 import type { DbOrTx } from "@platform/db";
 import { automationRules, automationExecutions } from "@platform/db";
 import { logger } from "@platform/logger";
@@ -11,6 +12,7 @@ import type { TriggerType, ActionConfig } from "./types.js";
 import { executeNotifyAction } from "./actions/notify.js";
 import { executeSetFieldAction } from "./actions/set-field.js";
 import { executeTransitionAction } from "./actions/transition.js";
+import { isOpen, recordFailure, reset } from "./circuit-breaker.js";
 
 const MAX_DEPTH = 10;
 
@@ -19,6 +21,7 @@ export async function executeAutomationRules(
   tenantId: string,
   rawEvent: unknown,
   depth = 0,
+  redis?: Redis,
 ): Promise<void> {
   if (depth >= MAX_DEPTH) {
     throw new AutomationError("MAX_DEPTH_EXCEEDED", { depth });
@@ -68,7 +71,7 @@ export async function executeAutomationRules(
 
     try {
       for (const action of rule.actions as ActionConfig[]) {
-        await runAction(db, tenantId, event, action, depth);
+        await runAction(db, tenantId, event, action, depth, redis);
       }
 
       await db
@@ -104,26 +107,42 @@ async function runAction(
   event: TriggerEvent,
   action: ActionConfig,
   depth: number,
+  redis?: Redis,
 ): Promise<void> {
   const config = action.config;
 
-  switch (action.type) {
-    case "notify":
-      await executeNotifyAction(db, tenantId, event, config as Parameters<typeof executeNotifyAction>[3]);
-      break;
-    case "set_field":
-      await executeSetFieldAction(db, tenantId, event, config as Parameters<typeof executeSetFieldAction>[3]);
-      break;
-    case "transition":
-      await executeTransitionAction(
-        db,
-        tenantId,
-        event,
-        config as Parameters<typeof executeTransitionAction>[3],
-        depth,
-      );
-      break;
-    default:
-      logger.warn({ tenantId, actionType: action.type }, "Automation: unhandled action type");
+  if (redis && (await isOpen(redis, tenantId, action.type))) {
+    logger.warn(
+      { tenantId, actionType: action.type },
+      "Automation: circuit open — skipping action",
+    );
+    return;
+  }
+
+  try {
+    switch (action.type) {
+      case "notify":
+        await executeNotifyAction(db, tenantId, event, config as Parameters<typeof executeNotifyAction>[3]);
+        break;
+      case "set_field":
+        await executeSetFieldAction(db, tenantId, event, config as Parameters<typeof executeSetFieldAction>[3]);
+        break;
+      case "transition":
+        await executeTransitionAction(
+          db,
+          tenantId,
+          event,
+          config as Parameters<typeof executeTransitionAction>[3],
+          depth,
+        );
+        break;
+      default:
+        logger.warn({ tenantId, actionType: action.type }, "Automation: unhandled action type");
+        return;
+    }
+    if (redis) await reset(redis, tenantId, action.type);
+  } catch (err) {
+    if (redis) await recordFailure(redis, tenantId, action.type);
+    throw err;
   }
 }

@@ -8,3 +8,4 @@ export {
   deleteAutomationRule,
 } from "./automation-crud.js";
 export { executeAutomationRules } from "./executor.js";
+export { isOpen, recordFailure, reset } from "./circuit-breaker.js";

@@ -1,22 +1,32 @@
 import { defineConfig } from "vitest/config";
+import path from "path";
+
+const packages = path.resolve(__dirname, "../../packages");
 
 export default defineConfig({
+  resolve: {
+    // Point workspace packages to their TypeScript source so that all
+    // imports — both in test files and in dynamically-loaded modules under
+    // test — resolve to the same entry point and share a single module
+    // instance. Without this, different module loaders (Vite vs Node native
+    // ESM) can produce separate class objects, breaking instanceof checks.
+    alias: {
+      "@platform/workflow-engine": path.join(
+        packages,
+        "workflow-engine/src/index.ts",
+      ),
+      "@platform/entity-engine": path.join(
+        packages,
+        "entity-engine/src/index.ts",
+      ),
+      "@platform/logger": path.join(packages, "logger/src/index.ts"),
+      "@platform/auth": path.join(packages, "auth/src/index.ts"),
+      "@platform/db": path.join(packages, "db/src/index.ts"),
+      "@platform/config": path.join(packages, "config/src/index.ts"),
+    },
+  },
   test: {
     environment: "node",
-    deps: {
-      // Inline workspace packages so Vitest uses a single module instance
-      // for both the test file and the module under test. Without this,
-      // the test's import and the handler's import resolve through different
-      // loaders, producing separate class objects that fail instanceof checks.
-      inline: [
-        "@platform/workflow-engine",
-        "@platform/entity-engine",
-        "@platform/logger",
-        "@platform/auth",
-        "@platform/db",
-        "@platform/config",
-      ],
-    },
     // Provide all required @platform/config env vars so tests don't need to
     // vi.mock the config module. CI job env vars take precedence over these
     // defaults when set (e.g. the real DATABASE_URL in integration jobs).

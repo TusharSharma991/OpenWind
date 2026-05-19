@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { Hono } from "hono";
 import { WorkflowError } from "@platform/workflow-engine";
 import { EntityError, ValidationError } from "@platform/entity-engine";
-import { errorHandler } from "./error-handler.js";
+import { handleError } from "./error-handler.js";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
@@ -14,7 +14,7 @@ vi.mock("@platform/logger", () => ({
 
 function makeApp(thrownError: unknown) {
   const app = new Hono();
-  app.use(errorHandler());
+  app.onError(handleError);
   app.get("/test", () => {
     throw thrownError;
   });

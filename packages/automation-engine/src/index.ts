@@ -7,3 +7,4 @@ export {
   updateAutomationRule,
   deleteAutomationRule,
 } from "./automation-crud.js";
+export { executeAutomationRules } from "./executor.js";

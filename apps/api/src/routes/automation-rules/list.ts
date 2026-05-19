@@ -3,7 +3,6 @@ import { z } from "zod";
 import { requireAuth, requireRole } from "@platform/auth";
 import { db } from "@platform/db";
 import { listAutomationRules } from "@platform/automation-engine";
-import type { TriggerType } from "@platform/automation-engine";
 import { factory } from "./factory.js";
 import { handleAutomationError } from "../../lib/handle-automation-error.js";
 import { TriggerTypeSchema } from "./schemas.js";
@@ -25,9 +24,7 @@ export const listAutomationRulesHandler = factory.createHandlers(
 
     try {
       const rules = await listAutomationRules(db, tenantId, {
-        ...(triggerType !== undefined && {
-          triggerType: triggerType as TriggerType,
-        }),
+        ...(triggerType !== undefined && { triggerType }),
         ...(isEnabled !== undefined && { isEnabled }),
       });
       return c.json({ data: rules });

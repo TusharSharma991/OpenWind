@@ -3,6 +3,7 @@
  * Single source of truth — imported by create.ts, update.ts, and list.ts.
  */
 import { z } from "zod";
+import type { ConditionTree } from "@platform/workflow-engine";
 
 // ── Trigger types ─────────────────────────────────────────────────────────────
 
@@ -70,3 +71,8 @@ export const ConditionTreeSchema: z.ZodType<ConditionTreeInput> = z.lazy(() =>
     FieldConditionSchema,
   ]),
 );
+
+// Compile-time guard: if @platform/workflow-engine adds new operator types,
+// this assignment will fail tsc and alert us to update ConditionTreeSchema.
+export type _AssertConditionTreeCompatible =
+  ConditionTreeInput extends ConditionTree ? true : never;

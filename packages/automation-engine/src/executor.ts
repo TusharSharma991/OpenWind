@@ -48,11 +48,19 @@ export async function executeAutomationRules(
     .orderBy(automationRules.priority, automationRules.createdAt);
 
   for (const rule of rules) {
-    const fields =
-      "fields" in event ? (event.fields as Record<string, unknown>) : {};
+    // Merge the event's top-level properties (e.g. toState, fromState,
+    // assigneeId, slaHours) with any entity field values so that condition
+    // trees can match on both. entity.created events carry a `fields` map;
+    // all other event types carry their data as top-level properties only.
+    const eventFields: Record<string, unknown> = {
+      ...Object.fromEntries(
+        Object.entries(event).filter(([k]) => k !== "fields"),
+      ),
+      ...("fields" in event ? (event.fields as Record<string, unknown>) : {}),
+    };
     const passes = evaluateConditionTree(
       rule.conditions as ConditionTree | null,
-      fields,
+      eventFields,
     );
     if (!passes) continue;
 

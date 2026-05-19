@@ -3,6 +3,11 @@
 -- ALTER TABLE "dead_letter_events" DISABLE ROW LEVEL SECURITY;
 -- DROP INDEX IF EXISTS "dead_letter_events_tenant_created_idx";
 -- DROP TABLE IF EXISTS "dead_letter_events";
+--
+-- NOTE: The true flag on current_setting is intentional — it makes the function
+-- return NULL (instead of raising an exception) when app.tenant_id is not set,
+-- so tenant_id = NULL evaluates to false and safely blocks all rows rather than
+-- crashing migration scripts and background jobs that run outside a tenant context.
 
 CREATE TABLE "dead_letter_events" (
   "id"                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -23,4 +28,4 @@ ALTER TABLE "dead_letter_events" ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "dead_letter_events_tenant_isolation"
   ON "dead_letter_events"
-  USING (tenant_id = current_setting('app.tenant_id')::uuid);
+  USING (tenant_id = current_setting('app.tenant_id', true)::uuid);

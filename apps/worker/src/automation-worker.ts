@@ -1,12 +1,11 @@
-import { Worker } from "bullmq";
-import { createClient } from "ioredis";
+import { Worker, type Job } from "bullmq";
+import Redis from "ioredis";
 import { db, withTenantContext, deadLetterEvents } from "@platform/db";
 import { executeAutomationRules } from "@platform/automation-engine";
 import { env } from "@platform/config";
 import { logger } from "@platform/logger";
-import { automationQueue } from "./queues.js";
 
-const connection = createClient(env.REDIS_URL);
+const connection = new Redis(env.REDIS_URL);
 
 interface AutomationJobData {
   outboxEventId: string;
@@ -28,8 +27,11 @@ export const automationWorker = new Worker<AutomationJobData>(
   { connection, concurrency: 5 },
 );
 
-automationWorker.on("failed", async (job, err) => {
-  if (!job || (job.opts.attempts ?? 1) > (job.attemptsMade ?? 0)) return;
+async function handleFailedJob(
+  job: Job<AutomationJobData> | undefined,
+  err: Error,
+): Promise<void> {
+  if (!job || job.opts.attempts > job.attemptsMade) return;
 
   const { outboxEventId, tenantId, eventType, payload, ruleId } =
     job.data as AutomationJobData;
@@ -42,7 +44,7 @@ automationWorker.on("failed", async (job, err) => {
       payload: payload as Record<string, unknown>,
       ruleId: ruleId ?? null,
       error: err.message,
-      attemptCount: job.attemptsMade ?? 1,
+      attemptCount: job.attemptsMade,
     });
     logger.warn(
       { tenantId, outboxEventId, eventType },
@@ -54,6 +56,10 @@ automationWorker.on("failed", async (job, err) => {
       "Automation: failed to write to dead letter queue",
     );
   }
+}
+
+automationWorker.on("failed", (job, err) => {
+  void handleFailedJob(job, err);
 });
 
 export function stopAutomationWorker(): Promise<void> {

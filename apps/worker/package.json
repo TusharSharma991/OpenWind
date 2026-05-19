@@ -17,6 +17,7 @@
     "@platform/logger": "workspace:*",
     "@platform/workflow-engine": "workspace:*",
     "bullmq": "^5.0.0",
+    "drizzle-orm": "^0.45.2",
     "ioredis": "^5.0.0"
   },
   "devDependencies": {

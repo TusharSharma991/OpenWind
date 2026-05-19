@@ -3,6 +3,9 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     environment: "node",
+    deps: {
+      inline: ["@platform/logger"],
+    },
     // Provide all required @platform/config env vars so tests don't need to
     // vi.mock the config module. CI job env vars take precedence over these
     // defaults when set (e.g. the real DATABASE_URL in integration jobs).

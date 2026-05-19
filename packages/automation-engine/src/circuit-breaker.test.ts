@@ -55,7 +55,10 @@ describe("circuit breaker", () => {
 
       await recordFailure(redisMock as never, "t-aaa", "webhook", 600);
 
-      expect(redisMock.expire).toHaveBeenCalledWith("circuit:t-aaa:webhook", 600);
+      expect(redisMock.expire).toHaveBeenCalledWith(
+        "circuit:t-aaa:webhook",
+        600,
+      );
     });
 
     it("does not set TTL on subsequent failures", async () => {

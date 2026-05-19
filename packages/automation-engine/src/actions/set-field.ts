@@ -15,8 +15,7 @@ export async function executeSetFieldAction(
   config: SetFieldConfig,
 ): Promise<void> {
   const instanceId =
-    config.instanceId ??
-    ("instanceId" in event ? event.instanceId : undefined);
+    config.instanceId ?? ("instanceId" in event ? event.instanceId : undefined);
   if (!instanceId) return;
 
   await updateEntity(db, tenantId, instanceId, {

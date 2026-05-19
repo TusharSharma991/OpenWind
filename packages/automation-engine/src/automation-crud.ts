@@ -133,6 +133,5 @@ export async function deleteAutomationRule(
     )
     .returning({ id: automationRules.id });
 
-  if (result.length === 0)
-    throw new AutomationError("RULE_NOT_FOUND", { id });
+  if (result.length === 0) throw new AutomationError("RULE_NOT_FOUND", { id });
 }

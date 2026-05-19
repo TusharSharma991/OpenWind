@@ -42,7 +42,12 @@ async function tick(): Promise<void> {
       await tx
         .update(outboxEvents)
         .set({ deliveredAt: new Date() })
-        .where(inArray(outboxEvents.id, rows.map((r) => r.id)));
+        .where(
+          inArray(
+            outboxEvents.id,
+            rows.map((r) => r.id),
+          ),
+        );
 
       logger.info({ count: rows.length }, "Outbox: delivered events to queue");
     });
@@ -51,9 +56,7 @@ async function tick(): Promise<void> {
   }
 }
 
-export function startOutboxPoller(
-  intervalMs = DEFAULT_POLL_INTERVAL_MS,
-): void {
+export function startOutboxPoller(intervalMs = DEFAULT_POLL_INTERVAL_MS): void {
   if (pollTimer) return;
   pollTimer = setInterval(() => {
     activeTick = tick();

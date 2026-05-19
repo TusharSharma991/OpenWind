@@ -6,7 +6,10 @@ export function handleAutomationError(c: Context, err: unknown): Response {
   if (err instanceof AutomationError) {
     switch (err.code) {
       case "RULE_NOT_FOUND":
-        return c.json({ error: err.code, message: "Not found" }, 404) as Response;
+        return c.json(
+          { error: err.code, message: "Not found" },
+          404,
+        ) as Response;
       default:
         break;
     }

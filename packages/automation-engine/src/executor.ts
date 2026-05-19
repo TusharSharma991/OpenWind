@@ -122,10 +122,20 @@ async function runAction(
   try {
     switch (action.type) {
       case "notify":
-        await executeNotifyAction(db, tenantId, event, config as Parameters<typeof executeNotifyAction>[3]);
+        await executeNotifyAction(
+          db,
+          tenantId,
+          event,
+          config as Parameters<typeof executeNotifyAction>[3],
+        );
         break;
       case "set_field":
-        await executeSetFieldAction(db, tenantId, event, config as Parameters<typeof executeSetFieldAction>[3]);
+        await executeSetFieldAction(
+          db,
+          tenantId,
+          event,
+          config as Parameters<typeof executeSetFieldAction>[3],
+        );
         break;
       case "transition":
         await executeTransitionAction(
@@ -137,7 +147,10 @@ async function runAction(
         );
         break;
       default:
-        logger.warn({ tenantId, actionType: action.type }, "Automation: unhandled action type");
+        logger.warn(
+          { tenantId, actionType: action.type },
+          "Automation: unhandled action type",
+        );
         return;
     }
     if (redis) await reset(redis, tenantId, action.type);

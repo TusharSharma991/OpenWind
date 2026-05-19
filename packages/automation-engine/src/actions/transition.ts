@@ -17,8 +17,7 @@ export async function executeTransitionAction(
   depth: number,
 ): Promise<void> {
   const instanceId =
-    config.instanceId ??
-    ("instanceId" in event ? event.instanceId : undefined);
+    config.instanceId ?? ("instanceId" in event ? event.instanceId : undefined);
   if (!instanceId) return;
 
   const workflowEvent = await executeTransition(db, tenantId, {

@@ -196,9 +196,7 @@ describe("executeAutomationRules", () => {
 
     await executeAutomationRules(dbMock as never, "t-aaa", BASE_EVENT);
 
-    expect(mockUpdate).toHaveBeenCalledWith(
-      expect.anything(),
-    );
+    expect(mockUpdate).toHaveBeenCalledWith(expect.anything());
   });
 
   it("throws INVALID_EVENT_PAYLOAD for unknown event shapes", async () => {

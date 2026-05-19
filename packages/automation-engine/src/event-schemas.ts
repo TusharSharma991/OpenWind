@@ -50,7 +50,9 @@ export const TriggerEventSchema = z.discriminatedUnion("eventType", [
   EntityAssignedV1Schema,
 ]);
 
-export type WorkflowTransitionedV1 = z.infer<typeof WorkflowTransitionedV1Schema>;
+export type WorkflowTransitionedV1 = z.infer<
+  typeof WorkflowTransitionedV1Schema
+>;
 export type WorkflowSlaBreachedV1 = z.infer<typeof WorkflowSlaBreachedV1Schema>;
 export type EntityCreatedV1 = z.infer<typeof EntityCreatedV1Schema>;
 export type EntityAssignedV1 = z.infer<typeof EntityAssignedV1Schema>;

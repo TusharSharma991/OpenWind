@@ -39,9 +39,8 @@ vi.mock("@platform/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-const { startOutboxPoller, stopOutboxPoller } = await import(
-  "./outbox-poller.js"
-);
+const { startOutboxPoller, stopOutboxPoller } =
+  await import("./outbox-poller.js");
 
 const fakeRow = {
   id: "00000000-0000-0000-0000-000000000001",

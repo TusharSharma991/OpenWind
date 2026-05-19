@@ -1,45 +1,15 @@
 import { describe, it, expect, vi } from "vitest";
 import { Hono } from "hono";
+import { WorkflowError } from "@platform/workflow-engine";
+import { EntityError, ValidationError } from "@platform/entity-engine";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
-
-vi.mock("@platform/workflow-engine", () => {
-  class WorkflowError extends Error {
-    constructor(
-      public readonly code: string,
-      public readonly meta?: Record<string, unknown>,
-    ) {
-      super(code);
-      this.name = "WorkflowError";
-    }
-  }
-  return { WorkflowError };
-});
-
-vi.mock("@platform/entity-engine", () => {
-  class EntityError extends Error {
-    constructor(public readonly code: string) {
-      super(code);
-      this.name = "EntityError";
-    }
-  }
-  class ValidationError extends Error {
-    constructor(public readonly fields: unknown[]) {
-      super("ValidationError");
-      this.name = "ValidationError";
-    }
-  }
-  return { EntityError, ValidationError };
-});
 
 vi.mock("@platform/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
 const { errorHandler } = await import("./error-handler.js");
-const { WorkflowError } = await import("@platform/workflow-engine");
-const { EntityError, ValidationError } =
-  await import("@platform/entity-engine");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

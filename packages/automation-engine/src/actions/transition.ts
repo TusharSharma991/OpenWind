@@ -24,7 +24,7 @@ export async function executeTransitionAction(
     instanceId,
     transitionId: config.transitionId,
     triggeredBy: "automation",
-    comment: config.comment,
+    ...(config.comment !== undefined && { comment: config.comment }),
   });
 
   // Recursively execute rules triggered by this transition (depth + 1 for guard)

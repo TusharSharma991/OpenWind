@@ -8,8 +8,6 @@ const redisMock = {
   del: vi.fn(),
 };
 
-type FakeRedis = typeof redisMock;
-
 describe("circuit breaker", () => {
   beforeEach(() => vi.clearAllMocks());
 

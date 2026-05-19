@@ -8,7 +8,7 @@ import type { ConditionTree } from "@platform/workflow-engine";
 import { TriggerEventSchema } from "./event-schemas.js";
 import type { TriggerEvent } from "./event-schemas.js";
 import { AutomationError } from "./types.js";
-import type { TriggerType, ActionConfig } from "./types.js";
+import type { ActionConfig } from "./types.js";
 import { executeNotifyAction } from "./actions/notify.js";
 import { executeSetFieldAction } from "./actions/set-field.js";
 import { executeTransitionAction } from "./actions/transition.js";
@@ -134,7 +134,7 @@ async function runAction(
           db,
           tenantId,
           event,
-          config as Parameters<typeof executeSetFieldAction>[3],
+          config as unknown as Parameters<typeof executeSetFieldAction>[3],
         );
         break;
       case "transition":
@@ -142,7 +142,7 @@ async function runAction(
           db,
           tenantId,
           event,
-          config as Parameters<typeof executeTransitionAction>[3],
+          config as unknown as Parameters<typeof executeTransitionAction>[3],
           depth,
         );
         break;

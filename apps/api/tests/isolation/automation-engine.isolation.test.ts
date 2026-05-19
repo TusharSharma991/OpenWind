@@ -16,9 +16,6 @@ import {
   automationExecutions,
   entityTypes,
   entityInstances,
-  workflows,
-  workflowStates,
-  workflowTransitions,
 } from "@platform/db";
 import {
   createAutomationRule,
@@ -161,12 +158,9 @@ describe("executeAutomationRules — cross-tenant isolation", () => {
 // ── Execution log isolation ────────────────────────────────────────────────────
 
 describe("automation_executions — cross-tenant query isolation", () => {
-  it.skip(
-    "direct SELECT within Tenant A context returns no Tenant B executions (requires non-superuser role)",
-    async () => {
-      // Validated by engine-level WHERE tenant_id = $tenantId on all queries
-    },
-  );
+  it.skip("direct SELECT within Tenant A context returns no Tenant B executions (requires non-superuser role)", async () => {
+    // Validated by engine-level WHERE tenant_id = $tenantId on all queries
+  });
 
   it("Tenant B executions are zero after Tenant A's runs", async () => {
     const execsB = await db
@@ -184,10 +178,7 @@ describe("GET /automation-rules/:id — HTTP cross-tenant isolation", () => {
     const app = new Hono<{ Variables: { auth: AuthContext } }>();
     app.use(
       "*",
-      async (
-        c: Context<{ Variables: { auth: AuthContext } }>,
-        next: Next,
-      ) => {
+      async (c: Context<{ Variables: { auth: AuthContext } }>, next: Next) => {
         c.set("auth", {
           tenantId,
           userId: "u-aaa",

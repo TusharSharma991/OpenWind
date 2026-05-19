@@ -29,15 +29,17 @@ async function tick(): Promise<void> {
 
       if (rows.length === 0) return;
 
-      for (const row of rows) {
-        await automationQueue.add(row.event_type, {
-          outboxEventId: row.id,
-          tenantId: row.tenant_id,
-          eventType: row.event_type,
-          version: row.version,
-          payload: row.payload,
-        });
-      }
+      await Promise.all(
+        rows.map((row) =>
+          automationQueue.add(row.event_type, {
+            outboxEventId: row.id,
+            tenantId: row.tenant_id,
+            eventType: row.event_type,
+            version: row.version,
+            payload: row.payload,
+          }),
+        ),
+      );
 
       await tx
         .update(outboxEvents)

@@ -6,20 +6,10 @@ import { listAutomationRules } from "@platform/automation-engine";
 import type { TriggerType } from "@platform/automation-engine";
 import { factory } from "./factory.js";
 import { handleAutomationError } from "../../lib/handle-automation-error.js";
-
-const TRIGGER_TYPES = [
-  "workflow.entered_state",
-  "workflow.transitioned",
-  "workflow.sla_breached",
-  "field.changed",
-  "entity.created",
-  "entity.assigned",
-  "schedule.cron",
-  "connector.event",
-] as const;
+import { TriggerTypeSchema } from "./schemas.js";
 
 const ListAutomationRulesQuerySchema = z.object({
-  triggerType: z.enum(TRIGGER_TYPES).optional(),
+  triggerType: TriggerTypeSchema.optional(),
   enabled: z.enum(["true", "false"]).optional(),
 });
 

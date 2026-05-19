@@ -6,37 +6,17 @@ import { createAutomationRule } from "@platform/automation-engine";
 import type { TriggerType, ActionConfig } from "@platform/automation-engine";
 import { factory } from "./factory.js";
 import { handleAutomationError } from "../../lib/handle-automation-error.js";
-
-const TRIGGER_TYPES = [
-  "workflow.entered_state",
-  "workflow.transitioned",
-  "workflow.sla_breached",
-  "field.changed",
-  "entity.created",
-  "entity.assigned",
-  "schedule.cron",
-  "connector.event",
-] as const;
-
-const ActionConfigSchema = z.object({
-  type: z.enum([
-    "notify",
-    "assign",
-    "transition",
-    "set_field",
-    "create_entity",
-    "webhook",
-    "connector.action",
-    "script",
-  ]),
-  config: z.record(z.unknown()),
-});
+import {
+  TriggerTypeSchema,
+  ActionConfigSchema,
+  ConditionTreeSchema,
+} from "./schemas.js";
 
 const CreateAutomationRuleSchema = z.object({
   name: z.string().min(1).max(200),
-  triggerType: z.enum(TRIGGER_TYPES),
+  triggerType: TriggerTypeSchema,
   triggerConfig: z.record(z.unknown()),
-  conditions: z.unknown().optional(),
+  conditions: ConditionTreeSchema.nullable().optional(),
   actions: z.array(ActionConfigSchema).min(1),
   isEnabled: z.boolean().optional(),
   priority: z.number().int().optional(),

@@ -11,12 +11,7 @@ import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 import type { Context, Next } from "hono";
 import { db } from "@platform/db";
-import {
-  automationRules,
-  automationExecutions,
-  entityTypes,
-  entityInstances,
-} from "@platform/db";
+import { automationRules, automationExecutions } from "@platform/db";
 import {
   createAutomationRule,
   listAutomationRules,
@@ -35,27 +30,12 @@ const TENANT_B = "bbbbbbbb-0000-4000-b000-000000000022";
 
 // ── Shared state ──────────────────────────────────────────────────────────────
 
-let entityTypeId: string;
 let ruleIdA: string;
 let ruleIdB: string;
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
 
 beforeAll(async () => {
-  const ts = Date.now();
-
-  const [et] = await db
-    .insert(entityTypes)
-    .values({
-      tenantId: null,
-      name: `isolation_auto_ticket_${ts}`,
-      plural: `isolation_auto_tickets_${ts}`,
-      allowCustomFields: true,
-    })
-    .returning();
-  if (!et) throw new Error("entity type insert failed");
-  entityTypeId = et.id;
-
   const ruleA = await createAutomationRule(db, TENANT_A, {
     name: "Tenant A Rule",
     triggerType: "workflow.transitioned",
@@ -82,10 +62,6 @@ afterAll(async () => {
     .where(eq(automationExecutions.tenantId, TENANT_B));
   await db.delete(automationRules).where(eq(automationRules.id, ruleIdA));
   await db.delete(automationRules).where(eq(automationRules.id, ruleIdB));
-  await db
-    .delete(entityInstances)
-    .where(eq(entityInstances.entityTypeId, entityTypeId));
-  await db.delete(entityTypes).where(eq(entityTypes.id, entityTypeId));
 });
 
 // ── List isolation ─────────────────────────────────────────────────────────────

@@ -137,3 +137,18 @@ export interface WorkflowTransitionedEvent {
   actorId: string | null;
   occurredAt: string;
 }
+
+// Domain event written to outbox when an SLA timer breaches.
+// Field names match WorkflowSlaBreachedV1Schema in packages/automation-engine
+// so the outbox poller's TriggerEventSchema.safeParse() succeeds without transformation.
+export interface WorkflowSlaBreachedEvent {
+  eventType: "workflow.sla_breached";
+  version: 1;
+  tenantId: string;
+  instanceId: string;
+  entityTypeId: string;
+  workflowId: string;
+  state: string;
+  slaHours: number;
+  breachedAt: string;
+}

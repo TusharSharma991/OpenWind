@@ -251,6 +251,10 @@ export async function executeTransition(
   // SLA scheduler does not enqueue a breach job.  Already-enqueued jobs are
   // guarded by the breacher which checks current_state before writing the breach
   // event.
+  //
+  // Ordering note: cancellation runs after the workflow.transitioned outbox
+  // write above.  Both are inside the caller's transaction so ordering within
+  // the transaction is harmless — either both commit or both roll back.
   await cancelPendingSlaTimers(
     db,
     tenantId,

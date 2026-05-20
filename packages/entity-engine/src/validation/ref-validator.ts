@@ -117,9 +117,7 @@ export async function validateUserRefs(
 
   // Batch lookup: find all referenced user IDs that belong to this tenant.
   const userIds = refs.map((r) => r.userId);
-  // @platform/db resolves to its dist/ at lint-time; tenantUsers column types
-  // are guaranteed by the Drizzle schema (userId: text, tenantId: uuid).
-  const validRows = (await db
+  const validRows = await db
     .select({ userId: tenantUsers.userId })
     .from(tenantUsers)
     .where(
@@ -127,7 +125,7 @@ export async function validateUserRefs(
         inArray(tenantUsers.userId, userIds),
         eq(tenantUsers.tenantId, tenantId),
       ),
-    )) as Array<{ userId: string }>;
+    );
 
   const validUserIdSet = new Set(validRows.map((r) => r.userId));
 

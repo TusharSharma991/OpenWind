@@ -214,7 +214,6 @@ async function ensureOidcApp(
         accessTokenRoleAssertion: true,
         idTokenRoleAssertion: true,
         idTokenUserinfoAssertion: true,
-        clockSkew: "0s",
         additionalOrigins: [],
         skipNativeAppSuccessPage: false,
         // Token lifetime: 15 minutes

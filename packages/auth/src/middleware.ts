@@ -81,11 +81,13 @@ export const requireAuth = (db?: DbOrTx): MiddlewareHandler =>
       }
 
       c.set("auth", auth);
-      // Upsert the verified user into tenant_users so the entity engine can
-      // validate user_ref fields cross-tenant.  Fire-and-forget: we do not
-      // block the request on this write; the table is populated on the first
-      // JWT-authenticated request and is stable thereafter.
-      void withTenantContext(auth.tenantId, (tx) =>
+      // Upsert the verified user into tenant_users BEFORE calling next().
+      // This must complete before the route handler runs so that
+      // validateUserRefs() can find the user on their very first request
+      // (fire-and-forget would race with the INSERT on a brand-new user).
+      // onConflictDoNothing hits the unique index and returns immediately on
+      // every subsequent request — the overhead is one index scan per JWT call.
+      await withTenantContext(auth.tenantId, (tx) =>
         tx
           .insert(tenantUsers)
           .values({ tenantId: auth.tenantId, userId: auth.userId })
@@ -93,7 +95,7 @@ export const requireAuth = (db?: DbOrTx): MiddlewareHandler =>
       ).catch((err: unknown) => {
         logger.warn(
           { err, tenantId: auth.tenantId },
-          "auth: failed to sync tenant user — user_ref validation may fail on first request",
+          "auth: failed to sync tenant user — user_ref validation may fail on this request",
         );
       });
       await next();

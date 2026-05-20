@@ -31,6 +31,12 @@ import { join } from "node:path";
 
 const OPENBAO_ADDR = process.env["OPENBAO_ADDR"] ?? "http://localhost:8200";
 const ROOT_TOKEN = process.env["OPENBAO_DEV_ROOT_TOKEN"] ?? "dev-root-token";
+if (!process.env["OPENBAO_DEV_ROOT_TOKEN"]) {
+  console.warn(
+    "[setup-bao] WARNING: OPENBAO_DEV_ROOT_TOKEN not set — using default 'dev-root-token'. " +
+      "Set the variable explicitly if your dev container uses a different token.",
+  );
+}
 // Transit key created by docker-compose openbao-init container
 const TRANSIT_KEY = "platform-credentials";
 const TRANSIT_MOUNT = "transit";
@@ -179,8 +185,9 @@ async function ensureRole(): Promise<void> {
     method: "POST",
     body: {
       policies: [POLICY_NAME],
-      // SecretIDs do not expire in dev; tighten in production
-      secret_id_ttl: "0",
+      // 30-day TTL — finite to discourage accidentally committing .env.local.
+      // Re-run `pnpm setup-bao` before it lapses; tighten further in production.
+      secret_id_ttl: "720h",
       token_ttl: "1h",
       token_max_ttl: "4h",
     },

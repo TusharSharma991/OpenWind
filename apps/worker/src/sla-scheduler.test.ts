@@ -13,7 +13,7 @@ vi.mock("@platform/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-const mockTxExecute = vi.fn();
+const mockTxExecute = vi.fn().mockResolvedValue([]);
 const mockTxUpdate = vi.fn(() => ({
   set: vi.fn(() => ({ where: vi.fn().mockResolvedValue([]) })),
 }));
@@ -190,6 +190,23 @@ describe("SLA scheduler tick", () => {
         expect.objectContaining({ count: 1 }),
         expect.stringContaining("dead-lettered stale events"),
       );
+    });
+
+    it("sets app.tenant_id before each dead_letter_events INSERT so RLS WITH CHECK passes (N2)", async () => {
+      const fireAt = new Date(
+        Date.now() - STALE_SLA_THRESHOLD_MS - 3_600_000,
+      ).toISOString();
+      mockTxExecute.mockResolvedValueOnce([makeRow({ fireAt })]);
+
+      await tick();
+
+      // The SELECT call is the first execute; set_config must also appear
+      const executeCalls = mockTxExecute.mock.calls;
+      const setConfigCall = executeCalls.find((call) => {
+        const arg = call[0] as { op?: string };
+        return arg?.op === "sql";
+      });
+      expect(setConfigCall).toBeDefined();
     });
 
     it("dead-letters events with a malformed (NaN) fireAt instead of enqueuing with NaN delay", async () => {

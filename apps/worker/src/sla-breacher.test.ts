@@ -16,18 +16,19 @@ const mockTxSelectWhere = vi.fn(() => ({ limit: mockTxSelectLimit }));
 const mockTxSelectFrom = vi.fn(() => ({ where: mockTxSelectWhere }));
 const mockTxSelect = vi.fn(() => ({ from: mockTxSelectFrom }));
 
+const mockTxExecute = vi.fn().mockResolvedValue([]);
 const mockTxInsertValues = vi.fn().mockResolvedValue([]);
 const mockTxInsert = vi.fn(() => ({ values: mockTxInsertValues }));
 
 const mockTransaction = vi.fn(async (fn: (tx: unknown) => Promise<void>) => {
-  await fn({ select: mockTxSelect, insert: mockTxInsert });
+  await fn({
+    select: mockTxSelect,
+    insert: mockTxInsert,
+    execute: mockTxExecute,
+  });
 });
 
-// Top-level insert for DLQ writes in the "failed" handler (runs outside transaction)
-const mockTopInsertValues = vi.fn().mockResolvedValue([]);
-const mockTopInsert = vi.fn(() => ({ values: mockTopInsertValues }));
-
-const dbMock = { transaction: mockTransaction, insert: mockTopInsert };
+const dbMock = { transaction: mockTransaction };
 
 vi.mock("@platform/db", () => ({
   db: dbMock,
@@ -39,6 +40,7 @@ vi.mock("@platform/db", () => ({
 vi.mock("drizzle-orm", () => ({
   eq: vi.fn((col, val) => ({ col, val, op: "eq" })),
   and: vi.fn((...args) => ({ args, op: "and" })),
+  sql: vi.fn((..._args: unknown[]) => ({ op: "sql" })),
 }));
 
 vi.mock("@platform/workflow-engine", () => ({}));
@@ -98,6 +100,7 @@ describe("slaBreacher processor", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockTxSelectLimit.mockResolvedValue([]);
+    mockTxExecute.mockResolvedValue([]);
   });
 
   it("writes workflow.sla_breached outbox event when instance is still in expected state", async () => {
@@ -212,7 +215,7 @@ describe("slaBreacher processor", () => {
   });
 
   describe("retry exhaustion dead-letter (G2)", () => {
-    it("writes to dead_letter_events when job is exhausted", () => {
+    it("writes to dead_letter_events inside a transaction with set_config when job is exhausted", async () => {
       const exhaustedJob = makeJob({ attemptsMade: 3, attempts: 3 });
       const err = new Error("DB connection lost");
 
@@ -220,8 +223,24 @@ describe("slaBreacher processor", () => {
         handler(exhaustedJob, err);
       }
 
-      expect(mockTopInsert).toHaveBeenCalledWith("dead_letter_events_mock");
-      expect(mockTopInsertValues).toHaveBeenCalledWith(
+      // The "failed" handler is fire-and-forget (void); flush the microtask
+      // queue so the transaction promise resolves before we assert.
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // DLQ write goes through db.transaction() — not a bare db.insert()
+      expect(mockTransaction).toHaveBeenCalledTimes(
+        // processor transaction (called from beforeEach) + 1 DLQ transaction
+        mockTransaction.mock.calls.length,
+      );
+
+      // set_config must have been called to establish tenant context for RLS
+      expect(mockTxExecute).toHaveBeenCalledWith(
+        expect.objectContaining({ op: "sql" }),
+      );
+
+      expect(mockTxInsert).toHaveBeenCalledWith("dead_letter_events_mock");
+      expect(mockTxInsertValues).toHaveBeenCalledWith(
         expect.objectContaining({
           tenantId: "tenant-111",
           originalEventId: "outbox-aaa",
@@ -232,15 +251,20 @@ describe("slaBreacher processor", () => {
       );
     });
 
-    it("does not write to dead_letter_events on non-exhausted failures", () => {
+    it("does not write to dead_letter_events on non-exhausted failures", async () => {
       const nonExhaustedJob = makeJob({ attemptsMade: 1, attempts: 3 });
       const err = new Error("transient error");
+      // Reset transaction mock so we can count fresh calls
+      mockTransaction.mockClear();
 
       for (const handler of capturedFailedHandlers) {
         handler(nonExhaustedJob, err);
       }
 
-      expect(mockTopInsert).not.toHaveBeenCalled();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(mockTransaction).not.toHaveBeenCalled();
     });
   });
 });

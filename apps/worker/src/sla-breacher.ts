@@ -19,7 +19,7 @@
  */
 
 import { Worker } from "bullmq";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import {
   db,
   outboxEvents,
@@ -152,21 +152,30 @@ slaBreacher.on("failed", (job, err) => {
       slaHours,
       outboxEventId,
     } = job.data;
+    // Wrap in a transaction and set app.tenant_id before the INSERT.
+    // dead_letter_events RLS derives its WITH CHECK from the USING clause:
+    // tenant_id = current_setting('app.tenant_id', true)::uuid — without
+    // the GUC the expression evaluates to NULL and the INSERT is silently
+    // blocked (the outer .catch() logs but the DLQ row is never written).
     void db
-      .insert(deadLetterEvents)
-      .values({
-        tenantId,
-        originalEventId: outboxEventId,
-        eventType: "workflow.sla_breached",
-        payload: {
-          instanceId,
-          workflowId,
-          stateName,
-          slaHours,
-        } as Record<string, unknown>,
-        ruleId: null,
-        error: err.message,
-        attemptCount: job.attemptsMade,
+      .transaction(async (tx) => {
+        await tx.execute(
+          sql`SELECT set_config('app.tenant_id', ${tenantId}, true)`,
+        );
+        await tx.insert(deadLetterEvents).values({
+          tenantId,
+          originalEventId: outboxEventId,
+          eventType: "workflow.sla_breached",
+          payload: {
+            instanceId,
+            workflowId,
+            stateName,
+            slaHours,
+          } as Record<string, unknown>,
+          ruleId: null,
+          error: err.message,
+          attemptCount: job.attemptsMade,
+        });
       })
       .catch((dlqErr: unknown) => {
         logger.error(

@@ -100,19 +100,36 @@ export async function tick(): Promise<void> {
         }
       }
 
-      // Dead-letter stale events — do not enqueue them
+      // Dead-letter stale events — do not enqueue them.
+      // Group by tenant and set app.tenant_id before each INSERT block.
+      // dead_letter_events RLS derives its WITH CHECK from the USING clause:
+      // tenant_id = current_setting('app.tenant_id', true)::uuid — without
+      // the GUC the expression evaluates to NULL and every INSERT is silently
+      // blocked.  set_config with true is SET LOCAL (transaction-scoped).
       if (stale.length > 0) {
-        await tx.insert(deadLetterEvents).values(
-          stale.map((row) => ({
-            tenantId: row.tenant_id,
-            originalEventId: row.id,
-            eventType: "workflow.sla_scheduled" as const,
-            payload: row.payload as Record<string, unknown>,
-            ruleId: null,
-            error: `SLA event exceeded stale threshold (${STALE_SLA_THRESHOLD_MS / 3_600_000}h). fireAt=${row.payload.fireAt}`,
-            attemptCount: 1,
-          })),
-        );
+        const staleByTenant = new Map<string, SlaOutboxRow[]>();
+        for (const row of stale) {
+          const group = staleByTenant.get(row.tenant_id) ?? [];
+          group.push(row);
+          staleByTenant.set(row.tenant_id, group);
+        }
+
+        for (const [tenantId, tenantRows] of staleByTenant) {
+          await tx.execute(
+            sql`SELECT set_config('app.tenant_id', ${tenantId}, true)`,
+          );
+          await tx.insert(deadLetterEvents).values(
+            tenantRows.map((row) => ({
+              tenantId: row.tenant_id,
+              originalEventId: row.id,
+              eventType: "workflow.sla_scheduled" as const,
+              payload: row.payload as Record<string, unknown>,
+              ruleId: null,
+              error: `SLA event exceeded stale threshold (${STALE_SLA_THRESHOLD_MS / 3_600_000}h). fireAt=${row.payload.fireAt}`,
+              attemptCount: 1,
+            })),
+          );
+        }
 
         logger.warn(
           {

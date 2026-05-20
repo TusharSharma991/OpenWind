@@ -61,4 +61,5 @@ export {
   evaluateFormula,
   isSafeRegex,
   validateEntityRefs,
+  validateUserRefs,
 } from "./validation/index.js";

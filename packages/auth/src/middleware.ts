@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import type { Context, Next, MiddlewareHandler } from "hono";
 import type { DbOrTx } from "@platform/db";
-import { apiKeys } from "@platform/db";
+import { apiKeys, tenantUsers, withTenantContext } from "@platform/db";
 import { logger } from "@platform/logger";
 import { verifyJwt, extractAuthContext } from "./jwks.js";
 import { introspectToken } from "./introspection.js";
@@ -25,6 +25,11 @@ export const requireAuth = (db?: DbOrTx): MiddlewareHandler =>
     async (c: Context<AuthVariables>, next: Next): Promise<Response | void> => {
       // Short-circuit when auth has been pre-populated (e.g. by test fixtures
       // or an upstream gateway that already verified the token).
+      // Hono's Variables type marks auth as non-optional (it's always present
+      // after requireAuth runs), but here we ARE the setter — at call time it
+      // may genuinely be absent.  The condition is necessary at runtime even
+      // though TypeScript's static view sees it as always-truthy.
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       if (c.get("auth")) {
         await next();
         return;
@@ -76,6 +81,21 @@ export const requireAuth = (db?: DbOrTx): MiddlewareHandler =>
       }
 
       c.set("auth", auth);
+      // Upsert the verified user into tenant_users so the entity engine can
+      // validate user_ref fields cross-tenant.  Fire-and-forget: we do not
+      // block the request on this write; the table is populated on the first
+      // JWT-authenticated request and is stable thereafter.
+      void withTenantContext(auth.tenantId, (tx) =>
+        tx
+          .insert(tenantUsers)
+          .values({ tenantId: auth.tenantId, userId: auth.userId })
+          .onConflictDoNothing(),
+      ).catch((err: unknown) => {
+        logger.warn(
+          { err, tenantId: auth.tenantId },
+          "auth: failed to sync tenant user — user_ref validation may fail on first request",
+        );
+      });
       await next();
       return;
     },

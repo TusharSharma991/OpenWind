@@ -5,6 +5,7 @@ import {
   jsonb,
   timestamp,
   index,
+  unique,
 } from "drizzle-orm/pg-core";
 
 export const tenants = pgTable("tenants", {
@@ -39,6 +40,38 @@ export const apiKeys = pgTable(
   },
   (t) => ({
     tenantIdx: index("api_keys_tenant_idx").on(t.tenantId),
+  }),
+);
+
+/**
+ * tenant_users — shadow table that records every user who has successfully
+ * authenticated into a tenant.  Populated by a fire-and-forget upsert in the
+ * requireAuth JWT path; used by the entity engine to validate user_ref fields
+ * cross-tenant (a user_ref UUID must resolve to a user in the same tenant).
+ *
+ * RLS: enforced via app.tenant_id GUC, consistent with other tenant tables.
+ * The auth middleware upsert runs inside withTenantContext so the GUC is set.
+ */
+export const tenantUsers = pgTable(
+  "tenant_users",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    /** External user ID — Zitadel JWT sub claim value */
+    userId: text("user_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => ({
+    tenantUserIdx: index("tenant_users_tenant_user_idx").on(
+      t.tenantId,
+      t.userId,
+    ),
+    uniqueTenantUser: unique("tenant_users_tenant_user_unique").on(
+      t.tenantId,
+      t.userId,
+    ),
   }),
 );
 

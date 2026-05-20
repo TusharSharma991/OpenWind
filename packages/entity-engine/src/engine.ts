@@ -28,6 +28,7 @@ import {
   transformZodErrors,
   applyFormulaFields,
   validateEntityRefs,
+  validateUserRefs,
 } from "./validation/index.js";
 import {
   resolveLookupFields,
@@ -77,15 +78,25 @@ export async function createEntity(
 
   const allFields = await loadEntityFields(db, input.entityTypeId, tenantId);
 
-  // Cross-tenant entity_ref guard: ensure all referenced instances belong to
-  // this tenant.  Runs after Zod (values are valid UUIDs) but before INSERT.
-  const refErrors = await validateEntityRefs(
-    db,
-    tenantId,
-    result.data as Record<string, unknown>,
-    allFields,
-  );
-  if (refErrors.length > 0) throw new ValidationError(refErrors);
+  // Cross-tenant reference guards: entity_ref and user_ref values must resolve
+  // to resources owned by this tenant.  Runs after Zod (values are valid UUIDs)
+  // but before INSERT.
+  const [refErrors, userRefErrors] = await Promise.all([
+    validateEntityRefs(
+      db,
+      tenantId,
+      result.data as Record<string, unknown>,
+      allFields,
+    ),
+    validateUserRefs(
+      db,
+      tenantId,
+      result.data as Record<string, unknown>,
+      allFields,
+    ),
+  ]);
+  const allRefErrors = [...refErrors, ...userRefErrors];
+  if (allRefErrors.length > 0) throw new ValidationError(allRefErrors);
 
   const fieldsWithFormulas = await applyFormulaFields(
     allFields,
@@ -222,21 +233,32 @@ export async function updateEntity(
       tenantId,
     );
 
-    // Cross-tenant entity_ref guard: validate only the fields being updated
-    // (existing refs were already validated on create/previous update).
+    // Cross-tenant reference guards (update path): validate only the fields
+    // being changed — existing refs were validated on create / prior update.
     // input.fields is narrowed to Record<string,unknown> by the enclosing if.
     const providedFields = input.fields;
-    const updatedRefFields = allFields.filter(
+    const updatedEntityRefFields = allFields.filter(
       (f) => f.fieldType === "entity_ref" && f.name in providedFields,
     );
-    if (updatedRefFields.length > 0) {
-      const refErrors = await validateEntityRefs(
-        db,
-        tenantId,
-        providedFields,
-        updatedRefFields,
-      );
-      if (refErrors.length > 0) throw new ValidationError(refErrors);
+    const updatedUserRefFields = allFields.filter(
+      (f) => f.fieldType === "user_ref" && f.name in providedFields,
+    );
+    if (updatedEntityRefFields.length > 0 || updatedUserRefFields.length > 0) {
+      const [refErrors, userRefErrors] = await Promise.all([
+        updatedEntityRefFields.length > 0
+          ? validateEntityRefs(
+              db,
+              tenantId,
+              providedFields,
+              updatedEntityRefFields,
+            )
+          : Promise.resolve([]),
+        updatedUserRefFields.length > 0
+          ? validateUserRefs(db, tenantId, providedFields, updatedUserRefFields)
+          : Promise.resolve([]),
+      ]);
+      const allRefErrors = [...refErrors, ...userRefErrors];
+      if (allRefErrors.length > 0) throw new ValidationError(allRefErrors);
     }
 
     const fieldsWithFormulas = await applyFormulaFields(

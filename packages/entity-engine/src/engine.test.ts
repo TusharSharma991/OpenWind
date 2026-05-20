@@ -91,6 +91,7 @@ vi.mock("./validation/index.js", () => ({
   // validateEntityRefs — default no-op (returns no errors); individual tests can
   // override via mockResolvedValueOnce to exercise the rejection path.
   validateEntityRefs: vi.fn().mockResolvedValue([]),
+  validateUserRefs: vi.fn().mockResolvedValue([]),
   isSafeRegex: vi.fn().mockResolvedValue(true),
 }));
 

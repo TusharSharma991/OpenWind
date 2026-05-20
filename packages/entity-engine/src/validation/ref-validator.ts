@@ -15,7 +15,7 @@
 
 import { eq, and, inArray } from "drizzle-orm";
 import type { DbOrTx } from "@platform/db";
-import { entityInstances } from "@platform/db";
+import { entityInstances, tenantUsers } from "@platform/db";
 import type { EntityField } from "../types.js";
 import type { FieldError } from "../errors.js";
 
@@ -73,6 +73,72 @@ export async function validateEntityRefs(
         code: "INVALID_REFERENCE",
         message: `Referenced entity does not exist or is not accessible`,
         meta: { refId },
+      });
+    }
+  }
+
+  return errors;
+}
+
+/**
+ * Validates that every user_ref value in `fields` references a user who has
+ * authenticated into `tenantId` (i.e. exists in the tenant_users shadow table).
+ *
+ * The tenant_users table is populated by the auth middleware on every
+ * successful JWT verification.  A user UUID that has never authenticated into
+ * this tenant will fail validation even if it exists in Zitadel — cross-tenant
+ * user references are treated as non-existent at the application layer.
+ *
+ * @param db           — db client or transaction
+ * @param tenantId     — the requesting tenant
+ * @param fields       — the field values to validate (may be partial on update)
+ * @param entityFields — the full field definitions for the entity type
+ * @returns            — array of FieldErrors; empty means all refs are valid
+ */
+export async function validateUserRefs(
+  db: DbOrTx,
+  tenantId: string,
+  fields: Record<string, unknown>,
+  entityFields: EntityField[],
+): Promise<FieldError[]> {
+  const userRefFields = entityFields.filter((f) => f.fieldType === "user_ref");
+
+  type RefEntry = { fieldName: string; userId: string };
+  const refs: RefEntry[] = [];
+
+  for (const field of userRefFields) {
+    const value = fields[field.name];
+    if (typeof value === "string" && value.length > 0) {
+      refs.push({ fieldName: field.name, userId: value });
+    }
+  }
+
+  if (refs.length === 0) return [];
+
+  // Batch lookup: find all referenced user IDs that belong to this tenant.
+  const userIds = refs.map((r) => r.userId);
+  // @platform/db resolves to its dist/ at lint-time; tenantUsers column types
+  // are guaranteed by the Drizzle schema (userId: text, tenantId: uuid).
+  const validRows = (await db
+    .select({ userId: tenantUsers.userId })
+    .from(tenantUsers)
+    .where(
+      and(
+        inArray(tenantUsers.userId, userIds),
+        eq(tenantUsers.tenantId, tenantId),
+      ),
+    )) as Array<{ userId: string }>;
+
+  const validUserIdSet = new Set(validRows.map((r) => r.userId));
+
+  const errors: FieldError[] = [];
+  for (const { fieldName, userId } of refs) {
+    if (!validUserIdSet.has(userId)) {
+      errors.push({
+        field: fieldName,
+        code: "INVALID_REFERENCE",
+        message: `Referenced user does not exist or is not accessible`,
+        meta: { userId },
       });
     }
   }

@@ -1,4 +1,4 @@
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import type { Redis } from "ioredis";
 import type { DbOrTx } from "@platform/db";
 import { automationRules, automationExecutions } from "@platform/db";
@@ -79,77 +79,76 @@ export async function executeAutomationRules(
 
     if (!execRow) continue;
 
-    // Use a named savepoint so that a Postgres exception thrown by an action
-    // (FK violation, constraint failure, etc.) does not abort the outer
-    // transaction.  Without this, the catch block's attempt to write "failed"
-    // to automation_executions would itself fail with "current transaction is
-    // aborted", leaving the execution stuck at "running" with no trace in the
-    // audit log.
-    const sp = `sp_exec_${execRow.id.replace(/-/g, "_")}`;
-    await db.execute(sql.raw(`SAVEPOINT ${sp}`));
+    // Run all actions for this rule inside db.transaction().
+    // • When db is already a transaction (worker path via withTenantContext):
+    //   Drizzle creates a named savepoint automatically.  If actions throw, the
+    //   savepoint is rolled back but the outer transaction remains open so the
+    //   audit-log update below can still execute.
+    // • When db is a bare connection (direct callers, isolation tests):
+    //   Drizzle starts a regular transaction.  If actions throw, the transaction
+    //   rolls back and the outer bare connection writes the audit log normally.
+    //
+    // NOTE: actions within a rule ARE atomically rolled back together on failure
+    // because they all run inside this inner transaction/savepoint.  Partial
+    // execution (actions 0..K-1 applied, action K fails) is therefore prevented
+    // at the DB level.  Full saga / compensating-action support (for side-effects
+    // that cannot be rolled back, e.g. sent emails) remains deferred.
+    let actionError: Error | null = null;
+    let skippedCount = 0;
 
     try {
-      // NOTE: Actions within a rule execute sequentially but are NOT transactional.
-      // If action K fails, actions 0…K-1 (e.g. set_field, transition) have already
-      // been applied and are not rolled back. The execution is marked "failed" and
-      // the error is logged, but the entity may be left in a partially-modified state.
-      // Full rollback would require saga/compensating-action support and is deferred.
-      let skippedCount = 0;
-      for (const action of rule.actions as ActionConfig[]) {
-        const skipped = await runAction(
-          db,
-          tenantId,
-          event,
-          action,
-          depth,
-          redis,
-        );
-        if (skipped) skippedCount++;
-      }
+      await db.transaction(async (ruleTx) => {
+        for (const action of rule.actions as ActionConfig[]) {
+          const skipped = await runAction(
+            ruleTx,
+            tenantId,
+            event,
+            action,
+            depth,
+            redis,
+          );
+          if (skipped) skippedCount++;
+        }
+      });
+    } catch (err) {
+      actionError = err instanceof Error ? err : new Error(String(err));
+    }
 
-      await db.execute(sql.raw(`RELEASE SAVEPOINT ${sp}`));
+    // Write the execution outcome using the outer db — always available
+    // regardless of whether the inner transaction/savepoint was rolled back.
+    const finalStatus = actionError
+      ? "failed"
+      : skippedCount > 0
+        ? "degraded"
+        : "success";
 
-      // If any actions were bypassed by the circuit breaker, record the
-      // execution as "degraded" so the audit trail reflects that the rule
-      // ran but did not fully execute — not "success" (misleading) nor
-      // "failed" (suggests a bug rather than a deliberate circuit-open skip).
-      const finalStatus = skippedCount > 0 ? "degraded" : "success";
-      await db
-        .update(automationExecutions)
-        .set({
-          status: finalStatus,
-          result:
-            skippedCount > 0
-              ? ({ skippedActions: skippedCount } as Record<string, unknown>)
-              : null,
-          completedAt: new Date(),
-        })
-        .where(eq(automationExecutions.id, execRow.id));
+    await db
+      .update(automationExecutions)
+      .set({
+        status: finalStatus,
+        // If any actions were bypassed by the circuit breaker, record the count
+        // so the audit trail reflects partial execution — not "success" (misleading)
+        // nor "failed" (suggests a bug rather than a deliberate circuit-open skip).
+        result:
+          skippedCount > 0 && !actionError
+            ? ({ skippedActions: skippedCount } as Record<string, unknown>)
+            : null,
+        error: actionError?.message ?? null,
+        completedAt: new Date(),
+      })
+      .where(eq(automationExecutions.id, execRow.id));
 
+    if (actionError) {
+      logger.error(
+        { tenantId, ruleId: rule.id, execId: execRow.id, err: actionError },
+        "Automation: rule execution failed",
+      );
+    } else {
       logger.info(
         { tenantId, ruleId: rule.id, execId: execRow.id, skippedCount },
         skippedCount > 0
           ? "Automation: rule executed with degraded actions (circuit open)"
           : "Automation: rule executed successfully",
-      );
-    } catch (err) {
-      // Roll back to the savepoint so the outer transaction is still usable,
-      // then write the failure status.
-      await db.execute(sql.raw(`ROLLBACK TO SAVEPOINT ${sp}`));
-      await db.execute(sql.raw(`RELEASE SAVEPOINT ${sp}`));
-
-      await db
-        .update(automationExecutions)
-        .set({
-          status: "failed",
-          error: err instanceof Error ? err.message : String(err),
-          completedAt: new Date(),
-        })
-        .where(eq(automationExecutions.id, execRow.id));
-
-      logger.error(
-        { tenantId, ruleId: rule.id, execId: execRow.id, err },
-        "Automation: rule execution failed",
       );
     }
   }

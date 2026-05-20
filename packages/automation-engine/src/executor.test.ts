@@ -3,9 +3,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mockSelect = vi.fn();
 const mockInsert = vi.fn();
 const mockUpdate = vi.fn();
-const mockExecute = vi.fn().mockResolvedValue(undefined);
 const mockUpdateEntity = vi.fn();
 const mockExecuteTransition = vi.fn();
+
+// Simulates Drizzle's db.transaction(): runs the callback with a nested tx
+// object that shares the same select/insert/update mocks.
+const mockTransaction = vi.fn(async (fn: (tx: unknown) => Promise<void>) => {
+  await fn(dbMock);
+});
 
 const dbMock = {
   select: () => ({
@@ -25,8 +30,7 @@ const dbMock = {
       where: mockUpdate,
     }),
   }),
-  // Used for SAVEPOINT / ROLLBACK TO / RELEASE raw SQL
-  execute: mockExecute,
+  transaction: mockTransaction,
 };
 
 vi.mock("@platform/db", () => ({
@@ -38,8 +42,6 @@ vi.mock("@platform/db", () => ({
 vi.mock("drizzle-orm", () => ({
   eq: vi.fn(),
   and: vi.fn((...args: unknown[]) => args),
-  // sql.raw is used by the savepoint path in executor.ts
-  sql: { raw: vi.fn((s: string) => ({ op: "sql.raw", sql: s })) },
 }));
 
 vi.mock("@platform/workflow-engine", () => ({
@@ -90,7 +92,11 @@ describe("executeAutomationRules", () => {
     vi.clearAllMocks();
     mockInsert.mockResolvedValue([EXEC_ROW]);
     mockUpdate.mockResolvedValue(undefined);
-    mockExecute.mockResolvedValue(undefined);
+    mockTransaction.mockImplementation(
+      async (fn: (tx: unknown) => Promise<void>) => {
+        await fn(dbMock);
+      },
+    );
   });
 
   it("executes matching rules and writes execution row with success status", async () => {
@@ -102,19 +108,13 @@ describe("executeAutomationRules", () => {
     expect(mockUpdate).toHaveBeenCalled();
   });
 
-  it("wraps each rule execution in a savepoint and releases it on success", async () => {
+  it("wraps each rule's actions in db.transaction() for atomic rollback", async () => {
     mockSelect.mockResolvedValue([NOTIFY_RULE]);
 
     await executeAutomationRules(dbMock as never, TENANT_ID, BASE_EVENT);
 
-    // SAVEPOINT + RELEASE = 2 execute calls per rule
-    const executeCalls = mockExecute.mock.calls.map(
-      (c) => (c[0] as { sql?: string }).sql ?? "",
-    );
-    expect(executeCalls.some((s) => s.startsWith("SAVEPOINT"))).toBe(true);
-    expect(executeCalls.some((s) => s.startsWith("RELEASE SAVEPOINT"))).toBe(
-      true,
-    );
+    // Each rule should trigger one db.transaction() call for its action loop
+    expect(mockTransaction).toHaveBeenCalledOnce();
   });
 
   it("skips rules whose conditions are not met", async () => {
@@ -204,7 +204,7 @@ describe("executeAutomationRules", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("rolls back to savepoint and writes failed status when action throws", async () => {
+  it("rolls back inner transaction and writes failed status when action throws", async () => {
     mockSelect.mockResolvedValue([
       {
         ...NOTIFY_RULE,
@@ -212,21 +212,16 @@ describe("executeAutomationRules", () => {
       },
     ]);
     mockUpdateEntity.mockRejectedValue(new Error("DB error"));
+    // Simulate transaction rollback on error (re-throw from the inner tx)
+    mockTransaction.mockImplementationOnce(
+      async (fn: (tx: unknown) => Promise<void>) => {
+        await fn(dbMock); // fn will throw; let it propagate
+      },
+    );
 
     await executeAutomationRules(dbMock as never, TENANT_ID, BASE_EVENT);
 
-    // Savepoint was rolled back then released
-    const executeCalls = mockExecute.mock.calls.map(
-      (c) => (c[0] as { sql?: string }).sql ?? "",
-    );
-    expect(
-      executeCalls.some((s) => s.startsWith("ROLLBACK TO SAVEPOINT")),
-    ).toBe(true);
-    expect(executeCalls.some((s) => s.startsWith("RELEASE SAVEPOINT"))).toBe(
-      true,
-    );
-
-    // Status update still ran (outer tx was restored)
+    // Audit log update still called on outer db after inner tx rolled back
     expect(mockUpdate).toHaveBeenCalled();
   });
 
@@ -243,20 +238,12 @@ describe("executeAutomationRules", () => {
       mockRedis as never,
     );
 
-    // The update should have been called with "degraded", not "success"
     expect(mockUpdate).toHaveBeenCalled();
-    const updateSetArg = (mockUpdate.mock.calls[0]?.[0] ?? {}) as Record<
-      string,
-      unknown
-    >;
-    // mockUpdate receives the Drizzle where clause; check the set() call
-    // We verify via the set mock one level up — inspect the full chain mock
     const { logger } = await import("@platform/logger");
     expect(vi.mocked(logger.info)).toHaveBeenCalledWith(
       expect.objectContaining({ skippedCount: 1 }),
       expect.stringContaining("degraded"),
     );
-    void updateSetArg; // suppress unused warning
   });
 
   it("throws INVALID_EVENT_PAYLOAD for unknown event shapes", async () => {

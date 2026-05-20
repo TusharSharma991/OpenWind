@@ -1,4 +1,4 @@
-import { eq, and, isNotNull, sql } from "drizzle-orm";
+import { eq, and, isNotNull, isNull, sql } from "drizzle-orm";
 import type { DbOrTx } from "@platform/db";
 import {
   entityInstances,
@@ -24,17 +24,40 @@ export async function executeTransition(
   tenantId: string,
   request: TransitionRequest,
 ): Promise<WorkflowEvent> {
-  // 1. Load entity instance
-  const [instance] = await db
-    .select()
-    .from(entityInstances)
-    .where(
-      and(
-        eq(entityInstances.id, request.instanceId),
-        eq(entityInstances.tenantId, tenantId),
-      ),
-    )
-    .limit(1);
+  // 1. Load entity instance with a pessimistic write lock.
+  // FOR UPDATE NOWAIT throws Postgres error 55P03 immediately if another transaction
+  // already holds the lock — the caller gets TRANSITION_LOCKED and retries after the
+  // Retry-After header interval.
+  //
+  // Combining the read and the lock into a single query closes the TOCTOU window that
+  // would exist between a plain SELECT (reading current_state) and a separate
+  // FOR UPDATE NOWAIT statement. A concurrent transition committing between those two
+  // statements would cause the guard at step 3 to compare against a stale current_state,
+  // potentially allowing an invalid state-machine transition.
+  let instance: typeof entityInstances.$inferSelect | undefined;
+  try {
+    [instance] = await db
+      .select()
+      .from(entityInstances)
+      .where(
+        and(
+          eq(entityInstances.id, request.instanceId),
+          eq(entityInstances.tenantId, tenantId),
+        ),
+      )
+      .for("update", { noWait: true })
+      .limit(1);
+  } catch (err) {
+    const code =
+      (err as { code?: unknown }).code ??
+      (err as { cause?: { code?: unknown } }).cause?.code;
+    if (code === "55P03") {
+      throw new WorkflowError("TRANSITION_LOCKED", {
+        instanceId: request.instanceId,
+      });
+    }
+    throw err;
+  }
 
   if (!instance) {
     throw new WorkflowError("INSTANCE_NOT_FOUND", {
@@ -48,16 +71,6 @@ export async function executeTransition(
       reason: "no workflow attached",
     });
   }
-
-  // 1b. Pessimistic row lock — prevents concurrent transitions on the same instance.
-  // Throws Postgres error 55P03 (lock_not_available) if another transaction holds the lock;
-  // caller's withTenantContext transaction keeps the lock until commit.
-  await db.execute(
-    sql`SELECT 1 FROM entity_instances
-        WHERE id = ${request.instanceId}::uuid
-          AND tenant_id = ${tenantId}::uuid
-        FOR UPDATE NOWAIT`,
-  );
 
   // 1d. Idempotency check — return existing event if key already used
   if (request.idempotencyKey) {
@@ -83,7 +96,7 @@ export async function executeTransition(
         triggeredBy: existing.triggeredBy as WorkflowEvent["triggeredBy"],
         actorId: existing.actorId ?? null,
         comment: existing.comment ?? null,
-        metadata: (existing.metadata as Record<string, unknown>) ?? {},
+        metadata: (existing.metadata ?? {}) as Record<string, unknown>,
         createdAt: existing.createdAt,
       };
     }
@@ -114,7 +127,7 @@ export async function executeTransition(
     )
     .limit(1);
 
-  if (!transition || transition.fromState !== instance.currentState) {
+  if (transition?.fromState !== instance.currentState) {
     throw new WorkflowError("TRANSITION_NOT_AVAILABLE", {
       instanceId: request.instanceId,
       currentState: instance.currentState,
@@ -234,6 +247,22 @@ export async function executeTransition(
     "Transition executed",
   );
 
+  // Cancel any pending SLA timers for the state we are leaving.
+  // Marks undelivered workflow.sla_scheduled outbox events as delivered so the
+  // SLA scheduler does not enqueue a breach job.  Already-enqueued jobs are
+  // guarded by the breacher which checks current_state before writing the breach
+  // event.
+  //
+  // Ordering note: cancellation runs after the workflow.transitioned outbox
+  // write above.  Both are inside the caller's transaction so ordering within
+  // the transaction is harmless — either both commit or both roll back.
+  await cancelPendingSlaTimers(
+    db,
+    tenantId,
+    request.instanceId,
+    instance.currentState,
+  );
+
   // Handle SLA for new state
   await scheduleSlaIfNeeded(
     db,
@@ -253,7 +282,7 @@ export async function executeTransition(
     triggeredBy: eventRow.triggeredBy as WorkflowEvent["triggeredBy"],
     actorId: eventRow.actorId ?? null,
     comment: eventRow.comment ?? null,
-    metadata: (eventRow.metadata as Record<string, unknown>) ?? {},
+    metadata: (eventRow.metadata ?? {}) as Record<string, unknown>,
     createdAt: eventRow.createdAt,
   };
 }
@@ -275,7 +304,7 @@ export async function getAvailableTransitions(
     )
     .limit(1);
 
-  if (!instance || !instance.workflowId) return [];
+  if (!instance?.workflowId) return [];
 
   const transitions = await db
     .select()
@@ -347,12 +376,38 @@ export async function getWorkflowEventLog(
     triggeredBy: e.triggeredBy as WorkflowEvent["triggeredBy"],
     actorId: e.actorId ?? null,
     comment: e.comment ?? null,
-    metadata: (e.metadata as Record<string, unknown>) ?? {},
+    metadata: (e.metadata ?? {}) as Record<string, unknown>,
     createdAt: e.createdAt,
   }));
 }
 
 // ── SLA helpers ───────────────────────────────────────────────────────────────
+
+/**
+ * Marks undelivered `workflow.sla_scheduled` outbox events for a specific
+ * instance + state as delivered, preventing the SLA scheduler from enqueuing
+ * breach jobs for the state being left.  Must be called within the same
+ * transaction as the state update.
+ */
+async function cancelPendingSlaTimers(
+  db: DbOrTx,
+  tenantId: string,
+  instanceId: string,
+  stateName: string,
+): Promise<void> {
+  await db
+    .update(outboxEvents)
+    .set({ deliveredAt: new Date() })
+    .where(
+      and(
+        eq(outboxEvents.tenantId, tenantId),
+        eq(outboxEvents.eventType, "workflow.sla_scheduled"),
+        isNull(outboxEvents.deliveredAt),
+        sql`${outboxEvents.payload}->>'instanceId' = ${instanceId}`,
+        sql`${outboxEvents.payload}->>'stateName' = ${stateName}`,
+      ),
+    );
+}
 
 async function scheduleSlaIfNeeded(
   db: DbOrTx,

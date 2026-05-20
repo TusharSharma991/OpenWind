@@ -21,6 +21,7 @@ CREATE TABLE "dead_letter_events" (
   "created_at"        timestamptz NOT NULL DEFAULT now()
 );
 
+-- Tenant + time index for operator inspection queries
 CREATE INDEX "dead_letter_events_tenant_created_idx"
   ON "dead_letter_events" ("tenant_id", "created_at");
 

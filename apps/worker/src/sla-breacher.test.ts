@@ -48,18 +48,22 @@ vi.mock("bullmq", () => ({
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const BASE_JOB = {
-  id: "job-1",
-  data: {
-    outboxEventId: "outbox-aaa",
-    tenantId: "tenant-111",
-    instanceId: "instance-222",
-    workflowId: "workflow-333",
-    stateName: "in_review",
-    slaHours: 24,
-    fireAt: new Date().toISOString(),
-  },
-};
+function makeJob(fireAt?: string) {
+  return {
+    id: "job-1",
+    data: {
+      outboxEventId: "outbox-aaa",
+      tenantId: "tenant-111",
+      instanceId: "instance-222",
+      workflowId: "workflow-333",
+      stateName: "in_review",
+      slaHours: 24,
+      fireAt: fireAt ?? new Date().toISOString(),
+    },
+  };
+}
+
+const BASE_JOB = makeJob();
 
 // ── Import after mocks ────────────────────────────────────────────────────────
 
@@ -113,6 +117,42 @@ describe("slaBreacher processor", () => {
       stateName: "in_review",
       slaHours: 24,
       workflowId: "workflow-333",
+    });
+  });
+
+  describe("late-firing warning", () => {
+    it("logs a warning when the job fires more than 15 min past its fireAt", async () => {
+      // fireAt was 30 minutes ago — exceeds the 15 min threshold
+      const fireAt = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+      mockSelectLimit.mockResolvedValueOnce([{ currentState: "in_review" }]);
+      const { logger } = await import("@platform/logger");
+
+      await capturedProcessor!(makeJob(fireAt));
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ latencyMs: expect.any(Number) }),
+        expect.stringContaining("fired significantly late"),
+      );
+    });
+
+    it("does not warn when the job fires on time", async () => {
+      // fireAt is now — well within threshold
+      const fireAt = new Date().toISOString();
+      mockSelectLimit.mockResolvedValueOnce([{ currentState: "in_review" }]);
+      const { logger } = await import("@platform/logger");
+
+      await capturedProcessor!(makeJob(fireAt));
+
+      expect(logger.warn).not.toHaveBeenCalled();
+    });
+
+    it("still writes the breach event even when the job fires late", async () => {
+      const fireAt = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+      mockSelectLimit.mockResolvedValueOnce([{ currentState: "in_review" }]);
+
+      await capturedProcessor!(makeJob(fireAt));
+
+      expect(mockInsert).toHaveBeenCalledOnce();
     });
   });
 });

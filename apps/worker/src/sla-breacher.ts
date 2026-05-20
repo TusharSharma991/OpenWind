@@ -15,6 +15,13 @@ import { logger } from "@platform/logger";
 import { connection } from "./queues.js";
 import type { SlaJobData } from "./sla-scheduler.js";
 
+/**
+ * Jobs that fire more than 15 minutes past their scheduled fireAt are logged
+ * as warnings.  This surfaces BullMQ downtime recoveries without blocking the
+ * breach event — the event is still written, but operators are alerted.
+ */
+const LATE_WARNING_THRESHOLD_MS = 15 * 60 * 1000;
+
 export const slaBreacher = new Worker<SlaJobData>(
   "sla",
   async (job) => {
@@ -26,6 +33,17 @@ export const slaBreacher = new Worker<SlaJobData>(
       stateName,
       slaHours,
     } = job.data;
+
+    // Warn if the job fired significantly later than its scheduled fireAt.
+    // This happens when BullMQ was down and the job was delayed on recovery.
+    const scheduledFireAt = new Date(job.data.fireAt).getTime();
+    const latencyMs = Date.now() - scheduledFireAt;
+    if (latencyMs > LATE_WARNING_THRESHOLD_MS) {
+      logger.warn(
+        { tenantId, instanceId, stateName, latencyMs, outboxEventId },
+        "SLA breach: job fired significantly late — possible BullMQ downtime recovery",
+      );
+    }
 
     // Guard: is the instance still in the SLA-tracked state?
     const [instance] = await db

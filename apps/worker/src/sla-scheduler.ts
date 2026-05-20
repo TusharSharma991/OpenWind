@@ -10,10 +10,21 @@
  * `workflow.sla_scheduled` outbox event as delivered (preventing scheduling).
  * If the job was already enqueued, the sla-breacher guards against firing by
  * checking the instance's current state before writing the breach event.
+ *
+ * Recovery after BullMQ downtime:
+ * When the worker restarts after an outage, this scheduler re-polls the outbox
+ * for any undelivered `workflow.sla_scheduled` events.  Events whose `fireAt`
+ * is in the past (but within STALE_SLA_THRESHOLD_MS, default 48 h) are
+ * enqueued with delay=0 so they fire immediately on recovery.  Events older
+ * than the threshold are assumed unrecoverable: they are written to the
+ * `dead_letter_events` table for operator inspection and marked delivered so
+ * they are not retried.  The sla-breacher's late-firing warning
+ * (LATE_WARNING_THRESHOLD_MS, 15 min) surfaces recoveries that may be
+ * operationally significant without blocking the breach event.
  */
 
 import { sql, inArray } from "drizzle-orm";
-import { db, outboxEvents } from "@platform/db";
+import { db, outboxEvents, deadLetterEvents } from "@platform/db";
 import { logger } from "@platform/logger";
 import { slaQueue } from "./queues.js";
 
@@ -30,23 +41,33 @@ export type SlaJobData = {
 const BATCH_SIZE = 50;
 const DEFAULT_POLL_INTERVAL_MS = 10_000;
 
+/**
+ * SLA events whose fireAt is more than 48 hours in the past are considered
+ * unrecoverable.  They are dead-lettered instead of being enqueued, preventing
+ * a flood of stale breach events on worker recovery after a prolonged outage.
+ * Operators can inspect `dead_letter_events` to decide whether to re-trigger.
+ */
+export const STALE_SLA_THRESHOLD_MS = 48 * 60 * 60 * 1000;
+
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let activeTick: Promise<void> | null = null;
+
+type SlaOutboxRow = {
+  id: string;
+  tenant_id: string;
+  payload: {
+    instanceId: string;
+    workflowId: string;
+    stateName: string;
+    slaHours: number;
+    fireAt: string;
+  };
+};
 
 export async function tick(): Promise<void> {
   try {
     await db.transaction(async (tx) => {
-      const rows = await tx.execute<{
-        id: string;
-        tenant_id: string;
-        payload: {
-          instanceId: string;
-          workflowId: string;
-          stateName: string;
-          slaHours: number;
-          fireAt: string;
-        };
-      }>(sql`
+      const rows = await tx.execute<SlaOutboxRow>(sql`
         SELECT id, tenant_id, payload
         FROM outbox_events
         WHERE delivered_at IS NULL
@@ -59,29 +80,74 @@ export async function tick(): Promise<void> {
       if (rows.length === 0) return;
 
       const now = Date.now();
+      const fresh: SlaOutboxRow[] = [];
+      const stale: SlaOutboxRow[] = [];
 
-      await Promise.all(
-        rows.map((row) => {
-          const fireAt = new Date(row.payload.fireAt).getTime();
-          const delay = Math.max(0, fireAt - now);
-          const jobId = `sla:${row.id}`;
+      for (const row of rows) {
+        const fireAt = new Date(row.payload.fireAt).getTime();
+        const overdueMs = now - fireAt;
+        if (overdueMs > STALE_SLA_THRESHOLD_MS) {
+          stale.push(row);
+        } else {
+          fresh.push(row);
+        }
+      }
 
-          return slaQueue.add(
-            "sla.breach",
-            {
-              outboxEventId: row.id,
-              tenantId: row.tenant_id,
-              instanceId: row.payload.instanceId,
-              workflowId: row.payload.workflowId,
-              stateName: row.payload.stateName,
-              slaHours: row.payload.slaHours,
-              fireAt: row.payload.fireAt,
-            } satisfies SlaJobData,
-            { jobId, delay },
-          );
-        }),
-      );
+      // Dead-letter stale events — do not enqueue them
+      if (stale.length > 0) {
+        await tx.insert(deadLetterEvents).values(
+          stale.map((row) => ({
+            tenantId: row.tenant_id,
+            originalEventId: row.id,
+            eventType: "workflow.sla_scheduled" as const,
+            payload: row.payload as Record<string, unknown>,
+            ruleId: null,
+            error: `SLA event exceeded stale threshold (${STALE_SLA_THRESHOLD_MS / 3_600_000}h). fireAt=${row.payload.fireAt}`,
+            attemptCount: 1,
+          })),
+        );
 
+        logger.warn(
+          {
+            count: stale.length,
+            thresholdHours: STALE_SLA_THRESHOLD_MS / 3_600_000,
+            outboxEventIds: stale.map((r) => r.id),
+          },
+          "SLA scheduler: dead-lettered stale events",
+        );
+      }
+
+      // Enqueue fresh events (delay=0 for past-due, positive delay for future)
+      if (fresh.length > 0) {
+        await Promise.all(
+          fresh.map((row) => {
+            const fireAt = new Date(row.payload.fireAt).getTime();
+            const delay = Math.max(0, fireAt - now);
+            const jobId = `sla:${row.id}`;
+
+            return slaQueue.add(
+              "sla.breach",
+              {
+                outboxEventId: row.id,
+                tenantId: row.tenant_id,
+                instanceId: row.payload.instanceId,
+                workflowId: row.payload.workflowId,
+                stateName: row.payload.stateName,
+                slaHours: row.payload.slaHours,
+                fireAt: row.payload.fireAt,
+              } satisfies SlaJobData,
+              { jobId, delay },
+            );
+          }),
+        );
+
+        logger.info(
+          { count: fresh.length },
+          "SLA scheduler: enqueued breach jobs",
+        );
+      }
+
+      // Mark all rows (fresh + stale) as delivered so they are not re-processed
       await tx
         .update(outboxEvents)
         .set({ deliveredAt: new Date() })
@@ -91,11 +157,6 @@ export async function tick(): Promise<void> {
             rows.map((r) => r.id),
           ),
         );
-
-      logger.info(
-        { count: rows.length },
-        "SLA scheduler: enqueued breach jobs",
-      );
     });
   } catch (err) {
     logger.error({ err }, "SLA scheduler tick failed");

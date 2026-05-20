@@ -17,13 +17,21 @@ const mockTxExecute = vi.fn();
 const mockTxUpdate = vi.fn(() => ({
   set: vi.fn(() => ({ where: vi.fn().mockResolvedValue([]) })),
 }));
+const mockTxInsert = vi.fn(() => ({
+  values: vi.fn().mockResolvedValue([]),
+}));
 const mockTransaction = vi.fn(async (fn: (tx: unknown) => Promise<void>) => {
-  await fn({ execute: mockTxExecute, update: mockTxUpdate });
+  await fn({
+    execute: mockTxExecute,
+    update: mockTxUpdate,
+    insert: mockTxInsert,
+  });
 });
 
 vi.mock("@platform/db", () => ({
   db: { transaction: mockTransaction },
   outboxEvents: "outbox_events_mock",
+  deadLetterEvents: "dead_letter_events_mock",
 }));
 
 vi.mock("drizzle-orm", () => ({
@@ -57,7 +65,7 @@ function makeRow(
 
 // ── Import after mocks ────────────────────────────────────────────────────────
 
-const { tick } = await import("./sla-scheduler.js");
+const { tick, STALE_SLA_THRESHOLD_MS } = await import("./sla-scheduler.js");
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -93,7 +101,7 @@ describe("SLA scheduler tick", () => {
     expect(opts.delay).toBeGreaterThan(0);
   });
 
-  it("uses delay=0 when fireAt is in the past", async () => {
+  it("uses delay=0 when fireAt is in the past but within stale threshold", async () => {
     const fireAt = new Date(Date.now() - 5_000).toISOString(); // 5 s ago
     mockTxExecute.mockResolvedValueOnce([makeRow({ fireAt })]);
 
@@ -127,5 +135,87 @@ describe("SLA scheduler tick", () => {
     await tick();
 
     expect(logger.error).toHaveBeenCalled();
+  });
+
+  describe("stale event dead-lettering", () => {
+    it("dead-letters events whose fireAt exceeds the stale threshold", async () => {
+      // fireAt is 49 hours ago — exceeds 48 h threshold
+      const fireAt = new Date(
+        Date.now() - STALE_SLA_THRESHOLD_MS - 3_600_000,
+      ).toISOString();
+      const row = makeRow({ id: "outbox-stale", fireAt });
+      mockTxExecute.mockResolvedValueOnce([row]);
+
+      await tick();
+
+      // Must NOT enqueue a BullMQ job
+      expect(mockSlaQueueAdd).not.toHaveBeenCalled();
+
+      // Must insert into dead_letter_events
+      expect(mockTxInsert).toHaveBeenCalledWith("dead_letter_events_mock");
+      const insertValues = mockTxInsert.mock.results[0]?.value.values;
+      expect(insertValues).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({
+            tenantId: "tenant-111",
+            originalEventId: "outbox-stale",
+            eventType: "workflow.sla_scheduled",
+          }),
+        ]),
+      );
+    });
+
+    it("still marks stale outbox events as delivered", async () => {
+      const fireAt = new Date(
+        Date.now() - STALE_SLA_THRESHOLD_MS - 3_600_000,
+      ).toISOString();
+      mockTxExecute.mockResolvedValueOnce([makeRow({ fireAt })]);
+
+      await tick();
+
+      expect(mockTxUpdate).toHaveBeenCalledOnce();
+    });
+
+    it("warns when dead-lettering stale events", async () => {
+      const fireAt = new Date(
+        Date.now() - STALE_SLA_THRESHOLD_MS - 3_600_000,
+      ).toISOString();
+      mockTxExecute.mockResolvedValueOnce([makeRow({ fireAt })]);
+      const { logger } = await import("@platform/logger");
+
+      await tick();
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ count: 1 }),
+        expect.stringContaining("dead-lettered stale events"),
+      );
+    });
+
+    it("enqueues fresh events and dead-letters stale ones in the same batch", async () => {
+      const futureFireAt = new Date(Date.now() + 3_600_000).toISOString();
+      const staleFireAt = new Date(
+        Date.now() - STALE_SLA_THRESHOLD_MS - 3_600_000,
+      ).toISOString();
+      mockTxExecute.mockResolvedValueOnce([
+        makeRow({ id: "outbox-fresh", fireAt: futureFireAt }),
+        makeRow({ id: "outbox-stale", fireAt: staleFireAt }),
+      ]);
+
+      await tick();
+
+      // One BullMQ job for the fresh event
+      expect(mockSlaQueueAdd).toHaveBeenCalledOnce();
+      expect(mockSlaQueueAdd).toHaveBeenCalledWith(
+        "sla.breach",
+        expect.objectContaining({ outboxEventId: "outbox-fresh" }),
+        expect.anything(),
+      );
+
+      // One dead-letter insert for the stale event
+      expect(mockTxInsert).toHaveBeenCalledWith("dead_letter_events_mock");
+
+      // Both rows marked as delivered
+      expect(mockTxUpdate).toHaveBeenCalledOnce();
+    });
   });
 });

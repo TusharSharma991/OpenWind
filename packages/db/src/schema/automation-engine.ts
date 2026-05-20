@@ -75,17 +75,24 @@ export const outboxEvents = pgTable(
   }),
 );
 
+/**
+ * Dead-letter store for outbox events that could not be processed after
+ * exceeding the stale threshold (currently 48 h for SLA events).  Operators
+ * can inspect this table to decide whether to re-trigger or discard.
+ */
 export const deadLetterEvents = pgTable(
   "dead_letter_events",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: uuid("tenant_id").notNull(),
+    /** The original outbox event that was dead-lettered. Nullable — set to NULL if the outbox row was deleted. */
     originalEventId: uuid("original_event_id").references(
       () => outboxEvents.id,
       { onDelete: "set null" },
     ),
     eventType: text("event_type").notNull(),
     payload: jsonb("payload").notNull(),
+    /** The automation rule that was being evaluated, if applicable. NULL for SLA events. */
     ruleId: uuid("rule_id").references(() => automationRules.id, {
       onDelete: "set null",
     }),

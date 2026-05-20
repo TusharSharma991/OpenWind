@@ -5,12 +5,15 @@
  * Bootstraps a bare-bones Zitadel configuration for local development.
  *
  * What it does:
- *  1. Obtains an admin PAT from Zitadel using the initial admin credentials
+ *  1. Obtains an admin token from Zitadel using the initial admin credentials
  *  2. Creates a "Platform" project (idempotent — skips if already exists)
  *  3. Creates an OIDC web application inside the project with 15-min token expiry
  *  4. Creates a machine (service) account for token introspection
- *  5. Generates a PAT for the service account
- *  6. Writes / updates .env.local with all ZITADEL_* and OPENBAO_* env vars
+ *  5. Derives introspection client credentials for the service account
+ *  6. Writes / updates .env.local with ZITADEL_* env vars
+ *
+ * OpenBao bootstrap (OPENBAO_ADDR, OPENBAO_ROLE_ID, OPENBAO_SECRET_ID,
+ * OPENBAO_TRANSIT_KEY) is handled by a separate script — see issue #1.
  *
  * Run once after `docker compose up -d`:
  *   pnpm setup-auth
@@ -26,7 +29,13 @@ import { join } from "node:path";
 const ZITADEL_BASE = process.env["ZITADEL_BASE_URL"] ?? "http://localhost:8080";
 const ADMIN_EMAIL =
   process.env["ZITADEL_ADMIN_EMAIL"] ?? "admin@platform.local";
-const ADMIN_PASSWORD = process.env["ZITADEL_ADMIN_PASSWORD"] ?? "Admin1234!";
+const ADMIN_PASSWORD = process.env["ZITADEL_ADMIN_PASSWORD"];
+if (!ADMIN_PASSWORD) {
+  console.error(
+    "[setup-auth] ERROR: ZITADEL_ADMIN_PASSWORD env var is required — set it in your shell or .env.local and retry.",
+  );
+  process.exit(1);
+}
 const PROJECT_NAME = "Platform";
 const APP_NAME = "platform-api";
 const INTROSPECTION_SA_NAME = "platform-introspection";

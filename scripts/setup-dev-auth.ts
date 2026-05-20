@@ -18,7 +18,7 @@
  * Re-running is safe — it detects existing resources and skips creation.
  */
 
-import { writeFileSync, readFileSync, existsSync } from "node:fs";
+import { writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 // ── Config ────────────────────────────────────────────────────────────────────
@@ -310,8 +310,12 @@ async function getIntrospectionCredentials(
 
 function writeEnvLocal(vars: Record<string, string>): void {
   let existing = "";
-  if (existsSync(ENV_FILE)) {
+  try {
     existing = readFileSync(ENV_FILE, "utf8");
+  } catch (err) {
+    // File does not exist yet — start with an empty string.
+    // Re-throw anything other than a missing-file error.
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
   }
 
   // Parse existing lines, overwrite matching keys, append new ones

@@ -85,6 +85,13 @@ export async function tick(): Promise<void> {
 
       for (const row of rows) {
         const fireAt = new Date(row.payload.fireAt).getTime();
+        if (Number.isNaN(fireAt)) {
+          // Malformed fireAt — dead-letter immediately rather than enqueuing with
+          // NaN delay (BullMQ treats NaN as delay=0, and NaN propagates into the
+          // breacher's latency computation, triggering spurious late-warning logs).
+          stale.push(row);
+          continue;
+        }
         const overdueMs = now - fireAt;
         if (overdueMs > STALE_SLA_THRESHOLD_MS) {
           stale.push(row);
@@ -165,9 +172,24 @@ export async function tick(): Promise<void> {
 
 export function startSlaScheduler(intervalMs = DEFAULT_POLL_INTERVAL_MS): void {
   if (pollTimer) return;
+
+  // Run the first tick immediately so stale events are processed on startup
+  // without waiting up to intervalMs (10 s) — important for BullMQ recovery.
+  activeTick = tick().finally(() => {
+    activeTick = null;
+  });
+
   pollTimer = setInterval(() => {
-    activeTick = tick();
+    // Skip this interval if the previous tick is still running.  Without this
+    // guard a tick that takes longer than intervalMs would cause a second tick
+    // to overwrite activeTick — stopSlaScheduler would then await the newer
+    // promise and return while the original tick is still mid-transaction.
+    if (activeTick) return;
+    activeTick = tick().finally(() => {
+      activeTick = null;
+    });
   }, intervalMs);
+
   logger.info({ intervalMs }, "SLA scheduler started");
 }
 

@@ -1,14 +1,21 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 // ── DB mock helpers ───────────────────────────────────────────────────────────
 
-function makeSelectBuilder(results: () => unknown[]) {
+function makeSelectBuilder(results: () => unknown[], error?: Error) {
   const q: Record<string, unknown> = {};
   q["from"] = () => q;
   q["where"] = () => q;
   q["orderBy"] = () => q;
   q["limit"] = () => q;
-  q["then"] = (resolve: (v: unknown[]) => void) =>
-    Promise.resolve(results()).then(resolve);
+  // .for() is now called instead of a separate db.execute() for pessimistic locking
+  q["for"] = () => q;
+  q["then"] = (
+    resolve: (v: unknown[]) => void,
+    reject?: (e: unknown) => void,
+  ) => {
+    if (error) return Promise.reject(error).then(resolve, reject);
+    return Promise.resolve(results()).then(resolve);
+  };
   return q;
 }
 
@@ -23,14 +30,18 @@ const mockUpdate = vi.fn(() => ({
 
 let selectCallCount = 0;
 let selectResults: (() => unknown[])[] = [];
+// Parallel to selectResults — if set, that select call rejects with the error
+// instead of resolving. Used to simulate FOR UPDATE NOWAIT lock failures.
+let selectErrors: (Error | null)[] = [];
 
 const mockExecute = vi.fn().mockResolvedValue([]);
 
 const dbMock = {
   select: vi.fn(() => {
     const result = selectResults[selectCallCount] ?? (() => []);
+    const error = selectErrors[selectCallCount] ?? null;
     selectCallCount++;
-    return makeSelectBuilder(result);
+    return makeSelectBuilder(result, error ?? undefined);
   }),
   insert: vi.fn((table: unknown) => {
     if (table === "outbox_events_mock") {
@@ -130,6 +141,7 @@ describe("executeTransition", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     selectCallCount = 0;
+    selectErrors = [];
     mockExecute.mockResolvedValue([]);
     mockInsertValues.mockReturnValue({
       returning: vi.fn().mockResolvedValue([fakeEvent]),
@@ -330,11 +342,13 @@ describe("executeTransition", () => {
   });
 
   it("throws TRANSITION_LOCKED when Postgres 55P03 is raised by FOR UPDATE NOWAIT", async () => {
+    // The read+lock is now a single SELECT ... FOR UPDATE NOWAIT query.
+    // Simulating a lock-not-available error means the first select call rejects.
     const lockError = Object.assign(new Error("lock_not_available"), {
       code: "55P03",
     });
-    selectResults = [() => [fakeInstance]];
-    mockExecute.mockRejectedValueOnce(lockError);
+    selectResults = [() => []]; // result doesn't matter — error fires first
+    selectErrors = [lockError];
 
     await expect(
       executeTransition(dbMock as never, TENANT_ID, {
@@ -351,12 +365,31 @@ describe("executeTransition", () => {
     expect(mockInsertValues).not.toHaveBeenCalled();
   });
 
+  it("read and lock are a single atomic query — no separate db.execute lock step", async () => {
+    // Previously the engine called db.execute() for FOR UPDATE NOWAIT after an
+    // unlocked SELECT.  That TOCTOU window is now closed: the read+lock is one query.
+    // This test verifies db.execute() is never called during a transition.
+    selectResults = [
+      () => [fakeInstance],
+      () => [fakeWorkflow],
+      () => [fakeTransition],
+      () => [],
+    ];
+
+    await executeTransition(dbMock as never, TENANT_ID, {
+      instanceId: INSTANCE_ID,
+      transitionId: TRANSITION_ID,
+    });
+
+    expect(mockExecute).not.toHaveBeenCalled();
+  });
+
   it("re-throws non-lock Postgres errors unchanged", async () => {
     const dbError = Object.assign(new Error("connection refused"), {
       code: "08006",
     });
-    selectResults = [() => [fakeInstance]];
-    mockExecute.mockRejectedValueOnce(dbError);
+    selectResults = [() => []];
+    selectErrors = [dbError];
 
     await expect(
       executeTransition(dbMock as never, TENANT_ID, {
@@ -465,6 +498,7 @@ describe("getAvailableTransitions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     selectCallCount = 0;
+    selectErrors = [];
   });
 
   it("returns transitions available for current state and actor roles", async () => {
@@ -528,6 +562,7 @@ describe("getWorkflowEventLog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     selectCallCount = 0;
+    selectErrors = [];
   });
 
   it("returns ordered events for a valid instance", async () => {

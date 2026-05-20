@@ -65,7 +65,8 @@ function makeRow(
 
 // ── Import after mocks ────────────────────────────────────────────────────────
 
-const { tick, STALE_SLA_THRESHOLD_MS } = await import("./sla-scheduler.js");
+const { tick, startSlaScheduler, stopSlaScheduler, STALE_SLA_THRESHOLD_MS } =
+  await import("./sla-scheduler.js");
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -191,6 +192,23 @@ describe("SLA scheduler tick", () => {
       );
     });
 
+    it("dead-letters events with a malformed (NaN) fireAt instead of enqueuing with NaN delay", async () => {
+      const row = makeRow({ id: "outbox-nan", fireAt: "not-a-date" });
+      mockTxExecute.mockResolvedValueOnce([row]);
+
+      await tick();
+
+      // Must NOT enqueue — NaN delay would cause BullMQ to fire immediately
+      // and propagate NaN into the breacher's latency computation
+      expect(mockSlaQueueAdd).not.toHaveBeenCalled();
+
+      // Must dead-letter the malformed row
+      expect(mockTxInsert).toHaveBeenCalledWith("dead_letter_events_mock");
+
+      // Must still mark as delivered
+      expect(mockTxUpdate).toHaveBeenCalledOnce();
+    });
+
     it("enqueues fresh events and dead-letters stale ones in the same batch", async () => {
       const futureFireAt = new Date(Date.now() + 3_600_000).toISOString();
       const staleFireAt = new Date(
@@ -216,6 +234,51 @@ describe("SLA scheduler tick", () => {
 
       // Both rows marked as delivered
       expect(mockTxUpdate).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe("startSlaScheduler", () => {
+    it("fires the first tick immediately on startup without waiting for the interval", async () => {
+      vi.useFakeTimers();
+      mockTxExecute.mockResolvedValue([]);
+
+      startSlaScheduler(10_000);
+
+      // At t=0, before any interval fires, the transaction mock should already
+      // have been called by the immediate first tick.
+      await Promise.resolve(); // flush microtask queue
+      expect(mockTransaction).toHaveBeenCalled();
+
+      await stopSlaScheduler();
+      vi.useRealTimers();
+    });
+
+    it("skips a scheduled interval tick if the previous tick is still running", async () => {
+      vi.useFakeTimers();
+
+      let resolveTick!: () => void;
+      const slowTick = new Promise<void>((res) => {
+        resolveTick = res;
+      });
+
+      // Make the transaction hang so activeTick is never cleared
+      mockTransaction.mockImplementationOnce(() => slowTick);
+      mockTxExecute.mockResolvedValue([]);
+
+      startSlaScheduler(100);
+      await Promise.resolve(); // let the immediate tick start
+
+      // Advance past one interval — a second tick should be skipped because
+      // the first is still in-flight
+      vi.advanceTimersByTime(150);
+      await Promise.resolve();
+
+      // Only one transaction should have started despite the interval firing
+      expect(mockTransaction).toHaveBeenCalledTimes(1);
+
+      resolveTick();
+      await stopSlaScheduler();
+      vi.useRealTimers();
     });
   });
 });

@@ -24,17 +24,40 @@ export async function executeTransition(
   tenantId: string,
   request: TransitionRequest,
 ): Promise<WorkflowEvent> {
-  // 1. Load entity instance
-  const [instance] = await db
-    .select()
-    .from(entityInstances)
-    .where(
-      and(
-        eq(entityInstances.id, request.instanceId),
-        eq(entityInstances.tenantId, tenantId),
-      ),
-    )
-    .limit(1);
+  // 1. Load entity instance with a pessimistic write lock.
+  // FOR UPDATE NOWAIT throws Postgres error 55P03 immediately if another transaction
+  // already holds the lock — the caller gets TRANSITION_LOCKED and retries after the
+  // Retry-After header interval.
+  //
+  // Combining the read and the lock into a single query closes the TOCTOU window that
+  // would exist between a plain SELECT (reading current_state) and a separate
+  // FOR UPDATE NOWAIT statement. A concurrent transition committing between those two
+  // statements would cause the guard at step 3 to compare against a stale current_state,
+  // potentially allowing an invalid state-machine transition.
+  let instance: typeof entityInstances.$inferSelect | undefined;
+  try {
+    [instance] = await db
+      .select()
+      .from(entityInstances)
+      .where(
+        and(
+          eq(entityInstances.id, request.instanceId),
+          eq(entityInstances.tenantId, tenantId),
+        ),
+      )
+      .for("update", { noWait: true })
+      .limit(1);
+  } catch (err) {
+    const code =
+      (err as { code?: unknown }).code ??
+      (err as { cause?: { code?: unknown } }).cause?.code;
+    if (code === "55P03") {
+      throw new WorkflowError("TRANSITION_LOCKED", {
+        instanceId: request.instanceId,
+      });
+    }
+    throw err;
+  }
 
   if (!instance) {
     throw new WorkflowError("INSTANCE_NOT_FOUND", {
@@ -47,28 +70,6 @@ export async function executeTransition(
       instanceId: request.instanceId,
       reason: "no workflow attached",
     });
-  }
-
-  // 1b. Pessimistic row lock — prevents concurrent transitions on the same instance.
-  // Throws Postgres error 55P03 (lock_not_available) if another transaction holds the lock;
-  // caller's withTenantContext transaction keeps the lock until commit.
-  try {
-    await db.execute(
-      sql`SELECT 1 FROM entity_instances
-          WHERE id = ${request.instanceId}::uuid
-            AND tenant_id = ${tenantId}::uuid
-          FOR UPDATE NOWAIT`,
-    );
-  } catch (err) {
-    const code =
-      (err as { code?: unknown }).code ??
-      (err as { cause?: { code?: unknown } }).cause?.code;
-    if (code === "55P03") {
-      throw new WorkflowError("TRANSITION_LOCKED", {
-        instanceId: request.instanceId,
-      });
-    }
-    throw err;
   }
 
   // 1d. Idempotency check — return existing event if key already used

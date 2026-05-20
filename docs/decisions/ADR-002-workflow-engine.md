@@ -287,7 +287,7 @@ We use **pessimistic locking** (`SELECT ... FOR UPDATE`) for transitions, not op
 
 Optimistic locking would require the client to send a version number with the transition request, and the update would fail if the version had changed since the client loaded the entity. This is the correct choice for some update operations, but for workflow transitions it creates a poor user experience: two agents simultaneously trying to assign the same ticket would result in one of them getting a "version conflict" error and needing to retry.
 
-With pessimistic locking, the second agent's request waits briefly while the first completes, then proceeds. The wait is bounded (we set a `lock_timeout` of 5 seconds). This is more predictable behavior for business process operations.
+With pessimistic locking (`FOR UPDATE NOWAIT`), the second agent's request fails immediately with a `TRANSITION_LOCKED` error mapped to HTTP 409 and a `Retry-After: 5` header. The client retries after 5 seconds. We use `NOWAIT` rather than a blocking wait because blocking under contention exhausts connection-pool slots and can cascade into a broader outage. `NOWAIT` gives the client a deterministic, bounded retry signal while keeping the database connection free.
 
 #### The condition expression language
 
@@ -326,56 +326,26 @@ This covers approximately 95% of real business conditions. The remaining 5% use 
 
 #### SLA timer management
 
-SLA timers are managed via BullMQ delayed jobs. When an entity enters a state that has `sla_hours` set:
+SLA timers are managed through the outbox pattern rather than direct BullMQ scheduling. When an entity enters a state with `sla_hours` set, `executeTransition` writes a `workflow.sla_scheduled` outbox event (inside the same transaction as the state update). The SLA scheduler worker polls these events and enqueues BullMQ delayed jobs. Cancellation is handled by marking the outbox event as delivered before the scheduler enqueues it.
 
-```typescript
-async function scheduleSlaTimerIfNeeded(
-  instanceId: string,
-  state: string,
-  workflowId: string,
-  db: DrizzleTransaction,
-): Promise<void> {
-  const workflowState = await db
-    .select()
-    .from(workflowStates)
-    .where(
-      and(
-        eq(workflowStates.workflowId, workflowId),
-        eq(workflowStates.name, state),
-      ),
-    )
-    .limit(1)
-    .then((r) => r[0]);
+**Scheduling flow:**
 
-  if (!workflowState?.slaHours) return;
+1. `executeTransition` writes a `workflow.sla_scheduled` outbox row with `fireAt = now + slaHours`.
+2. The SLA scheduler polls undelivered `workflow.sla_scheduled` rows (batch of 50, `FOR UPDATE SKIP LOCKED`).
+3. For each row it enqueues a BullMQ delayed job with `jobId = "sla:{outboxEventId}"` and `delay = max(0, fireAt - now)`.
+4. The outbox row is marked delivered atomically in the same transaction as the enqueue.
 
-  const delayMs = workflowState.slaHours * 60 * 60 * 1000;
+**Cancellation flow (state exit):**
 
-  const job = await slaQueue.add(
-    "sla-check",
-    { instanceId, state, workflowId },
-    { delay: delayMs, jobId: `sla:${instanceId}:${state}` },
-  );
+`executeTransition` calls `cancelPendingSlaTimers` in the same transaction as the state update. This marks any undelivered `workflow.sla_scheduled` rows for the instance+state as delivered, preventing the scheduler from enqueuing them. Jobs that were already enqueued before cancellation are handled by the breacher guard (step 5).
 
-  // Store job ID so we can cancel it on state exit
-  await redis.set(`sla:${instanceId}:${state}`, job.id, {
-    EX: workflowState.slaHours * 3600 + 3600,
-  });
-}
+**Breach flow:**
 
-async function cancelSlaTimer(
-  instanceId: string,
-  exitingState: string,
-): Promise<void> {
-  const jobId = await redis.get(`sla:${instanceId}:${exitingState}`);
-  if (!jobId) return;
-  const job = await slaQueue.getJob(jobId);
-  if (job) await job.remove();
-  await redis.del(`sla:${instanceId}:${exitingState}`);
-}
-```
+5. When the delayed job fires, the SLA breacher checks inside a transaction whether the instance is still in the SLA-tracked state. If not, it is a no-op. If yes, it writes a `workflow.sla_breached` outbox event. The outbox poller routes this to the automation queue, where configured SLA breach rules are evaluated.
 
-When the SLA job fires, it checks whether the instance is still in the SLA-bound state (it may have transitioned since the job was scheduled). If still in the state, it publishes a `workflow.sla_breached` event. The automation engine handles whatever the customer configured for that event.
+**Recovery after downtime:**
+
+On worker restart, the scheduler re-polls all undelivered `workflow.sla_scheduled` events. Past-due events (within 48 h of `fireAt`) are enqueued with `delay=0` so they fire immediately. Events older than 48 h are written to `dead_letter_events` for operator inspection rather than causing a flood of stale breach notifications. The breacher logs a late-firing warning (`LATE_WARNING_THRESHOLD_MS = 15 min`) when a job fires significantly after its scheduled time.
 
 #### Parallel approval pattern
 

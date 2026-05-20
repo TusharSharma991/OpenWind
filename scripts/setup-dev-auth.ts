@@ -54,6 +54,8 @@ function fail(msg: string): never {
   process.exit(1);
 }
 
+const FETCH_TIMEOUT_MS = 15_000;
+
 async function zitadelFetch(
   path: string,
   token: string,
@@ -66,6 +68,7 @@ async function zitadelFetch(
   const url = `${ZITADEL_BASE}${path}`;
   const res = await fetch(url, {
     ...options,
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
@@ -90,6 +93,7 @@ async function getAdminToken(): Promise<string> {
 
   const res = await fetch(`${ZITADEL_BASE}/oauth/v2/token`, {
     method: "POST",
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       grant_type: "password",

@@ -352,7 +352,12 @@ describe("POST /entities/:id/transitions — HTTP cross-tenant isolation", () =>
 
     const res = await app.request(`/${instanceIdB}/transitions`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        // sk_ prefix bypasses Zitadel introspection check; auth context is
+        // already pre-set by the makeApp fixture middleware above.
+        Authorization: "Bearer sk_test_isolation_bypass",
+      },
       body: JSON.stringify({ transitionId: transitionIdA }),
     });
 

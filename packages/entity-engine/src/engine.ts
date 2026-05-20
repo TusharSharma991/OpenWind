@@ -27,6 +27,7 @@ import {
   invalidateSchemaCache,
   transformZodErrors,
   applyFormulaFields,
+  validateEntityRefs,
 } from "./validation/index.js";
 import {
   resolveLookupFields,
@@ -75,6 +76,17 @@ export async function createEntity(
   if (crossErrors.length > 0) throw new ValidationError(crossErrors);
 
   const allFields = await loadEntityFields(db, input.entityTypeId, tenantId);
+
+  // Cross-tenant entity_ref guard: ensure all referenced instances belong to
+  // this tenant.  Runs after Zod (values are valid UUIDs) but before INSERT.
+  const refErrors = await validateEntityRefs(
+    db,
+    tenantId,
+    result.data as Record<string, unknown>,
+    allFields,
+  );
+  if (refErrors.length > 0) throw new ValidationError(refErrors);
+
   const fieldsWithFormulas = await applyFormulaFields(
     allFields,
     result.data as Record<string, unknown>,
@@ -209,6 +221,24 @@ export async function updateEntity(
       existing.entityTypeId,
       tenantId,
     );
+
+    // Cross-tenant entity_ref guard: validate only the fields being updated
+    // (existing refs were already validated on create/previous update).
+    // input.fields is narrowed to Record<string,unknown> by the enclosing if.
+    const providedFields = input.fields;
+    const updatedRefFields = allFields.filter(
+      (f) => f.fieldType === "entity_ref" && f.name in providedFields,
+    );
+    if (updatedRefFields.length > 0) {
+      const refErrors = await validateEntityRefs(
+        db,
+        tenantId,
+        providedFields,
+        updatedRefFields,
+      );
+      if (refErrors.length > 0) throw new ValidationError(refErrors);
+    }
+
     const fieldsWithFormulas = await applyFormulaFields(
       allFields,
       fullResult.data as Record<string, unknown>,

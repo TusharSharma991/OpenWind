@@ -59,4 +59,6 @@ export {
   getValidationSchema,
   invalidateSchemaCache,
   evaluateFormula,
+  isSafeRegex,
+  validateEntityRefs,
 } from "./validation/index.js";

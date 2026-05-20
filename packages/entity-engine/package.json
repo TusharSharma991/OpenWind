@@ -17,6 +17,7 @@
     "@platform/db": "workspace:*",
     "@platform/logger": "workspace:*",
     "drizzle-orm": "^0.45.2",
+    "recheck": "^4.4.5",
     "redis": "^4.0.0",
     "zod": "^3.23.0"
   },

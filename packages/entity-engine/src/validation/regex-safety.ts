@@ -41,12 +41,13 @@ export async function isSafeRegex(
   try {
     const result = await check(pattern, flags);
     // recheck statuses: "safe" | "vulnerable" | "unknown" | "timeout"
-    // We accept "safe", "unknown", and "timeout" (conservative allow on timeout).
-    // Only "vulnerable" is rejected.
-    if (result.status === "vulnerable") {
+    // Accept only "safe" and "unknown".
+    // "timeout" is treated as fail-closed: a pattern complex enough to exhaust
+    // the static analyser is the highest-risk category and must be rejected.
+    if (result.status === "vulnerable" || result.status === "timeout") {
       logger.warn(
-        { pattern, flags, complexity: result.complexity },
-        "entity-engine: rejected ReDoS-vulnerable regex pattern",
+        { pattern, flags, status: result.status },
+        "entity-engine: rejected ReDoS-vulnerable or timeout regex pattern",
       );
       return false;
     }

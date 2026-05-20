@@ -7,6 +7,7 @@ import { rateLimit } from "./middleware/rate-limit.js";
 import { entityTypesRouter } from "./routes/entity-types/index.js";
 import { entitiesRouter } from "./routes/entities/index.js";
 import { workflowsRouter } from "./routes/workflows/index.js";
+import { automationRulesRouter } from "./routes/automation-rules/index.js";
 
 export function createApp(): Hono {
   const app = new Hono();
@@ -26,6 +27,7 @@ export function createApp(): Hono {
   app.route("/entity-types", entityTypesRouter);
   app.route("/entities", entitiesRouter);
   app.route("/workflows", workflowsRouter);
+  app.route("/automation-rules", automationRulesRouter);
 
   return app;
 }

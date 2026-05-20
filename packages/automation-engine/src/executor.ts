@@ -1,0 +1,222 @@
+import { eq, and } from "drizzle-orm";
+import type { Redis } from "ioredis";
+import type { DbOrTx } from "@platform/db";
+import { automationRules, automationExecutions } from "@platform/db";
+import { logger } from "@platform/logger";
+import { evaluateConditionTree } from "@platform/workflow-engine";
+import type { ConditionTree } from "@platform/workflow-engine";
+import { TriggerEventSchema } from "./event-schemas.js";
+import type { TriggerEvent } from "./event-schemas.js";
+import { AutomationError } from "./types.js";
+import type { ActionConfig } from "./types.js";
+import { executeNotifyAction } from "./actions/notify.js";
+import { executeSetFieldAction } from "./actions/set-field.js";
+import { executeTransitionAction } from "./actions/transition.js";
+import { isOpen, recordFailure, reset } from "./circuit-breaker.js";
+
+const MAX_DEPTH = 10;
+
+export async function executeAutomationRules(
+  db: DbOrTx,
+  tenantId: string,
+  rawEvent: unknown,
+  depth = 0,
+  redis?: Redis,
+): Promise<void> {
+  if (depth >= MAX_DEPTH) {
+    throw new AutomationError("MAX_DEPTH_EXCEEDED", { depth });
+  }
+
+  const parsed = TriggerEventSchema.safeParse(rawEvent);
+  if (!parsed.success) {
+    throw new AutomationError("INVALID_EVENT_PAYLOAD", {
+      errors: parsed.error.issues,
+    });
+  }
+  const event: TriggerEvent = parsed.data;
+
+  const rules = await db
+    .select()
+    .from(automationRules)
+    .where(
+      and(
+        eq(automationRules.tenantId, tenantId),
+        eq(automationRules.triggerType, event.eventType),
+        eq(automationRules.isEnabled, true),
+      ),
+    )
+    .orderBy(automationRules.priority, automationRules.createdAt);
+
+  for (const rule of rules) {
+    // Merge the event's top-level properties (e.g. toState, fromState,
+    // assigneeId, slaHours) with any entity field values so that condition
+    // trees can match on both. entity.created events carry a `fields` map;
+    // all other event types carry their data as top-level properties only.
+    const eventFields: Record<string, unknown> = {
+      ...Object.fromEntries(
+        Object.entries(event).filter(([k]) => k !== "fields"),
+      ),
+      ...("fields" in event ? (event.fields as Record<string, unknown>) : {}),
+    };
+    // Drizzle types jsonb as unknown; rowToRule in automation-crud does the
+    // same cast after querying. Cast here too since executor queries directly.
+    const passes = evaluateConditionTree(
+      rule.conditions as ConditionTree | null,
+      eventFields,
+    );
+    if (!passes) continue;
+
+    const [execRow] = await db
+      .insert(automationExecutions)
+      .values({
+        tenantId,
+        ruleId: rule.id,
+        triggerEvent: event as Record<string, unknown>,
+        status: "running",
+        startedAt: new Date(),
+      })
+      .returning();
+
+    if (!execRow) continue;
+
+    // Run all actions for this rule inside db.transaction().
+    // • When db is already a transaction (worker path via withTenantContext):
+    //   Drizzle creates a named savepoint automatically.  If actions throw, the
+    //   savepoint is rolled back but the outer transaction remains open so the
+    //   audit-log update below can still execute.
+    // • When db is a bare connection (direct callers, isolation tests):
+    //   Drizzle starts a regular transaction.  If actions throw, the transaction
+    //   rolls back and the outer bare connection writes the audit log normally.
+    //
+    // NOTE: actions within a rule ARE atomically rolled back together on failure
+    // because they all run inside this inner transaction/savepoint.  Partial
+    // execution (actions 0..K-1 applied, action K fails) is therefore prevented
+    // at the DB level.  Full saga / compensating-action support (for side-effects
+    // that cannot be rolled back, e.g. sent emails) remains deferred.
+    let actionError: Error | null = null;
+    let skippedCount = 0;
+
+    try {
+      await db.transaction(async (ruleTx) => {
+        for (const action of rule.actions as ActionConfig[]) {
+          const skipped = await runAction(
+            ruleTx,
+            tenantId,
+            event,
+            action,
+            depth,
+            redis,
+          );
+          if (skipped) skippedCount++;
+        }
+      });
+    } catch (err) {
+      actionError = err instanceof Error ? err : new Error(String(err));
+    }
+
+    // Write the execution outcome using the outer db — always available
+    // regardless of whether the inner transaction/savepoint was rolled back.
+    const finalStatus = actionError
+      ? "failed"
+      : skippedCount > 0
+        ? "degraded"
+        : "success";
+
+    await db
+      .update(automationExecutions)
+      .set({
+        status: finalStatus,
+        // If any actions were bypassed by the circuit breaker, record the count
+        // so the audit trail reflects partial execution — not "success" (misleading)
+        // nor "failed" (suggests a bug rather than a deliberate circuit-open skip).
+        result:
+          skippedCount > 0 && !actionError
+            ? ({ skippedActions: skippedCount } as Record<string, unknown>)
+            : null,
+        error: actionError?.message ?? null,
+        completedAt: new Date(),
+      })
+      .where(eq(automationExecutions.id, execRow.id));
+
+    if (actionError) {
+      logger.error(
+        { tenantId, ruleId: rule.id, execId: execRow.id, err: actionError },
+        "Automation: rule execution failed",
+      );
+    } else {
+      logger.info(
+        { tenantId, ruleId: rule.id, execId: execRow.id, skippedCount },
+        skippedCount > 0
+          ? "Automation: rule executed with degraded actions (circuit open)"
+          : "Automation: rule executed successfully",
+      );
+    }
+  }
+}
+
+/**
+ * Runs a single action.
+ * Returns `true` if the action was skipped because the circuit breaker is open;
+ * `false` if the action executed (successfully or after throwing).
+ * Throws if the underlying action handler throws.
+ */
+async function runAction(
+  db: DbOrTx,
+  tenantId: string,
+  event: TriggerEvent,
+  action: ActionConfig,
+  depth: number,
+  redis?: Redis,
+): Promise<boolean> {
+  const config = action.config;
+
+  if (redis && (await isOpen(redis, tenantId, action.type))) {
+    logger.warn(
+      { tenantId, actionType: action.type },
+      "Automation: circuit open — skipping action",
+    );
+    return true; // skipped
+  }
+
+  try {
+    switch (action.type) {
+      case "notify":
+        await executeNotifyAction(
+          db,
+          tenantId,
+          event,
+          config as Parameters<typeof executeNotifyAction>[3],
+        );
+        break;
+      case "set_field":
+        await executeSetFieldAction(
+          db,
+          tenantId,
+          event,
+          config as unknown as Parameters<typeof executeSetFieldAction>[3],
+        );
+        break;
+      case "transition":
+        await executeTransitionAction(
+          db,
+          tenantId,
+          event,
+          config as unknown as Parameters<typeof executeTransitionAction>[3],
+          depth,
+        );
+        break;
+      default:
+        logger.warn(
+          { tenantId, actionType: action.type },
+          "Automation: unhandled action type",
+        );
+        return false;
+    }
+    if (redis) await reset(redis, tenantId, action.type);
+  } catch (err) {
+    if (redis) await recordFailure(redis, tenantId, action.type);
+    throw err;
+  }
+
+  return false; // executed
+}

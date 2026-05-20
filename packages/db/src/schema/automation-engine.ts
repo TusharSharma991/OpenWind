@@ -74,3 +74,31 @@ export const outboxEvents = pgTable(
     ),
   }),
 );
+
+export const deadLetterEvents = pgTable(
+  "dead_letter_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    originalEventId: uuid("original_event_id").references(
+      () => outboxEvents.id,
+      { onDelete: "set null" },
+    ),
+    eventType: text("event_type").notNull(),
+    payload: jsonb("payload").notNull(),
+    ruleId: uuid("rule_id").references(() => automationRules.id, {
+      onDelete: "set null",
+    }),
+    error: text("error").notNull(),
+    attemptCount: integer("attempt_count").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => ({
+    tenantCreatedIdx: index("dead_letter_events_tenant_created_idx").on(
+      t.tenantId,
+      t.createdAt,
+    ),
+  }),
+);

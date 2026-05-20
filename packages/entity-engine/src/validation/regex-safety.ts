@@ -40,20 +40,29 @@ export async function isSafeRegex(
 
   try {
     const result = await check(pattern, flags);
-    // recheck statuses: "safe" | "vulnerable" | "unknown" | "timeout"
-    // Accept only "safe" and "unknown".
-    // "timeout" is treated as fail-closed: a pattern complex enough to exhaust
-    // the static analyser is the highest-risk category and must be rejected.
-    if (result.status === "vulnerable" || result.status === "timeout") {
+    // recheck returns status "safe" | "vulnerable" | "unknown".
+    // When timeout occurs recheck throws { kind: "timeout" } (see catch block).
+    if (result.status === "vulnerable") {
       logger.warn(
         { pattern, flags, status: result.status },
-        "entity-engine: rejected ReDoS-vulnerable or timeout regex pattern",
+        "entity-engine: rejected ReDoS-vulnerable regex pattern",
       );
       return false;
     }
     return true;
   } catch (err) {
-    // Unexpected error from recheck — fail-safe: reject the pattern
+    // recheck throws { kind: "timeout" } when the analyser runs out of time.
+    // Treat timeout as fail-closed: a pattern complex enough to exhaust the
+    // static analyser is highest-risk and must be rejected.
+    const kind = (err as { kind?: string }).kind;
+    if (kind === "timeout") {
+      logger.warn(
+        { pattern, flags },
+        "entity-engine: rejected regex pattern — recheck timed out (fail-closed)",
+      );
+      return false;
+    }
+    // Unexpected error — fail-safe: reject the pattern
     logger.warn(
       { pattern, flags, err },
       "entity-engine: recheck threw unexpectedly — rejecting pattern (fail-safe)",

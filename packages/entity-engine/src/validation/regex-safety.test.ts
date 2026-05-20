@@ -34,10 +34,11 @@ describe("isSafeRegex", () => {
     expect(await isSafeRegex("(a+)+$")).toBe(false);
   });
 
-  it("returns false when recheck reports timeout — fail-closed", async () => {
-    // A pattern complex enough to time out the static analyser is the
+  it("returns false when recheck times out — fail-closed", async () => {
+    // recheck signals timeout by throwing { kind: "timeout" }, not by returning
+    // a status.  A pattern complex enough to exhaust the analyser is the
     // highest-risk category and must be rejected, not silently accepted.
-    mockCheck.mockResolvedValue({ status: "timeout" });
+    mockCheck.mockRejectedValue({ kind: "timeout" });
     expect(await isSafeRegex("(.*){10}$")).toBe(false);
   });
 

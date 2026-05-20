@@ -32,6 +32,10 @@ vi.mock("./introspection.js", () => ({
 
 vi.mock("@platform/db", () => ({
   apiKeys: "api_keys_mock",
+  tenantUsers: "tenant_users_mock",
+  // withTenantContext is called fire-and-forget after JWT auth; mock it as a
+  // no-op so tests don't need a real db connection and don't throw 500s.
+  withTenantContext: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("drizzle-orm", () => ({

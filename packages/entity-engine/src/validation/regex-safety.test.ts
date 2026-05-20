@@ -30,16 +30,21 @@ describe("isSafeRegex", () => {
   });
 
   it("returns false when recheck reports vulnerable", async () => {
+    // Use a benign pattern string — recheck is mocked so the pattern value
+    // does not affect the outcome; this avoids CodeQL flagging a literal
+    // ReDoS-vulnerable regex in the test source.
     mockCheck.mockResolvedValue({ status: "vulnerable", complexity: {} });
-    expect(await isSafeRegex("(a+)+$")).toBe(false);
+    expect(await isSafeRegex("^redos-candidate$")).toBe(false);
   });
 
   it("returns false when recheck times out — fail-closed", async () => {
     // recheck signals timeout by throwing { kind: "timeout" }, not by returning
     // a status.  A pattern complex enough to exhaust the analyser is the
     // highest-risk category and must be rejected, not silently accepted.
+    // Use a benign placeholder — check is mocked; the actual pattern value
+    // does not matter for the test assertion.
     mockCheck.mockRejectedValue({ kind: "timeout" });
-    expect(await isSafeRegex("(.*){10}$")).toBe(false);
+    expect(await isSafeRegex("^timeout-candidate$")).toBe(false);
   });
 
   it("returns false when the pattern is syntactically invalid", async () => {

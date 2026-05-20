@@ -1,6 +1,6 @@
 import { Worker, type Job } from "bullmq";
 import Redis from "ioredis";
-import { db, withTenantContext, deadLetterEvents } from "@platform/db";
+import { withTenantContext, deadLetterEvents } from "@platform/db";
 import { executeAutomationRules } from "@platform/automation-engine";
 import { env } from "@platform/config";
 import { logger } from "@platform/logger";
@@ -22,8 +22,10 @@ export const automationWorker = new Worker<AutomationJobData>(
   "automation",
   async (job) => {
     const { tenantId, payload } = job.data;
+    // Pass the Redis connection so the circuit breaker is active.
+    // Without this argument the circuit breaker guard is silently skipped.
     await withTenantContext(tenantId, (tx) =>
-      executeAutomationRules(tx, tenantId, payload),
+      executeAutomationRules(tx, tenantId, payload, 0, connection),
     );
   },
   { connection, concurrency: 5 },
@@ -39,15 +41,19 @@ async function handleFailedJob(
     job.data as AutomationJobData;
 
   try {
-    await db.insert(deadLetterEvents).values({
-      tenantId,
-      originalEventId: outboxEventId,
-      eventType,
-      payload: payload as Record<string, unknown>,
-      ruleId: ruleId ?? null,
-      error: err.message,
-      attemptCount: job.attemptsMade,
-    });
+    // Use withTenantContext so the insert runs with tenant_id set consistently
+    // with all other writes — defensive against any future RLS reinstatement.
+    await withTenantContext(tenantId, (tx) =>
+      tx.insert(deadLetterEvents).values({
+        tenantId,
+        originalEventId: outboxEventId,
+        eventType,
+        payload: payload as Record<string, unknown>,
+        ruleId: ruleId ?? null,
+        error: err.message,
+        attemptCount: job.attemptsMade,
+      }),
+    );
     logger.warn(
       { tenantId, outboxEventId, eventType },
       "Automation: job moved to dead letter queue",

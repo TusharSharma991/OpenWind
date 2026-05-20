@@ -72,7 +72,11 @@ export const ConditionTreeSchema: z.ZodType<ConditionTreeInput> = z.lazy(() =>
   ]),
 );
 
-// Compile-time guard: if @platform/workflow-engine adds new operator types,
-// this assignment will fail tsc and alert us to update ConditionTreeSchema.
+// Bidirectional compile-time compatibility guards.
+// _Forward: fails if workflow-engine adds a new operator that ConditionTreeSchema doesn't cover.
+// _Inverse: fails if ConditionTreeInput drifts to accept shapes that ConditionTree rejects.
+// Both must remain `true` — a `never` here is a tsc error.
 export type _AssertConditionTreeCompatible =
   ConditionTreeInput extends ConditionTree ? true : never;
+export type _AssertConditionTreeInverse =
+  ConditionTree extends ConditionTreeInput ? true : never;

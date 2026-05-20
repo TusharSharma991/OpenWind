@@ -1,4 +1,4 @@
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import type { Redis } from "ioredis";
 import type { DbOrTx } from "@platform/db";
 import { automationRules, automationExecutions } from "@platform/db";
@@ -58,6 +58,8 @@ export async function executeAutomationRules(
       ),
       ...("fields" in event ? (event.fields as Record<string, unknown>) : {}),
     };
+    // Drizzle types jsonb as unknown; rowToRule in automation-crud does the
+    // same cast after querying. Cast here too since executor queries directly.
     const passes = evaluateConditionTree(
       rule.conditions as ConditionTree | null,
       eventFields,
@@ -77,26 +79,65 @@ export async function executeAutomationRules(
 
     if (!execRow) continue;
 
+    // Use a named savepoint so that a Postgres exception thrown by an action
+    // (FK violation, constraint failure, etc.) does not abort the outer
+    // transaction.  Without this, the catch block's attempt to write "failed"
+    // to automation_executions would itself fail with "current transaction is
+    // aborted", leaving the execution stuck at "running" with no trace in the
+    // audit log.
+    const sp = `sp_exec_${execRow.id.replace(/-/g, "_")}`;
+    await db.execute(sql.raw(`SAVEPOINT ${sp}`));
+
     try {
       // NOTE: Actions within a rule execute sequentially but are NOT transactional.
       // If action K fails, actions 0…K-1 (e.g. set_field, transition) have already
       // been applied and are not rolled back. The execution is marked "failed" and
       // the error is logged, but the entity may be left in a partially-modified state.
       // Full rollback would require saga/compensating-action support and is deferred.
+      let skippedCount = 0;
       for (const action of rule.actions as ActionConfig[]) {
-        await runAction(db, tenantId, event, action, depth, redis);
+        const skipped = await runAction(
+          db,
+          tenantId,
+          event,
+          action,
+          depth,
+          redis,
+        );
+        if (skipped) skippedCount++;
       }
 
+      await db.execute(sql.raw(`RELEASE SAVEPOINT ${sp}`));
+
+      // If any actions were bypassed by the circuit breaker, record the
+      // execution as "degraded" so the audit trail reflects that the rule
+      // ran but did not fully execute — not "success" (misleading) nor
+      // "failed" (suggests a bug rather than a deliberate circuit-open skip).
+      const finalStatus = skippedCount > 0 ? "degraded" : "success";
       await db
         .update(automationExecutions)
-        .set({ status: "success", completedAt: new Date() })
+        .set({
+          status: finalStatus,
+          result:
+            skippedCount > 0
+              ? ({ skippedActions: skippedCount } as Record<string, unknown>)
+              : null,
+          completedAt: new Date(),
+        })
         .where(eq(automationExecutions.id, execRow.id));
 
       logger.info(
-        { tenantId, ruleId: rule.id, execId: execRow.id },
-        "Automation: rule executed successfully",
+        { tenantId, ruleId: rule.id, execId: execRow.id, skippedCount },
+        skippedCount > 0
+          ? "Automation: rule executed with degraded actions (circuit open)"
+          : "Automation: rule executed successfully",
       );
     } catch (err) {
+      // Roll back to the savepoint so the outer transaction is still usable,
+      // then write the failure status.
+      await db.execute(sql.raw(`ROLLBACK TO SAVEPOINT ${sp}`));
+      await db.execute(sql.raw(`RELEASE SAVEPOINT ${sp}`));
+
       await db
         .update(automationExecutions)
         .set({
@@ -114,6 +155,12 @@ export async function executeAutomationRules(
   }
 }
 
+/**
+ * Runs a single action.
+ * Returns `true` if the action was skipped because the circuit breaker is open;
+ * `false` if the action executed (successfully or after throwing).
+ * Throws if the underlying action handler throws.
+ */
 async function runAction(
   db: DbOrTx,
   tenantId: string,
@@ -121,7 +168,7 @@ async function runAction(
   action: ActionConfig,
   depth: number,
   redis?: Redis,
-): Promise<void> {
+): Promise<boolean> {
   const config = action.config;
 
   if (redis && (await isOpen(redis, tenantId, action.type))) {
@@ -129,7 +176,7 @@ async function runAction(
       { tenantId, actionType: action.type },
       "Automation: circuit open — skipping action",
     );
-    return;
+    return true; // skipped
   }
 
   try {
@@ -164,11 +211,13 @@ async function runAction(
           { tenantId, actionType: action.type },
           "Automation: unhandled action type",
         );
-        return;
+        return false;
     }
     if (redis) await reset(redis, tenantId, action.type);
   } catch (err) {
     if (redis) await recordFailure(redis, tenantId, action.type);
     throw err;
   }
+
+  return false; // executed
 }

@@ -1,3 +1,5 @@
+import type { ConditionTree } from "@platform/workflow-engine";
+
 export type TriggerType =
   | "workflow.entered_state"
   | "workflow.transitioned"
@@ -25,7 +27,7 @@ export interface AutomationRule {
   isEnabled: boolean;
   triggerType: TriggerType;
   triggerConfig: Record<string, unknown>;
-  conditions: unknown | null;
+  conditions: ConditionTree | null;
   actions: ActionConfig[];
   priority: number;
   createdAt: Date;
@@ -41,7 +43,7 @@ export type CreateAutomationRuleInput = {
   name: string;
   triggerType: TriggerType;
   triggerConfig: Record<string, unknown>;
-  conditions?: unknown | undefined;
+  conditions?: ConditionTree | null | undefined;
   actions: ActionConfig[];
   isEnabled?: boolean | undefined;
   priority?: number | undefined;
@@ -52,7 +54,7 @@ export type UpdateAutomationRuleInput = {
   isEnabled?: boolean | undefined;
   triggerType?: TriggerType | undefined;
   triggerConfig?: Record<string, unknown> | undefined;
-  conditions?: unknown | null | undefined;
+  conditions?: ConditionTree | null | undefined;
   actions?: ActionConfig[] | undefined;
   priority?: number | undefined;
 };

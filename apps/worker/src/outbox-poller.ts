@@ -29,15 +29,22 @@ async function tick(): Promise<void> {
 
       if (rows.length === 0) return;
 
+      // jobId is the outbox event ID — BullMQ deduplicates by jobId, so if the
+      // delivered_at update below rolls back and this tick re-runs, re-adding the
+      // same job is a no-op rather than producing a duplicate execution.
       await Promise.all(
         rows.map((row) =>
-          automationQueue.add(row.event_type, {
-            outboxEventId: row.id,
-            tenantId: row.tenant_id,
-            eventType: row.event_type,
-            version: row.version,
-            payload: row.payload,
-          }),
+          automationQueue.add(
+            row.event_type,
+            {
+              outboxEventId: row.id,
+              tenantId: row.tenant_id,
+              eventType: row.event_type,
+              version: row.version,
+              payload: row.payload,
+            },
+            { jobId: row.id },
+          ),
         ),
       );
 

@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { Hono } from "hono";
 import type { Context, Next } from "hono";
 import { db } from "@platform/db";
@@ -30,8 +30,8 @@ const TENANT_B = "bbbbbbbb-0000-4000-b000-000000000022";
 
 // ── Shared state ──────────────────────────────────────────────────────────────
 
-let ruleIdA: string;
-let ruleIdB: string;
+let ruleIdA: string | undefined;
+let ruleIdB: string | undefined;
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
 
@@ -54,14 +54,36 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  // Delete executions first (FK references rules) then rules.
+  // Scoped by both tenantId and id so that a partial beforeAll failure
+  // (where ruleIdA is set but ruleIdB is not) still cleans up what exists
+  // without accidentally deleting rows from other test runs sharing the DB.
   await db
     .delete(automationExecutions)
     .where(eq(automationExecutions.tenantId, TENANT_A));
   await db
     .delete(automationExecutions)
     .where(eq(automationExecutions.tenantId, TENANT_B));
-  await db.delete(automationRules).where(eq(automationRules.id, ruleIdA));
-  await db.delete(automationRules).where(eq(automationRules.id, ruleIdB));
+  if (ruleIdA) {
+    await db
+      .delete(automationRules)
+      .where(
+        and(
+          eq(automationRules.id, ruleIdA),
+          eq(automationRules.tenantId, TENANT_A),
+        ),
+      );
+  }
+  if (ruleIdB) {
+    await db
+      .delete(automationRules)
+      .where(
+        and(
+          eq(automationRules.id, ruleIdB),
+          eq(automationRules.tenantId, TENANT_B),
+        ),
+      );
+  }
 });
 
 // ── List isolation ─────────────────────────────────────────────────────────────

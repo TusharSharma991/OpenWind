@@ -68,6 +68,8 @@ describe("outbox poller tick", () => {
         outboxEventId: fakeRow.id,
         tenantId: fakeRow.tenant_id,
       }),
+      // jobId deduplicates re-enqueues on transaction retry (M2 fix)
+      expect.objectContaining({ jobId: fakeRow.id }),
     );
     expect(mockUpdate).toHaveBeenCalled();
   });

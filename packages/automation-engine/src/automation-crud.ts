@@ -1,6 +1,7 @@
 import { eq, and } from "drizzle-orm";
 import type { DbOrTx } from "@platform/db";
 import { automationRules } from "@platform/db";
+import type { ConditionTree } from "@platform/workflow-engine";
 import type {
   AutomationRule,
   CreateAutomationRuleInput,
@@ -18,7 +19,9 @@ function rowToRule(r: typeof automationRules.$inferSelect): AutomationRule {
     isEnabled: r.isEnabled,
     triggerType: r.triggerType as TriggerType,
     triggerConfig: r.triggerConfig as Record<string, unknown>,
-    conditions: r.conditions ?? null,
+    // Drizzle types jsonb as unknown; cast once here at the DB boundary.
+    // The shape is guaranteed by ConditionTreeSchema validation at write time.
+    conditions: (r.conditions ?? null) as ConditionTree | null,
     actions: r.actions as ActionConfig[],
     priority: r.priority,
     createdAt: r.createdAt,

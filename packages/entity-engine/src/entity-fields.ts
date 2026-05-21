@@ -144,6 +144,9 @@ function rowToEntityField(row: typeof entityFields.$inferSelect): EntityField {
     name: row.name,
     label: row.label,
     fieldType: row.fieldType as EntityField["fieldType"],
+    // Drizzle types jsonb columns as `unknown` in select inference; the schema
+    // declares this column NOT NULL with a default of `{}`, so it is always an
+    // object at runtime.  The cast is safe but cannot be narrowed statically.
     config: row.config as Record<string, unknown>,
     isRequired: row.isRequired,
     isIndexed: row.isIndexed,

@@ -133,7 +133,7 @@ describe("validateEntityRefs", () => {
     ).not.toHaveBeenCalled();
   });
 
-  it("returns one error per invalid ref in a multi-ref payload", async () => {
+  it("returns one error per invalid ref in a multi-ref payload (all invalid)", async () => {
     const validId = "valid-uuid";
     // Only `validId` is returned — the other two are cross-tenant or missing
     const db = makeMockDb([{ id: validId }]);
@@ -155,6 +155,28 @@ describe("validateEntityRefs", () => {
       "relatedTo",
       "secondRef",
     ]);
+  });
+
+  it("returns only one error when one ref is valid and the other is invalid (mixed payload)", async () => {
+    const validId = "valid-uuid";
+    // DB returns `validId` as belonging to this tenant; `bad-uuid` is absent
+    const db = makeMockDb([{ id: validId }]);
+
+    const secondRefField: EntityField = {
+      name: "secondRef",
+      fieldType: "entity_ref",
+    } as EntityField;
+
+    const errors = await validateEntityRefs(
+      db,
+      TENANT_ID,
+      { relatedTo: validId, secondRef: "bad-uuid" },
+      [refField, secondRefField],
+    );
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.field).toBe("secondRef");
+    expect(errors[0]?.code).toBe("INVALID_REFERENCE");
   });
 });
 

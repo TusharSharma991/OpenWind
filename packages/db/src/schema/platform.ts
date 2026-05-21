@@ -64,10 +64,9 @@ export const tenantUsers = pgTable(
       .notNull(),
   },
   (t) => ({
-    tenantUserIdx: index("tenant_users_tenant_user_idx").on(
-      t.tenantId,
-      t.userId,
-    ),
+    // No explicit index needed — the uniqueTenantUser unique constraint below
+    // automatically creates a backing B-tree index on (tenant_id, user_id),
+    // which serves as the primary lookup pattern.
     uniqueTenantUser: unique("tenant_users_tenant_user_unique").on(
       t.tenantId,
       t.userId,

@@ -54,7 +54,14 @@ export async function isSafeRegex(
     // recheck throws { kind: "timeout" } when the analyser runs out of time.
     // Treat timeout as fail-closed: a pattern complex enough to exhaust the
     // static analyser is highest-risk and must be rejected.
-    const kind = (err as { kind?: string }).kind;
+    //
+    // Guard: recheck could theoretically throw a primitive (string, number) or
+    // null in a future version.  Narrow to object before accessing `.kind` so
+    // we never get a runtime TypeError on `null.kind` or similar.
+    const kind =
+      typeof err === "object" && err !== null
+        ? (err as { kind?: string }).kind
+        : undefined;
     if (kind === "timeout") {
       logger.warn(
         { pattern, flags },

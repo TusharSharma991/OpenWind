@@ -17,8 +17,10 @@ type AuthVariables = { Variables: { auth: AuthContext } };
  * JWT path: verifies signature, extracts tenantId from org claim, roles from project claims.
  * API key path: hashes the raw key, looks up in api_keys table, loads tenant from key row.
  *
- * The `db` parameter is only needed for API key validation; JWT-only routes can omit it
- * by passing undefined.  If an API key arrives and db is undefined the request is rejected.
+ * The `db` parameter is only needed for API key validation.  Passing `undefined`
+ * (or calling `requireAuth()` with no argument) intentionally restricts the route
+ * to JWT tokens only — any `sk_…` API key presented will be rejected with 401.
+ * Use this on routes where API key access is explicitly not permitted.
  */
 export const requireAuth = (db?: DbOrTx): MiddlewareHandler =>
   createMiddleware<AuthVariables>(
@@ -87,6 +89,15 @@ export const requireAuth = (db?: DbOrTx): MiddlewareHandler =>
       // (fire-and-forget would race with the INSERT on a brand-new user).
       // onConflictDoNothing hits the unique index and returns immediately on
       // every subsequent request — the overhead is one index scan per JWT call.
+      //
+      // Why withTenantContext and not a plain db.insert()?
+      // tenant_users has an RLS policy enforced via the `app.tenant_id` GUC
+      // (see migration 0007).  Without withTenantContext setting that GUC,
+      // the WITH CHECK clause evaluates to NULL and the INSERT is silently
+      // rejected by Postgres RLS.  The transaction overhead (~0.5 ms) is
+      // acceptable given this runs once per unique user per JWT expiry window.
+      // A lighter-weight set_config helper could reduce the overhead in future
+      // (tracked as a follow-up optimisation).
       await withTenantContext(auth.tenantId, (tx) =>
         tx
           .insert(tenantUsers)

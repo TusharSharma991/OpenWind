@@ -1,7 +1,6 @@
 -- Down migration (rollback):
 -- DROP POLICY IF EXISTS "tenant_users_tenant_isolation" ON "tenant_users";
 -- ALTER TABLE "tenant_users" DISABLE ROW LEVEL SECURITY;
--- DROP INDEX IF EXISTS "tenant_users_tenant_user_idx";
 -- DROP TABLE IF EXISTS "tenant_users";
 
 -- tenant_users is a shadow table populated by the auth middleware on every
@@ -16,11 +15,10 @@ CREATE TABLE "tenant_users" (
   "user_id"    text        NOT NULL,
   "created_at" timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT "tenant_users_tenant_user_unique" UNIQUE ("tenant_id", "user_id")
+  -- The UNIQUE constraint above automatically creates a B-tree index on
+  -- (tenant_id, user_id), which also serves the primary lookup pattern.
+  -- No separate CREATE INDEX is needed.
 );
-
--- Primary lookup pattern: validate a single user_id within a tenant
-CREATE INDEX "tenant_users_tenant_user_idx"
-  ON "tenant_users" ("tenant_id", "user_id");
 
 ALTER TABLE "tenant_users" ENABLE ROW LEVEL SECURITY;
 

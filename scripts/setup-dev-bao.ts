@@ -176,11 +176,10 @@ async function ensureRole(): Promise<void> {
   const existing = await baoFetch(
     `/v1/auth/${APPROLE_MOUNT}/role/${ROLE_NAME}`,
   );
-  if (existing !== null) {
-    log(`Role "${ROLE_NAME}" already exists — skipping creation.`);
-    return;
-  }
 
+  // Always POST (create-or-update) so that re-running the script picks up
+  // any changes to TTL or policy bindings.  OpenBao treats POST to an
+  // existing role as an update, making this idempotent.
   await baoFetch(`/v1/auth/${APPROLE_MOUNT}/role/${ROLE_NAME}`, {
     method: "POST",
     body: {
@@ -192,7 +191,11 @@ async function ensureRole(): Promise<void> {
       token_max_ttl: "4h",
     },
   });
-  log(`Role "${ROLE_NAME}" created.`);
+  log(
+    existing !== null
+      ? `Role "${ROLE_NAME}" already existed — config updated.`
+      : `Role "${ROLE_NAME}" created.`,
+  );
 }
 
 // ── Step 5: Read RoleID ───────────────────────────────────────────────────────
@@ -212,7 +215,10 @@ async function getRoleId(): Promise<string> {
 // ── Step 6: Generate SecretID ─────────────────────────────────────────────────
 
 async function generateSecretId(): Promise<string> {
-  log("Generating new SecretID (previous SecretID is invalidated)...");
+  // OpenBao allows multiple active SecretIDs per role simultaneously.
+  // Generating a new one does NOT invalidate existing SecretIDs — they
+  // remain valid until their own TTL (secret_id_ttl) expires.
+  log("Generating new SecretID...");
   const res = (await baoFetch(
     `/v1/auth/${APPROLE_MOUNT}/role/${ROLE_NAME}/secret-id`,
     { method: "POST", body: {} },

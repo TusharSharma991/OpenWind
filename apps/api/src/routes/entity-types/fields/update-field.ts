@@ -22,8 +22,8 @@ export const updateEntityFieldHandler = factory.createHandlers(
   requireRole("admin"),
   zValidator("json", UpdateFieldSchema),
   async (c) => {
-    const typeId = c.req.param("typeId")!;
-    const fieldId = c.req.param("fieldId")!;
+    const typeId = c.req.param("typeId") ?? "";
+    const fieldId = c.req.param("fieldId") ?? "";
     const input = c.req.valid("json");
     const { tenantId } = c.get("auth");
 

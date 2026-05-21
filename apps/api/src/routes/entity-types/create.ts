@@ -1,6 +1,6 @@
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { requireAuth, requireRole } from "@platform/auth";
+import { requireAuth, requireRole, requireIntrospection } from "@platform/auth";
 import { db } from "@platform/db";
 import { createEntityType } from "@platform/entity-engine";
 import { factory } from "./factory.js";
@@ -17,6 +17,7 @@ const CreateEntityTypeSchema = z.object({
 export const createEntityTypeHandler = factory.createHandlers(
   requireAuth(),
   requireRole("admin"),
+  requireIntrospection(),
   zValidator("json", CreateEntityTypeSchema),
   async (c) => {
     const input = c.req.valid("json");

@@ -24,6 +24,9 @@ vi.mock("@platform/auth", () => ({
   requireRole: () => async (_c: Context, next: Next) => {
     await next();
   },
+  requireIntrospection: () => async (_c: Context, next: Next) => {
+    await next();
+  },
 }));
 
 vi.mock("@platform/db", () => ({

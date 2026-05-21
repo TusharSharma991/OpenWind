@@ -35,8 +35,16 @@ function buildFieldSchema(field: EntityField): z.ZodTypeAny {
       let s = z.string();
       if (typeof cfg["minLength"] === "number") s = s.min(cfg["minLength"]);
       if (typeof cfg["maxLength"] === "number") s = s.max(cfg["maxLength"]);
-      if (typeof cfg["pattern"] === "string")
-        s = s.regex(new RegExp(cfg["pattern"]));
+      if (typeof cfg["pattern"] === "string") {
+        // Defensive: pattern is validated by isSafeRegex at save time, but if
+        // a malformed pattern somehow reaches here (e.g. pre-existing data) we
+        // skip it silently rather than throwing during entity validation.
+        try {
+          s = s.regex(new RegExp(cfg["pattern"]));
+        } catch {
+          // Invalid regex stored in config — skip rather than crash validation
+        }
+      }
       return s;
     }
 

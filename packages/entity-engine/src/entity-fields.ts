@@ -3,8 +3,8 @@ import type { DbOrTx } from "@platform/db";
 import { entityFields } from "@platform/db";
 import { logger } from "@platform/logger";
 import type { EntityField } from "./types.js";
-import { EntityError } from "./errors.js";
-import { invalidateSchemaCache } from "./validation/index.js";
+import { EntityError, ValidationError } from "./errors.js";
+import { invalidateSchemaCache, isSafeRegex } from "./validation/index.js";
 
 export type UpdateEntityFieldInput = {
   label?: string | undefined;
@@ -57,6 +57,26 @@ export async function updateEntityField(
 
   if (existing.isSystem) {
     throw new EntityError("SYSTEM_FIELD_IMMUTABLE", { fieldId });
+  }
+
+  // ReDoS guard: validate config.pattern only for text fields.
+  // Checked here (not at the route layer) because the engine already holds
+  // the existing field's type — the update schema does not carry fieldType.
+  if (existing.fieldType === "text" && input.config !== undefined) {
+    const pattern = input.config["pattern"];
+    if (typeof pattern === "string" && pattern.length > 0) {
+      const safe = await isSafeRegex(pattern);
+      if (!safe) {
+        throw new ValidationError([
+          {
+            field: "config.pattern",
+            code: "INVALID_FORMAT",
+            message:
+              "Pattern is invalid or vulnerable to ReDoS — use a simpler regex",
+          },
+        ]);
+      }
+    }
   }
 
   const updates: Partial<typeof entityFields.$inferInsert> = {};
@@ -124,7 +144,10 @@ function rowToEntityField(row: typeof entityFields.$inferSelect): EntityField {
     name: row.name,
     label: row.label,
     fieldType: row.fieldType as EntityField["fieldType"],
-    config: (row.config as Record<string, unknown>) ?? {},
+    // Drizzle types jsonb columns as `unknown` in select inference; the schema
+    // declares this column NOT NULL with a default of `{}`, so it is always an
+    // object at runtime.  The cast is safe but cannot be narrowed statically.
+    config: row.config as Record<string, unknown>,
     isRequired: row.isRequired,
     isIndexed: row.isIndexed,
     isSystem: row.isSystem,

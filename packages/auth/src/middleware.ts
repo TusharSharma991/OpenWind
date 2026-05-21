@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import type { Context, Next, MiddlewareHandler } from "hono";
 import type { DbOrTx } from "@platform/db";
-import { apiKeys } from "@platform/db";
+import { apiKeys, tenantUsers, withTenantContext } from "@platform/db";
 import { logger } from "@platform/logger";
 import { verifyJwt, extractAuthContext } from "./jwks.js";
 import { introspectToken } from "./introspection.js";
@@ -17,14 +17,21 @@ type AuthVariables = { Variables: { auth: AuthContext } };
  * JWT path: verifies signature, extracts tenantId from org claim, roles from project claims.
  * API key path: hashes the raw key, looks up in api_keys table, loads tenant from key row.
  *
- * The `db` parameter is only needed for API key validation; JWT-only routes can omit it
- * by passing undefined.  If an API key arrives and db is undefined the request is rejected.
+ * The `db` parameter is only needed for API key validation.  Passing `undefined`
+ * (or calling `requireAuth()` with no argument) intentionally restricts the route
+ * to JWT tokens only — any `sk_…` API key presented will be rejected with 401.
+ * Use this on routes where API key access is explicitly not permitted.
  */
 export const requireAuth = (db?: DbOrTx): MiddlewareHandler =>
   createMiddleware<AuthVariables>(
     async (c: Context<AuthVariables>, next: Next): Promise<Response | void> => {
       // Short-circuit when auth has been pre-populated (e.g. by test fixtures
       // or an upstream gateway that already verified the token).
+      // Hono's Variables type marks auth as non-optional (it's always present
+      // after requireAuth runs), but here we ARE the setter — at call time it
+      // may genuinely be absent.  The condition is necessary at runtime even
+      // though TypeScript's static view sees it as always-truthy.
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       if (c.get("auth")) {
         await next();
         return;
@@ -76,6 +83,32 @@ export const requireAuth = (db?: DbOrTx): MiddlewareHandler =>
       }
 
       c.set("auth", auth);
+      // Upsert the verified user into tenant_users BEFORE calling next().
+      // This must complete before the route handler runs so that
+      // validateUserRefs() can find the user on their very first request
+      // (fire-and-forget would race with the INSERT on a brand-new user).
+      // onConflictDoNothing hits the unique index and returns immediately on
+      // every subsequent request — the overhead is one index scan per JWT call.
+      //
+      // Why withTenantContext and not a plain db.insert()?
+      // tenant_users has an RLS policy enforced via the `app.tenant_id` GUC
+      // (see migration 0007).  Without withTenantContext setting that GUC,
+      // the WITH CHECK clause evaluates to NULL and the INSERT is silently
+      // rejected by Postgres RLS.  The transaction overhead (~0.5 ms) is
+      // acceptable given this runs once per unique user per JWT expiry window.
+      // A lighter-weight set_config helper could reduce the overhead in future
+      // (tracked as a follow-up optimisation).
+      await withTenantContext(auth.tenantId, (tx) =>
+        tx
+          .insert(tenantUsers)
+          .values({ tenantId: auth.tenantId, userId: auth.userId })
+          .onConflictDoNothing(),
+      ).catch((err: unknown) => {
+        logger.warn(
+          { err, tenantId: auth.tenantId },
+          "auth: failed to sync tenant user — user_ref validation may fail on this request",
+        );
+      });
       await next();
       return;
     },

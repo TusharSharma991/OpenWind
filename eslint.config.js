@@ -182,6 +182,39 @@ export default [
     },
   },
 
+  // ─── Scripts: relaxed rules, no tsconfig project ─────────────────────────
+  // Dev scripts in scripts/ are not part of any workspace package and do not
+  // have a tsconfig that eslint can resolve via project:true.  Use the same
+  // relaxed config as test files to avoid "file not in project" parse errors.
+  {
+    files: ["scripts/**/*.ts"],
+    languageOptions: {
+      parserOptions: {
+        project: false,
+      },
+    },
+    rules: {
+      "@typescript-eslint/explicit-function-return-type": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/no-unsafe-member-access": "off",
+      "@typescript-eslint/no-unsafe-call": "off",
+      "@typescript-eslint/no-unsafe-return": "off",
+      "@typescript-eslint/no-unsafe-argument": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+      "@typescript-eslint/require-await": "off",
+      "@typescript-eslint/no-floating-promises": "off",
+      "@typescript-eslint/no-misused-promises": "off",
+      "@typescript-eslint/await-thenable": "off",
+      "@typescript-eslint/prefer-nullish-coalescing": "off",
+      "@typescript-eslint/prefer-optional-chain": "off",
+      "no-restricted-syntax": "off",
+      // Developer scripts legitimately use console.log for user-facing output
+      "no-console": "off",
+      // no-undef is too aggressive without a tsconfig project — TS covers this
+      "no-undef": "off",
+    },
+  },
+
   // ─── Tests: relaxed rules + disable type-checked rules ───────────────────
   // Test files are excluded from the per-package tsconfigs (they're compiled by
   // vitest, not tsc). Disabling type-checked rules avoids "file not in project"

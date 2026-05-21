@@ -2,7 +2,11 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { requireAuth, requireRole } from "@platform/auth";
 import { db } from "@platform/db";
-import { addEntityField, FIELD_TYPES } from "@platform/entity-engine";
+import {
+  addEntityField,
+  FIELD_TYPES,
+  isSafeRegex,
+} from "@platform/entity-engine";
 import { factory } from "../factory.js";
 import { handleEntityError } from "../../../lib/handle-entity-error.js";
 
@@ -25,9 +29,38 @@ export const createEntityFieldHandler = factory.createHandlers(
   requireRole("admin"),
   zValidator("json", CreateFieldSchema),
   async (c) => {
-    const typeId = c.req.param("typeId")!;
+    const typeId = c.req.param("typeId") ?? "";
     const input = c.req.valid("json");
     const { tenantId } = c.get("auth");
+
+    // ReDoS guard: zValidator uses synchronous safeParse so async superRefine
+    // would not run there.  We check the pattern here after basic validation
+    // passes, at config-save time only (not on the validation hot-path).
+    const pattern = input.config["pattern"];
+    if (
+      input.fieldType === "text" &&
+      typeof pattern === "string" &&
+      pattern.length > 0
+    ) {
+      const safe = await isSafeRegex(pattern);
+      if (!safe) {
+        return c.json(
+          {
+            error: "VALIDATION_ERROR",
+            message: "Validation failed",
+            fields: [
+              {
+                field: "config.pattern",
+                code: "INVALID_FORMAT",
+                message:
+                  "Pattern is invalid or vulnerable to ReDoS — use a simpler regex",
+              },
+            ],
+          },
+          422,
+        );
+      }
+    }
 
     try {
       const field = await addEntityField(db, tenantId, typeId, {

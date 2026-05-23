@@ -26,7 +26,8 @@ gh: #2
 | auth         | `analytics_user` is a read-only DB role with `BYPASSRLS` — must be scoped down                                                                                                                   |
 | out of scope | Per-tenant PII classification UI (Phase 3); encryption-at-rest for PII fields (future); SSRF protection for entity URL-type fields, connector polling URLs, or file source URLs (separate track) |
 | gate         | Must merge before any pilot customer data is written to the platform                                                                                                                             |
-| dns timeout  | Max 2s for DNS resolution in `validateWebhookUrl`; treat timeout as block                                                                                                                        |
+| dns timeout  | Max 2s for DNS resolution in `validateWebhookUrl`; DNS resolution failure or timeout throws `AutomationError('DNS_RESOLUTION_TIMEOUT')` and is treated as a secure block                         |
+| cidr config  | `SSRF_BLOCK_CIDRS` is a comma-separated list of CIDR strings in `@platform/config`. If empty or malformed, the system falls back to default private ranges defined in §I.                        |
 
 ---
 
@@ -56,9 +57,40 @@ fd00::/8           ULA IPv6
 [platform private CIDRs from env: SSRF_BLOCK_CIDRS]
 ```
 
-> **DNS pinning:** After resolving the URL and validating the IP, the outbound HTTP request must be made to the _already-resolved IP address_ (not re-resolved from the hostname) with the `Host` header set to the original hostname. This prevents DNS rebinding where the hostname returns a safe IP on lookup but a blocked IP at connection time.
+> **DNS pinning (connection hook pattern):** Rather than rewriting the URL string to an IP (which breaks HTTPS TLS/SNI certificate verification), the outbound HTTP client must employ a custom HTTP/HTTPS agent with a custom DNS `lookup` hook. This hook intercepts the DNS resolution phase at the connection layer and resolves the hostname directly to the validated IP address, ensuring standard TLS SNI check and certificate handshakes succeed natively without compromise.
 
-> All addresses must be normalized to their canonical form before range-checking. IPv4-mapped IPv6 addresses must be extracted to their IPv4 value and checked against IPv4 ranges.
+> All addresses must be normalized to their canonical byte representation (using a standard, hardened parsing library like `ipaddr.js`) before range-checking. IPv4-mapped IPv6 addresses must be extracted to their IPv4 value and checked against IPv4 ranges.
+
+### Masked `workflow_events` view for `analytics_user`
+
+```sql
+CREATE VIEW workflow_events_masked AS
+SELECT
+  id,
+  tenant_id,
+  workflow_id,
+  instance_id,
+  action_id,
+  actor_id,
+  created_at,
+  -- Redact PII/financial values inside the JSONB metadata field at query time.
+  -- Fields mapped to 'pii' or 'financial' in entity_fields sensitivity are set to '[REDACTED]'.
+  (
+    SELECT jsonb_object_agg(
+      key,
+      CASE
+        WHEN ef.sensitivity IN ('pii', 'financial') THEN '"[REDACTED]"'::jsonb
+        ELSE val
+      END
+    )
+    FROM jsonb_each(metadata) AS e(key, val)
+    LEFT JOIN entity_fields ef ON ef.entity_type_id = (
+      -- Resolves the entity_type_id of the associated workflow instance
+      SELECT entity_type_id FROM entity_instances WHERE id = instance_id
+    ) AND ef.name = key
+  ) AS metadata
+FROM workflow_events;
+```
 
 ### Audit log entry (blocked webhook)
 
@@ -86,7 +118,7 @@ R1: No outbound webhook request is made to any URL that resolves to a blocked ad
 ✓ Webhook action targeting a legitimate public URL proceeds normally
 ✓ Block list includes env-configurable private CIDRs (`SSRF_BLOCK_CIDRS`) in addition to hardcoded RFC ranges
 ✓ DNS resolution that exceeds 2s is treated as a block; delivery does not hang
-✓ Outbound request is made directly to the validated IP (not re-resolved from hostname); `Host` header preserves original hostname — DNS rebinding cannot substitute a blocked IP after validation
+✓ Outbound request uses a one-shot custom `https.Agent` with `lookup` pinned to the validated IP; URL and `Host` header are unchanged; TLS certificate validation succeeds against the original hostname; DNS rebinding is prevented — no second DNS resolution occurs at connection time
 
 R2: Every blocked webhook attempt is logged with tenantId, target URL, resolved IP, and reason.
 ✓ Blocked attempt produces a `webhook.blocked` log entry with all four fields
@@ -111,6 +143,7 @@ R5: When writing to `workflow_events.metadata`, values for `pii` and `financial`
 R6: `analytics_user` cannot read raw PII or financial values from any platform table.
 ✓ `analytics_user` cannot read raw `pii` or `financial` field values from `workflow_events` — a read attempt returns no such data
 ✓ An explicit grant list enumerates exactly which tables and columns `analytics_user` may access; all other tables default to no access
+✓ `ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE SELECT ON TABLES FROM analytics_user` is set in the migration — new tables are inaccessible to `analytics_user` at the DB level, independent of the CI lint rule
 ✓ A CI lint rule fails if a new migration file adds a table without an explicit `-- analytics: excluded` or `-- analytics: included(col1,col2)` annotation
 ✓ ADR-001 is updated with an addendum documenting the grant scope and opt-in convention
 
@@ -133,12 +166,12 @@ R6: `analytics_user` cannot read raw PII or financial values from any platform t
 | --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- | ------ | -------- |
 | T1  | Add `SSRF_BLOCK_CIDRS` env var to `@platform/config`                                                                                                                                                                                                                             | 1     | todo   | —        |
 | T2  | Implement `validateWebhookUrl(url)` in `@platform/automation-engine` — resolves DNS (2s timeout via `AbortController`), normalizes IPv4-mapped IPv6, checks all block list ranges, throws typed `AutomationError('WEBHOOK_SSRF_BLOCKED')`; returns resolved IP for use by caller | 1     | todo   | T1       |
-| T3  | Wire `validateWebhookUrl` into webhook action executor; use returned IP to construct request (pin connection, set `Host` header to original hostname); log blocked attempts                                                                                                      | 1     | todo   | T2       |
+| T3  | Wire `validateWebhookUrl` into webhook action executor; construct a one-shot `https.Agent` with `lookup` callback pinned to the validated IP (URL and `Host` header unchanged — TLS SNI preserved); log blocked attempts                                                         | 1     | todo   | T2       |
 | T4  | Unit tests: loopback, RFC1918, link-local, IPv4-mapped IPv6 blocked; public URL passes; DNS timeout treated as block; DNS rebinding blocked (mock DNS returns different IP on second call)                                                                                       | 1     | todo   | T3       |
 | T5  | Migration: add `entity_fields.sensitivity` column + default                                                                                                                                                                                                                      | 2     | todo   | —        |
 | T6  | Update workflow engine `writeEventLog` to redact `pii`/`financial` field values before insert                                                                                                                                                                                    | 2     | todo   | T5       |
 | T7  | Unit tests: redaction for pii/financial; verbatim for public/internal                                                                                                                                                                                                            | 2     | todo   | T6       |
-| T8  | Migration: enumerate `analytics_user` GRANT SELECT list; create masking view for `workflow_events`                                                                                                                                                                               | 2     | todo   | T5       |
+| T8  | Migration: `ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE SELECT ON TABLES FROM analytics_user`; enumerate explicit GRANT SELECT list; create masking view for `workflow_events`                                                                                              | 2     | todo   | T5       |
 | T9  | Update all existing entity field seed SQL with explicit sensitivity values (one sub-task per module — scope: ~7 modules, est. 30–60 fields total)                                                                                                                                | 2     | todo   | T5       |
 | T10 | ADR-001 addendum: document analytics_user grant scope and opt-in convention                                                                                                                                                                                                      | 2     | todo   | T8       |
 | T11 | Isolation test: cross-tenant webhook blocked; analytics_user cannot read raw metadata                                                                                                                                                                                            | 3     | todo   | T4,T7,T8 |

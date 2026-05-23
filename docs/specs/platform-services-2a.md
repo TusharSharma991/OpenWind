@@ -24,7 +24,7 @@ gh: #12
 
 | constraint             | value                                                                                                                                                                                        |
 | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| stack                  | Novu (notifications), S3/MinIO (files), ClamAV or cloud AV (scanning), Drizzle, Hono, `@hono/zod-openapi`                                                                                    |
+| stack                  | Novu (notifications), S3/MinIO (files), ClamAV daemon via TCP socket / REST API (scanning), Drizzle, Hono, `@hono/zod-openapi`                                                               |
 | auth                   | All endpoints require JWT; file access validates tenant ownership before signing                                                                                                             |
 | notification templates | Defined in Novu, never in TypeScript — config-first invariant                                                                                                                                |
 | audit log              | Append-only at DB level: no UPDATE/DELETE RLS policy on `admin_audit_log`                                                                                                                    |
@@ -32,8 +32,10 @@ gh: #12
 | depends on             | #7 (1A infra), #8 (1B auth) complete                                                                                                                                                         |
 | upload URL expiry      | Presigned upload URL expires in 15 min; presigned download URL expires in 1h                                                                                                                 |
 | per-file size limit    | Max 100MB per individual file; enforced at `POST /files` before presigned URL is issued                                                                                                      |
-| pending file TTL       | `files` rows with `scan_status='pending'` older than 24h are treated as abandoned and purged                                                                                                 |
+| pending file TTL       | `files` rows with `scan_status='pending'` older than 24h are treated as abandoned and purged; `failed` scans are NOT purged (alert developer)                                                |
 | notification delivery  | `sendNotification` enqueues a BullMQ job — never called synchronously inside a DB transaction; Novu outages do not block mutations or exhaust connection pool                                |
+| env requirements       | `CLAMAV_HOST` (TCP address of scan daemon), `CLAMAV_PORT` (TCP port of daemon), `SSRF_BLOCK_CIDRS` (SSRF CIDR list), `REDIS_URL` (cache for template/schema metadata)                        |
+| storage quota config   | Stored in `tenants.config` under `config: { storage_quota_mb: number }` (JSONB path: `$.storage_quota_mb`, defaults to `5120` [5GB] if unspecified)                                          |
 
 ---
 
@@ -50,6 +52,12 @@ type NotificationPreferences = {
   channels: { email: boolean; inApp: boolean; sms: boolean }
   templateOverrides: Record<string, { email?: boolean; inApp?: boolean; sms?: boolean }>
 }
+
+// Notification Integration Mapping:
+// modular event notifications are wired directly in the Automation Engine's rule configurations.
+// The Automation Engine's "notify" action JSON contains the exact Novu `templateId` parameter,
+// and resolves custom trigger variables from the event payload context.
+// Valid template IDs are preloaded in Redis to support fast, non-blocking synchronous check of `templateId` in `sendNotification`.
 ```
 
 ### `@platform/files`
@@ -59,8 +67,25 @@ initiateUpload(tenantId: string, moduleSlug: string, entityId: string, filename:
 confirmUpload(tenantId: string, fileId: string): Promise<void>
 getDownloadUrl(tenantId: string, fileId: string): Promise<{ downloadUrl: string; downloadUrlExpiresAt: Date }>
 deleteFile(tenantId: string, fileId: string): Promise<void>
-// uploadUrl expires in 15 min; downloadUrl expires in 1h
-// presigned POST policy includes content-length-range (1 byte – 100MB); S3 enforces server-side
+
+export class FileError extends Error {
+  constructor(
+    public readonly code: FileErrorCode,
+    public readonly meta?: Record<string, unknown>,
+  ) {
+    super(code);
+    this.name = "FileError";
+  }
+}
+
+export type FileErrorCode =
+  | "QUOTA_EXCEEDED"
+  | "FILE_TOO_LARGE"
+  | "FILE_PENDING_SCAN"
+  | "FILE_QUARANTINED"
+  | "FILE_NOT_FOUND"
+  | "SCAN_FAILED"
+  | "PROVIDER_ERROR";
 ```
 
 ### File storage path pattern
@@ -81,9 +106,10 @@ files (
   storage_key TEXT NOT NULL,  -- S3 path
   mime_type TEXT NOT NULL,
   size_bytes BIGINT NOT NULL,
-  scan_status TEXT NOT NULL DEFAULT 'pending',  -- pending | clean | quarantined | deleted
+  scan_status TEXT NOT NULL DEFAULT 'pending',  -- pending | clean | quarantined | deleted | failed
   uploaded_by UUID NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()  -- updated on every scan_status transition
 )
 ```
 
@@ -149,7 +175,7 @@ GET    /openapi.json                   → auto-generated OpenAPI 3.1 spec
 
 R1: Automation engine `notify` action sends notifications via Novu using a template ID and payload. No platform TypeScript defines template content.
 ✓ Calling `sendNotification(tenantId, userId, 'ticket.assigned', { ticketId })` delivers via Novu without any hardcoded template in platform code
-✓ Unknown `templateId` returns a typed error, does not silently drop
+✓ Unknown `templateId` does not silently drop — the BullMQ worker validates against a Redis-cached set of known Novu template IDs (TTL: 5 min); an unknown ID transitions the job to `failed`, emits a `system.error` event, and triggers an oncall alert
 ✓ When Novu is unavailable, `sendNotification` throws a typed `NotificationError('PROVIDER_UNAVAILABLE')` — caller decides retry; notification is never silently dropped
 
 R2: Users can read and update their notification channel preferences (email, in-app, SMS) via the preferences API.
@@ -173,15 +199,18 @@ R5: All file access is tenant-scoped. A tenant cannot access files belonging to 
 
 R6: File uploads are checked for malware asynchronously. Infected files are quarantined; pending files are not served.
 ✓ After `POST /files/:id/complete`, a background job runs AV scan; `scan_status` transitions `pending → clean | quarantined`
-✓ `GET /files/:id` on a `pending` file returns 422 — download URL not issued until scan completes
+✓ If the AV scanner fails or times out, the BullMQ job retries up to 5 times with exponential backoff; if all retries fail, status transitions `pending → failed` (developer alerted; file not purged automatically)
+✓ `GET /files/:id` on a `pending` or `failed` file returns 422 — download URL not issued
 ✓ `GET /files/:id` on a `quarantined` file returns 422 with reason; never issues a download URL
 ✓ Tenant admin receives a notification when a file is quarantined
 
 R7: Storage quota is enforced per tenant at upload time; size limits are enforced at S3 level, not on self-reported values.
-✓ `POST /files` returns 422 if the new file would push total stored bytes over `tenant_config.storage_quota_mb`
+✓ `POST /files` reserves quota by adding file `sizeBytes` to the tenant's current usage, returning 422 if it would exceed `config.storage_quota_mb`
+✓ If a reserved upload is never completed, its quota reservation is cleared when it is purged after 24 hours
 ✓ `POST /files` returns 422 if `sizeBytes` exceeds 100MB regardless of remaining quota
 ✓ Presigned POST policy `content-length-range` prevents a client from claiming a small size and uploading a large file — S3 enforces the limit before the object is written
-✓ Two concurrent uploads at the quota boundary result in at most one succeeding — the second receives 422
+✓ Two concurrent uploads at the quota boundary result in at most one succeeding — the second receives 422 (enforced by concurrent transaction check)
+✓ Soft-deleted files (`scan_status='deleted'`) immediately trigger an asynchronous physical deletion of their S3 object, and their storage quota is immediately reclaimed and deducted from tenant usage
 
 **Audit log**
 
@@ -216,8 +245,9 @@ R11: Module seed SQL sets default `view_configs` rows for each entity type. Tena
 
 R13: Abandoned pending file rows are purged automatically.
 ✓ A background job runs at least once per hour; any `files` row with `scan_status='pending'` and `created_at < now() - 24h` is deleted along with its S3 object
+✓ `scan_failed` files are never targeted by this job — only `pending` rows are eligible for abandonment purge
 ✓ Purge is logged with tenant ID, file ID, and reason='abandoned'
-✓ Purged file IDs do not count against tenant quota
+✓ Purged file IDs do not count against tenant quota; the purge job releases any reserved quota when deleting a `pending` row
 
 **OpenAPI**
 
@@ -231,40 +261,42 @@ R12: `GET /openapi.json` returns a valid OpenAPI 3.1 spec derived from Zod valid
 
 - Files are never served via direct S3 URLs — always presigned, always tenant-validated
 - Presigned upload URLs expire in 15 min; download URLs expire in 1h — never long-lived
-- `pending` and `quarantined` files never yield a download URL — only `clean` files are served
+- `pending`, `failed`, and `quarantined` files never yield a download URL — only `clean` files are served
 - S3 presigned POST policy enforces `content-length-range` — self-reported `sizeBytes` alone is not the enforcement mechanism
 - `sendNotification` enqueues a BullMQ job; it is never called synchronously inside a DB transaction
-- Pending file rows older than 24h are abandoned; purge job removes both row and S3 object
+- Pending file rows older than 24h are abandoned; purge job removes both row and S3 object (failed files are retained for investigation)
+- Soft-deleted files immediately purge their physical S3 object and release tenant quota bounds
 - Audit log rows are written in the same transaction as the mutation they describe
 - `admin_audit_log` grants no UPDATE or DELETE to any application role — enforced in migration, not only in application code
-- Notification templates live in Novu, never in platform TypeScript
-- `sendNotification` never silently drops a notification — it throws on any failure
+- Notification templates live in Novu, never in platform TypeScript; event mappings are defined inside Automation Engine rule configurations
+- `sendNotification` never silently drops a notification — it throws on any failure; templates are validated synchronously against a local Redis cache of valid IDs
 - `view_configs` seed uses INSERT ... ON CONFLICT DO NOTHING — reinstall never overwrites tenant overrides
 - `view_configs` has one row per (tenant, entity_type) — UNIQUE constraint enforced
 - PII/financial field values in `before_snapshot`/`after_snapshot` are redacted to `"[REDACTED]"` before insert; field names are retained (R14, T16)
+- Sensitivity lookup is retrieved via the Entity Engine's high-speed memory-cached schema representation to avoid database query overhead (N+1 prevention)
 
 ---
 
 ## §T Tasks
 
-| id  | task                                                                                                                                                                            | phase | status | depends         |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- | ------ | --------------- |
-| T1  | Migration: `files` table + RLS + indexes                                                                                                                                        | 1     | todo   | —               |
-| T2  | Migration: `admin_audit_log` table + append-only RLS + indexes                                                                                                                  | 1     | todo   | —               |
-| T3  | Migration: `view_configs` table + RLS + unique constraint                                                                                                                       | 1     | todo   | —               |
-| T4  | `@platform/notifications` package: `sendNotification`, `getUserPreferences`, `updateUserPreferences` wrapping Novu SDK                                                          | 1     | todo   | —               |
-| T5  | `@platform/files` package: `initiateUpload` (with `content-length-range` in POST policy), `confirmUpload`, `getDownloadUrl`, `deleteFile`; S3 path convention; quota check      | 1     | todo   | T1              |
-| T6  | `@platform/audit` package: `writeAuditEntry`; middleware that hooks entity create/update/delete/transition                                                                      | 1     | todo   | T2              |
-| T7  | File routes: `POST /files`, `POST /files/:id/complete`, `GET /files/:id` (block on pending/quarantined), `DELETE /files/:id`                                                    | 2     | todo   | T5              |
-| T8  | AV scan BullMQ job (triggered by `confirmUpload`); quarantine flow; tenant notification on quarantine; idempotent enqueue guard                                                 | 2     | todo   | T5,T4           |
-| T9  | Audit log routes: `GET /admin/audit` with filtering + cursor pagination                                                                                                         | 2     | todo   | T6              |
-| T10 | Notification preferences routes: `GET /preferences/notifications`, `PATCH /preferences/notifications`                                                                           | 2     | todo   | T4              |
-| T11 | View configs routes: `GET /admin/view-configs/:entityType`, `PATCH /admin/view-configs/:entityType`                                                                             | 2     | todo   | T3              |
-| T12 | Wire `@hono/zod-openapi`; `GET /openapi.json` route                                                                                                                             | 2     | todo   | T7,T9,T10,T11   |
-| T13 | Integration tests: quota boundary (concurrent uploads), scan flow state transitions, audit write atomicity, view config isolation, Novu outage throws                           | 3     | todo   | T5,T6,T7,T8,T11 |
-| T14 | Isolation tests: cross-tenant file access (expect 404), cross-tenant audit log, cross-tenant view config                                                                        | 3     | todo   | T7,T9,T11       |
-| T15 | Abandoned file purge job (BullMQ recurring): delete pending rows + S3 objects older than 24h; log purge                                                                         | 2     | todo   | T5              |
-| T16 | PII-aware snapshot capture in `@platform/audit` middleware: call ssrf-pii-hardening redaction logic on entity field values before persisting `before_snapshot`/`after_snapshot` | 2     | todo   | T6, ssrf T6     |
+| id  | task                                                                                                                                                                            | phase       | status                                                                                                               | depends         |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------- | --------------- | ---- | ----- |
+| T1  | Migration: `files` table + RLS + indexes                                                                                                                                        | 1           | todo                                                                                                                 | —               |
+| T2  | Migration: `admin_audit_log` table + append-only RLS + indexes                                                                                                                  | 1           | todo                                                                                                                 | —               |
+| T3  | Migration: `view_configs` table + RLS + unique constraint                                                                                                                       | 1           | todo                                                                                                                 | —               |
+| T4  | `@platform/notifications` package: `sendNotification`, `getUserPreferences`, `updateUserPreferences` wrapping Novu SDK                                                          | 1           | todo                                                                                                                 | —               |
+| T5  | `@platform/files` package: `initiateUpload` (with `content-length-range` in POST policy), `confirmUpload`, `getDownloadUrl`, `deleteFile`; S3 path convention; quota check      | 1           | todo                                                                                                                 | T1              |
+| T6  | `@platform/audit` package: `writeAuditEntry`; middleware that hooks entity create/update/delete/transition                                                                      | 1           | todo                                                                                                                 | T2              |
+| T7  | File routes: `POST /files`, `POST /files/:id/complete`, `GET /files/:id` (block on pending/quarantined/scan_failed), `DELETE /files/:id` (removes S3 object immediately)        | 2           | todo                                                                                                                 | T5              |
+| T8  | AV scan BullMQ job (triggered by `confirmUpload`): retry policy (5×, exponential backoff); `pending → clean                                                                     | quarantined | scan_failed`transitions; quarantine notifies tenant;`scan_failed` triggers developer alert; idempotent enqueue guard | 2               | todo | T5,T4 |
+| T9  | Audit log routes: `GET /admin/audit` with filtering + cursor pagination                                                                                                         | 2           | todo                                                                                                                 | T6              |
+| T10 | Notification preferences routes: `GET /preferences/notifications`, `PATCH /preferences/notifications`                                                                           | 2           | todo                                                                                                                 | T4              |
+| T11 | View configs routes: `GET /admin/view-configs/:entityType`, `PATCH /admin/view-configs/:entityType`                                                                             | 2           | todo                                                                                                                 | T3              |
+| T12 | Wire `@hono/zod-openapi`; `GET /openapi.json` route                                                                                                                             | 2           | todo                                                                                                                 | T7,T9,T10,T11   |
+| T13 | Integration tests: quota boundary (concurrent uploads), scan flow state transitions, audit write atomicity, view config isolation, Novu outage throws                           | 3           | todo                                                                                                                 | T5,T6,T7,T8,T11 |
+| T14 | Isolation tests: cross-tenant file access (expect 404), cross-tenant audit log, cross-tenant view config                                                                        | 3           | todo                                                                                                                 | T7,T9,T11       |
+| T15 | Abandoned file purge job (BullMQ recurring): delete `pending` rows + S3 objects older than 24h; release reserved quota; log purge; `scan_failed` rows excluded                  | 2           | todo                                                                                                                 | T5              |
+| T16 | PII-aware snapshot capture in `@platform/audit` middleware: call ssrf-pii-hardening redaction logic on entity field values before persisting `before_snapshot`/`after_snapshot` | 2           | todo                                                                                                                 | T6, ssrf T6     |
 
 phase gate: all unit + integration tests pass before advancing to next phase
 

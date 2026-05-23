@@ -4,7 +4,7 @@
 
 status: draft
 created: 2026-05-22
-updated: 2026-05-22
+updated: 2026-05-23
 reviewed: 2026-05-22
 gh: #12
 
@@ -41,16 +41,22 @@ gh: #12
 ### `@platform/notifications`
 
 ```typescript
-sendNotification(tenantId: string, userId: string, templateId: string, payload: Record<string, unknown>): Promise<void>
+sendNotification(tenantId: string, userId: string, templateId: string, payload: Record<string, unknown>, options?: { digestKey?: string }): Promise<void>
 getUserPreferences(tenantId: string, userId: string): Promise<NotificationPreferences>
 updateUserPreferences(tenantId: string, userId: string, prefs: Partial<NotificationPreferences>): Promise<void>
+
+type NotificationPreferences = {
+  channels: { email: boolean; inApp: boolean; sms: boolean }
+  templateOverrides: Record<string, { email?: boolean; inApp?: boolean; sms?: boolean }>
+}
 ```
 
 ### `@platform/files`
 
 ```typescript
 initiateUpload(tenantId: string, moduleSlug: string, entityId: string, filename: string, mimeType: string, sizeBytes: number): Promise<{ uploadUrl: string; uploadUrlExpiresAt: Date; fileId: string }>
-getDownloadUrl(tenantId: string, fileId: string): Promise<{ downloadUrl: string; expiresAt: Date }>
+getDownloadUrl(tenantId: string, fileId: string): Promise<{ downloadUrl: string; downloadUrlExpiresAt: Date }>
+deleteFile(tenantId: string, fileId: string): Promise<void>
 // uploadUrl expires in 15 min; downloadUrl expires in 1h
 ```
 
@@ -72,7 +78,7 @@ files (
   storage_key TEXT NOT NULL,  -- S3 path
   mime_type TEXT NOT NULL,
   size_bytes BIGINT NOT NULL,
-  scan_status TEXT NOT NULL DEFAULT 'pending',  -- pending | clean | quarantined
+  scan_status TEXT NOT NULL DEFAULT 'pending',  -- pending | clean | quarantined | deleted
   uploaded_by UUID NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 )
@@ -182,6 +188,12 @@ R9: `admin_audit_log` is append-only for all application-level database roles.
 ✓ Executing `DELETE FROM admin_audit_log` as `app_user` or `analytics_user` returns a permission error — no rows are deleted
 ✓ The migration for `admin_audit_log` contains no GRANT of UPDATE or DELETE to any application role
 
+R14: `before_snapshot` and `after_snapshot` in `admin_audit_log` must not contain raw PII or financial field values.
+✓ After an entity update where one field has `sensitivity='pii'`, the audit row's `after_snapshot` contains `"[REDACTED]"` for that field value, not the raw value
+✓ Field names are retained; only values are redacted — audit entry remains queryable by resource type and actor
+✓ Redaction is applied in the `@platform/audit` middleware before the DB write, using the same redaction logic as `ssrf-pii-hardening` T6
+✓ Fields with `sensitivity='public'` or `sensitivity='internal'` are written verbatim
+
 R10: Audit log is queryable by tenantId, actorId, resourceType, resourceId, and date range with cursor pagination.
 ✓ `GET /admin/audit?resourceType=ticket&from=2026-01-01` returns matching rows
 ✓ Response includes a cursor for the next page; page size max 100
@@ -218,29 +230,30 @@ R12: `GET /openapi.json` returns a valid OpenAPI 3.1 spec derived from Zod valid
 - `sendNotification` never silently drops a notification — it throws on any failure
 - `view_configs` seed uses INSERT ... ON CONFLICT DO NOTHING — reinstall never overwrites tenant overrides
 - `view_configs` has one row per (tenant, entity_type) — UNIQUE constraint enforced
-- PII field values in `before_snapshot`/`after_snapshot` are redacted per `entity_fields.sensitivity` (see ssrf-pii-hardening spec)
+- PII/financial field values in `before_snapshot`/`after_snapshot` are redacted to `"[REDACTED]"` before insert; field names are retained (R14, T16)
 
 ---
 
 ## §T Tasks
 
-| id  | task                                                                                                                                                  | phase | status | depends         |
-| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ----- | ------ | --------------- |
-| T1  | Migration: `files` table + RLS + indexes                                                                                                              | 1     | todo   | —               |
-| T2  | Migration: `admin_audit_log` table + append-only RLS + indexes                                                                                        | 1     | todo   | —               |
-| T3  | Migration: `view_configs` table + RLS + unique constraint                                                                                             | 1     | todo   | —               |
-| T4  | `@platform/notifications` package: `sendNotification`, `getUserPreferences`, `updateUserPreferences` wrapping Novu SDK                                | 1     | todo   | —               |
-| T5  | `@platform/files` package: `initiateUpload`, `getDownloadUrl`; S3 path convention; quota check                                                        | 1     | todo   | T1              |
-| T6  | `@platform/audit` package: `writeAuditEntry`; middleware that hooks entity create/update/delete/transition                                            | 1     | todo   | T2              |
-| T7  | File routes: `POST /files`, `GET /files/:id`, `DELETE /files/:id`                                                                                     | 2     | todo   | T5              |
-| T8  | AV scan background job (BullMQ); quarantine flow; tenant notification on quarantine                                                                   | 2     | todo   | T5,T4           |
-| T9  | Audit log routes: `GET /admin/audit` with filtering + cursor pagination                                                                               | 2     | todo   | T6              |
-| T10 | Notification preferences routes: `GET /preferences/notifications`, `PATCH /preferences/notifications`                                                 | 2     | todo   | T4              |
-| T11 | View configs routes: `GET /admin/view-configs/:entityType`, `PATCH /admin/view-configs/:entityType`                                                   | 2     | todo   | T3              |
-| T12 | Wire `@hono/zod-openapi`; `GET /openapi.json` route                                                                                                   | 2     | todo   | T7,T9,T10,T11   |
-| T13 | Integration tests: quota boundary (concurrent uploads), scan flow state transitions, audit write atomicity, view config isolation, Novu outage throws | 3     | todo   | T5,T6,T7,T8,T11 |
-| T14 | Isolation tests: cross-tenant file access (expect 404), cross-tenant audit log, cross-tenant view config                                              | 3     | todo   | T7,T9,T11       |
-| T15 | Abandoned file purge job (BullMQ recurring): delete pending rows + S3 objects older than 24h; log purge                                               | 2     | todo   | T5              |
+| id  | task                                                                                                                                                                            | phase | status | depends         |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- | ------ | --------------- |
+| T1  | Migration: `files` table + RLS + indexes                                                                                                                                        | 1     | todo   | —               |
+| T2  | Migration: `admin_audit_log` table + append-only RLS + indexes                                                                                                                  | 1     | todo   | —               |
+| T3  | Migration: `view_configs` table + RLS + unique constraint                                                                                                                       | 1     | todo   | —               |
+| T4  | `@platform/notifications` package: `sendNotification`, `getUserPreferences`, `updateUserPreferences` wrapping Novu SDK                                                          | 1     | todo   | —               |
+| T5  | `@platform/files` package: `initiateUpload`, `getDownloadUrl`; S3 path convention; quota check                                                                                  | 1     | todo   | T1              |
+| T6  | `@platform/audit` package: `writeAuditEntry`; middleware that hooks entity create/update/delete/transition                                                                      | 1     | todo   | T2              |
+| T7  | File routes: `POST /files`, `GET /files/:id`, `DELETE /files/:id`                                                                                                               | 2     | todo   | T5              |
+| T8  | AV scan background job (BullMQ); quarantine flow; tenant notification on quarantine                                                                                             | 2     | todo   | T5,T4           |
+| T9  | Audit log routes: `GET /admin/audit` with filtering + cursor pagination                                                                                                         | 2     | todo   | T6              |
+| T10 | Notification preferences routes: `GET /preferences/notifications`, `PATCH /preferences/notifications`                                                                           | 2     | todo   | T4              |
+| T11 | View configs routes: `GET /admin/view-configs/:entityType`, `PATCH /admin/view-configs/:entityType`                                                                             | 2     | todo   | T3              |
+| T12 | Wire `@hono/zod-openapi`; `GET /openapi.json` route                                                                                                                             | 2     | todo   | T7,T9,T10,T11   |
+| T13 | Integration tests: quota boundary (concurrent uploads), scan flow state transitions, audit write atomicity, view config isolation, Novu outage throws                           | 3     | todo   | T5,T6,T7,T8,T11 |
+| T14 | Isolation tests: cross-tenant file access (expect 404), cross-tenant audit log, cross-tenant view config                                                                        | 3     | todo   | T7,T9,T11       |
+| T15 | Abandoned file purge job (BullMQ recurring): delete pending rows + S3 objects older than 24h; log purge                                                                         | 2     | todo   | T5              |
+| T16 | PII-aware snapshot capture in `@platform/audit` middleware: call ssrf-pii-hardening redaction logic on entity field values before persisting `before_snapshot`/`after_snapshot` | 2     | todo   | T6, ssrf T6     |
 
 phase gate: all unit + integration tests pass before advancing to next phase
 

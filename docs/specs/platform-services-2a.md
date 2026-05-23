@@ -4,7 +4,7 @@
 
 status: draft
 created: 2026-05-22
-updated: 2026-05-23
+updated: 2026-05-23 (rev2)
 reviewed: 2026-05-22
 gh: #12
 
@@ -33,6 +33,7 @@ gh: #12
 | upload URL expiry      | Presigned upload URL expires in 15 min; presigned download URL expires in 1h                                                                                                                 |
 | per-file size limit    | Max 100MB per individual file; enforced at `POST /files` before presigned URL is issued                                                                                                      |
 | pending file TTL       | `files` rows with `scan_status='pending'` older than 24h are treated as abandoned and purged                                                                                                 |
+| notification delivery  | `sendNotification` enqueues a BullMQ job — never called synchronously inside a DB transaction; Novu outages do not block mutations or exhaust connection pool                                |
 
 ---
 
@@ -55,9 +56,11 @@ type NotificationPreferences = {
 
 ```typescript
 initiateUpload(tenantId: string, moduleSlug: string, entityId: string, filename: string, mimeType: string, sizeBytes: number): Promise<{ uploadUrl: string; uploadUrlExpiresAt: Date; fileId: string }>
+confirmUpload(tenantId: string, fileId: string): Promise<void>
 getDownloadUrl(tenantId: string, fileId: string): Promise<{ downloadUrl: string; downloadUrlExpiresAt: Date }>
 deleteFile(tenantId: string, fileId: string): Promise<void>
 // uploadUrl expires in 15 min; downloadUrl expires in 1h
+// presigned POST policy includes content-length-range (1 byte – 100MB); S3 enforces server-side
 ```
 
 ### File storage path pattern
@@ -123,6 +126,7 @@ view_configs (
 
 ```
 POST   /files                          → initiate upload, return presigned URL + fileId
+POST   /files/:id/complete             → signal upload finished; enqueue AV scan job
 GET    /files/:id                      → validate ownership, return presigned download URL
 DELETE /files/:id                      → soft-delete (sets scan_status='deleted'), admin only
 
@@ -157,22 +161,26 @@ R3: Novu digest batching is supported — the `notify` call passes enough metada
 
 **Files**
 
-R4: Upload flow is two-step: platform issues presigned URL, client uploads directly to S3, platform records metadata.
+R4: Upload flow is three-step: platform issues presigned URL, client uploads directly to S3, client calls complete endpoint to trigger scan.
 ✓ `POST /files` returns `{ uploadUrl, fileId }` without touching file bytes
 ✓ File metadata row exists in `files` table immediately after `POST /files` with `scan_status = 'pending'`
+✓ `POST /files/:id/complete` enqueues the AV scan BullMQ job; is idempotent — duplicate calls do not enqueue additional jobs
+✓ Presigned POST policy includes `content-length-range` (1 byte min, 100MB max) — S3 rejects uploads that violate the signed size bounds server-side
 
 R5: All file access is tenant-scoped. A tenant cannot access files belonging to another tenant.
 ✓ `GET /files/:id` returns 404 for a valid file ID that belongs to a different tenant
 ✓ S3 paths include `tenantId` prefix — direct bucket access without a signed URL is blocked at bucket policy level
 
-R6: File uploads are checked for malware asynchronously. Infected files are quarantined and not served.
-✓ After upload, a background job runs AV scan; `scan_status` transitions `pending → clean | quarantined`
-✓ `GET /files/:id` on a quarantined file returns 422 with reason; never issues a download URL
+R6: File uploads are checked for malware asynchronously. Infected files are quarantined; pending files are not served.
+✓ After `POST /files/:id/complete`, a background job runs AV scan; `scan_status` transitions `pending → clean | quarantined`
+✓ `GET /files/:id` on a `pending` file returns 422 — download URL not issued until scan completes
+✓ `GET /files/:id` on a `quarantined` file returns 422 with reason; never issues a download URL
 ✓ Tenant admin receives a notification when a file is quarantined
 
-R7: Storage quota is enforced per tenant at upload time.
+R7: Storage quota is enforced per tenant at upload time; size limits are enforced at S3 level, not on self-reported values.
 ✓ `POST /files` returns 422 if the new file would push total stored bytes over `tenant_config.storage_quota_mb`
-✓ `POST /files` returns 422 if a single file exceeds 100MB regardless of remaining quota
+✓ `POST /files` returns 422 if `sizeBytes` exceeds 100MB regardless of remaining quota
+✓ Presigned POST policy `content-length-range` prevents a client from claiming a small size and uploading a large file — S3 enforces the limit before the object is written
 ✓ Two concurrent uploads at the quota boundary result in at most one succeeding — the second receives 422
 
 **Audit log**
@@ -223,6 +231,9 @@ R12: `GET /openapi.json` returns a valid OpenAPI 3.1 spec derived from Zod valid
 
 - Files are never served via direct S3 URLs — always presigned, always tenant-validated
 - Presigned upload URLs expire in 15 min; download URLs expire in 1h — never long-lived
+- `pending` and `quarantined` files never yield a download URL — only `clean` files are served
+- S3 presigned POST policy enforces `content-length-range` — self-reported `sizeBytes` alone is not the enforcement mechanism
+- `sendNotification` enqueues a BullMQ job; it is never called synchronously inside a DB transaction
 - Pending file rows older than 24h are abandoned; purge job removes both row and S3 object
 - Audit log rows are written in the same transaction as the mutation they describe
 - `admin_audit_log` grants no UPDATE or DELETE to any application role — enforced in migration, not only in application code
@@ -242,10 +253,10 @@ R12: `GET /openapi.json` returns a valid OpenAPI 3.1 spec derived from Zod valid
 | T2  | Migration: `admin_audit_log` table + append-only RLS + indexes                                                                                                                  | 1     | todo   | —               |
 | T3  | Migration: `view_configs` table + RLS + unique constraint                                                                                                                       | 1     | todo   | —               |
 | T4  | `@platform/notifications` package: `sendNotification`, `getUserPreferences`, `updateUserPreferences` wrapping Novu SDK                                                          | 1     | todo   | —               |
-| T5  | `@platform/files` package: `initiateUpload`, `getDownloadUrl`; S3 path convention; quota check                                                                                  | 1     | todo   | T1              |
+| T5  | `@platform/files` package: `initiateUpload` (with `content-length-range` in POST policy), `confirmUpload`, `getDownloadUrl`, `deleteFile`; S3 path convention; quota check      | 1     | todo   | T1              |
 | T6  | `@platform/audit` package: `writeAuditEntry`; middleware that hooks entity create/update/delete/transition                                                                      | 1     | todo   | T2              |
-| T7  | File routes: `POST /files`, `GET /files/:id`, `DELETE /files/:id`                                                                                                               | 2     | todo   | T5              |
-| T8  | AV scan background job (BullMQ); quarantine flow; tenant notification on quarantine                                                                                             | 2     | todo   | T5,T4           |
+| T7  | File routes: `POST /files`, `POST /files/:id/complete`, `GET /files/:id` (block on pending/quarantined), `DELETE /files/:id`                                                    | 2     | todo   | T5              |
+| T8  | AV scan BullMQ job (triggered by `confirmUpload`); quarantine flow; tenant notification on quarantine; idempotent enqueue guard                                                 | 2     | todo   | T5,T4           |
 | T9  | Audit log routes: `GET /admin/audit` with filtering + cursor pagination                                                                                                         | 2     | todo   | T6              |
 | T10 | Notification preferences routes: `GET /preferences/notifications`, `PATCH /preferences/notifications`                                                                           | 2     | todo   | T4              |
 | T11 | View configs routes: `GET /admin/view-configs/:entityType`, `PATCH /admin/view-configs/:entityType`                                                                             | 2     | todo   | T3              |

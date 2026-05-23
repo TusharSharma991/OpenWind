@@ -4,7 +4,7 @@
 
 status: draft
 created: 2026-05-22
-updated: 2026-05-22
+updated: 2026-05-23
 reviewed: 2026-05-22
 gh: #2
 
@@ -48,11 +48,15 @@ sensitivity TEXT NOT NULL DEFAULT 'internal'
 10.0.0.0/8         RFC 1918
 172.16.0.0/12      RFC 1918
 192.168.0.0/16     RFC 1918
-169.254.0.0/16     link-local (AWS metadata)
+169.254.0.0/16     link-local / AWS metadata (IPv4)
+fe80::/10          link-local (IPv6)
+100.64.0.0/10      CGNAT / shared address space
 fd00::/8           ULA IPv6
 ::ffff:0:0/96      IPv4-mapped IPv6 (covers ::ffff:10.x, ::ffff:169.254.x, etc.)
 [platform private CIDRs from env: SSRF_BLOCK_CIDRS]
 ```
+
+> **DNS pinning:** After resolving the URL and validating the IP, the outbound HTTP request must be made to the _already-resolved IP address_ (not re-resolved from the hostname) with the `Host` header set to the original hostname. This prevents DNS rebinding where the hostname returns a safe IP on lookup but a blocked IP at connection time.
 
 > All addresses must be normalized to their canonical form before range-checking. IPv4-mapped IPv6 addresses must be extracted to their IPv4 value and checked against IPv4 ranges.
 
@@ -78,9 +82,11 @@ R1: No outbound webhook request is made to any URL that resolves to a blocked ad
 ✓ Webhook action targeting `http://169.254.169.254/` is blocked; no network request is made
 ✓ Webhook action targeting a hostname that DNS-resolves to a RFC 1918 address is blocked
 ✓ Webhook action targeting `::ffff:169.254.169.254` (IPv4-mapped IPv6) is blocked
+✓ Webhook action targeting `100.64.x.x` (CGNAT) or `fe80::/10` (IPv6 link-local) is blocked
 ✓ Webhook action targeting a legitimate public URL proceeds normally
 ✓ Block list includes env-configurable private CIDRs (`SSRF_BLOCK_CIDRS`) in addition to hardcoded RFC ranges
 ✓ DNS resolution that exceeds 2s is treated as a block; delivery does not hang
+✓ Outbound request is made directly to the validated IP (not re-resolved from hostname); `Host` header preserves original hostname — DNS rebinding cannot substitute a blocked IP after validation
 
 R2: Every blocked webhook attempt is logged with tenantId, target URL, resolved IP, and reason.
 ✓ Blocked attempt produces a `webhook.blocked` log entry with all four fields
@@ -99,6 +105,7 @@ R4: `entity_fields.sensitivity` classifies each field as `public | internal | pi
 R5: When writing to `workflow_events.metadata`, values for `pii` and `financial` fields are replaced with `"[REDACTED]"`. Field names are retained.
 ✓ A `workflow_events` row for a transition that updated an SSN field contains `{ "ssn": "[REDACTED]" }`, not the value
 ✓ `public` and `internal` field values are written verbatim
+✓ Redaction applies to top-level keys of `metadata` only — the engine does not traverse nested objects within a field value; non-field metadata keys (e.g. `comment`, `triggeredBy`) are never redacted
 ✓ Redaction happens in the engine before the DB write — never after
 
 R6: `analytics_user` cannot read raw PII or financial values from any platform table.
@@ -122,20 +129,21 @@ R6: `analytics_user` cannot read raw PII or financial values from any platform t
 
 ## §T Tasks
 
-| id  | task                                                                                                                                                                                                                | phase | status | depends  |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- | ------ | -------- |
-| T1  | Add `SSRF_BLOCK_CIDRS` env var to `@platform/config`                                                                                                                                                                | 1     | todo   | —        |
-| T2  | Implement `validateWebhookUrl(url)` in `@platform/automation-engine` — resolves DNS (2s timeout), normalizes IPv4-mapped IPv6, checks all block list ranges, throws typed `AutomationError('WEBHOOK_SSRF_BLOCKED')` | 1     | todo   | T1       |
-| T3  | Wire `validateWebhookUrl` into webhook action executor; log blocked attempts                                                                                                                                        | 1     | todo   | T2       |
-| T4  | Unit tests: loopback, RFC1918, link-local, IPv4-mapped IPv6 blocked; public URL passes; DNS timeout treated as block; DNS rebinding blocked (mock DNS returns different IP on second call)                          | 1     | todo   | T3       |
-| T5  | Migration: add `entity_fields.sensitivity` column + default                                                                                                                                                         | 2     | todo   | —        |
-| T6  | Update workflow engine `writeEventLog` to redact `pii`/`financial` field values before insert                                                                                                                       | 2     | todo   | T5       |
-| T7  | Unit tests: redaction for pii/financial; verbatim for public/internal                                                                                                                                               | 2     | todo   | T6       |
-| T8  | Migration: enumerate `analytics_user` GRANT SELECT list; create masking view for `workflow_events`                                                                                                                  | 2     | todo   | T5       |
-| T9  | Update all existing entity field seed SQL with explicit sensitivity values (one sub-task per module — scope: ~7 modules, est. 30–60 fields total)                                                                   | 2     | todo   | T5       |
-| T10 | ADR-001 addendum: document analytics_user grant scope and opt-in convention                                                                                                                                         | 2     | todo   | T8       |
-| T11 | Isolation test: cross-tenant webhook blocked; analytics_user cannot read raw metadata                                                                                                                               | 3     | todo   | T4,T7,T8 |
-| T12 | CI lint rule: fail if migration file lacks `-- analytics: excluded` or `-- analytics: included(...)` annotation (grep check in pre-commit / CI script)                                                              | 2     | todo   | T8       |
+| id  | task                                                                                                                                                                                                                                                                             | phase | status | depends  |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- | ------ | -------- |
+| T1  | Add `SSRF_BLOCK_CIDRS` env var to `@platform/config`                                                                                                                                                                                                                             | 1     | todo   | —        |
+| T2  | Implement `validateWebhookUrl(url)` in `@platform/automation-engine` — resolves DNS (2s timeout via `AbortController`), normalizes IPv4-mapped IPv6, checks all block list ranges, throws typed `AutomationError('WEBHOOK_SSRF_BLOCKED')`; returns resolved IP for use by caller | 1     | todo   | T1       |
+| T3  | Wire `validateWebhookUrl` into webhook action executor; use returned IP to construct request (pin connection, set `Host` header to original hostname); log blocked attempts                                                                                                      | 1     | todo   | T2       |
+| T4  | Unit tests: loopback, RFC1918, link-local, IPv4-mapped IPv6 blocked; public URL passes; DNS timeout treated as block; DNS rebinding blocked (mock DNS returns different IP on second call)                                                                                       | 1     | todo   | T3       |
+| T5  | Migration: add `entity_fields.sensitivity` column + default                                                                                                                                                                                                                      | 2     | todo   | —        |
+| T6  | Update workflow engine `writeEventLog` to redact `pii`/`financial` field values before insert                                                                                                                                                                                    | 2     | todo   | T5       |
+| T7  | Unit tests: redaction for pii/financial; verbatim for public/internal                                                                                                                                                                                                            | 2     | todo   | T6       |
+| T8  | Migration: enumerate `analytics_user` GRANT SELECT list; create masking view for `workflow_events`                                                                                                                                                                               | 2     | todo   | T5       |
+| T9  | Update all existing entity field seed SQL with explicit sensitivity values (one sub-task per module — scope: ~7 modules, est. 30–60 fields total)                                                                                                                                | 2     | todo   | T5       |
+| T10 | ADR-001 addendum: document analytics_user grant scope and opt-in convention                                                                                                                                                                                                      | 2     | todo   | T8       |
+| T11 | Isolation test: cross-tenant webhook blocked; analytics_user cannot read raw metadata                                                                                                                                                                                            | 3     | todo   | T4,T7,T8 |
+| T12 | CI lint rule: fail if migration file lacks `-- analytics: excluded` or `-- analytics: included(...)` annotation (grep check in pre-commit / CI script)                                                                                                                           | 2     | todo   | T8       |
+| T13 | Remove `analytics_user` blanket `GRANT SELECT ON api_keys` from migration 0001 — was overreach; replace with explicit column-level grant per T8 policy                                                                                                                           | 3     | todo   | T8       |
 
 phase gate: all unit + integration tests pass before advancing to next phase
 

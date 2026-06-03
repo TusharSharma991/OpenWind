@@ -1,4 +1,25 @@
 import { z } from "zod";
+import { config as loadDotenv } from "dotenv";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+
+// Load .env.local from the monorepo root (walk up from cwd until we find it)
+function findEnvLocal(): string | undefined {
+  let dir = process.cwd();
+  for (let i = 0; i < 8; i++) {
+    const candidate = join(dir, ".env.local");
+    if (existsSync(candidate)) return candidate;
+    const parent = join(dir, "..");
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return undefined;
+}
+
+const envLocalPath = findEnvLocal();
+if (envLocalPath) {
+  loadDotenv({ path: envLocalPath, override: false });
+}
 
 const EnvSchema = z
   .object({

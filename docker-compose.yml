@@ -1,4 +1,4 @@
-name: platform
+name: openwind
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Local development environment.
@@ -24,7 +24,6 @@ name: platform
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
-
   # ── PostgreSQL ─────────────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
@@ -61,26 +60,27 @@ services:
   # Transaction mode is required so SET LOCAL app.tenant_id scoping works
   # correctly — session mode would let the setting leak across pooled connections.
   pgbouncer:
-    image: bitnami/pgbouncer:latest
+    image: edoburu/pgbouncer:latest
     restart: unless-stopped
     environment:
-      POSTGRESQL_HOST: postgres
-      POSTGRESQL_PORT: 5432
-      POSTGRESQL_DATABASE: platform
-      POSTGRESQL_USERNAME: app_user
-      POSTGRESQL_PASSWORD: app_user_dev_password
-      PGBOUNCER_DATABASE: platform
-      PGBOUNCER_POOL_MODE: transaction
-      PGBOUNCER_MAX_CLIENT_CONN: 1000
-      PGBOUNCER_DEFAULT_POOL_SIZE: 20
-      PGBOUNCER_AUTH_TYPE: scram-sha-256
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: platform
+      DB_USER: app_user
+      DB_PASSWORD: app_user_dev_password
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 1000
+      DEFAULT_POOL_SIZE: 20
+      AUTH_TYPE: scram-sha-256
+      SERVER_TLS_SSLMODE: disable
     ports:
-      - "6432:6432"   # App connects here, not 5432
+      - "6432:5432" # App connects here, not 5432
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "pg_isready", "-h", "localhost", "-p", "6432", "-U", "app_user"]
+      test:
+        ["CMD-SHELL", "pg_isready -h localhost -p 5432 -U app_user || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -98,11 +98,11 @@ services:
       BAO_ADDR: http://0.0.0.0:8200
       BAO_LOG_LEVEL: warn
     ports:
-      - "8200:8200"   # OpenBao API + UI → http://localhost:8200
+      - "8200:8200" # OpenBao API + UI → http://localhost:8200
     cap_add:
       - IPC_LOCK
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8200/v1/sys/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8200/v1/sys/health"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -154,8 +154,8 @@ services:
       MINIO_ROOT_PASSWORD: platform_secret_key_dev_only
       MINIO_BROWSER_REDIRECT_URL: http://localhost:9001
     ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # Web console → http://localhost:9001
+      - "9000:9000" # S3 API
+      - "9001:9001" # Web console → http://localhost:9001
     volumes:
       - minio_data:/data
     healthcheck:
@@ -198,13 +198,25 @@ services:
       ZITADEL_EXTERNALDOMAIN: localhost
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: admin@platform.local
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: Admin1234!
+      # Machine user + PAT for automated setup scripts
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_USERNAME: setup-admin
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_NAME: Setup Admin
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_PAT_EXPIRATIONDATE: "2030-01-01T00:00:00Z"
+      # Disable Login V2 (the new SPA login) — it requires a separately hosted
+      # frontend that isn't bundled in the Docker image, causing 404 in dev.
+      # With this off, the console falls back to the built-in Login V1 HTML UI.
+      ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_REQUIRED: "false"
     ports:
-      - "8080:8080"   # Zitadel UI + API → http://localhost:8080
+      - "8080:8080" # Zitadel UI + API → http://localhost:8080
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "/app/zitadel", "ready"]
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://127.0.0.1:8080/debug/healthz | grep -q ok",
+        ]
       interval: 10s
       timeout: 5s
       retries: 20
@@ -215,7 +227,7 @@ services:
     image: ghcr.io/novuhq/novu/api:latest
     restart: unless-stopped
     environment:
-      NODE_ENV: development
+      NODE_ENV: local
       API_ROOT_URL: http://localhost:3010
       FRONT_BASE_URL: http://localhost:4200
       MONGO_URL: mongodb://novu-mongo:27017/novu
@@ -233,7 +245,7 @@ services:
     image: ghcr.io/novuhq/novu/worker:latest
     restart: unless-stopped
     environment:
-      NODE_ENV: development
+      NODE_ENV: local
       MONGO_URL: mongodb://novu-mongo:27017/novu
       REDIS_HOST: redis
       REDIS_PORT: 6379
@@ -249,7 +261,7 @@ services:
     environment:
       REACT_APP_API_URL: http://localhost:3010
     ports:
-      - "4200:4200"   # Novu dashboard → http://localhost:4200
+      - "4200:4200" # Novu dashboard → http://localhost:4200
 
   novu-mongo:
     image: mongo:7
@@ -262,8 +274,8 @@ services:
     image: mailhog/mailhog:latest
     restart: unless-stopped
     ports:
-      - "1025:1025"   # SMTP
-      - "8025:8025"   # Web UI → http://localhost:8025
+      - "1025:1025" # SMTP
+      - "8025:8025" # Web UI → http://localhost:8025
     environment:
       MH_STORAGE: maildir
       MH_MAILDIR_PATH: /mailhog-data
@@ -279,7 +291,7 @@ services:
       REDIS_PORT: 6379
       REDIS_USE_TLS: "false"
     ports:
-      - "3099:3000"   # Bull Board UI → http://localhost:3099
+      - "3099:3000" # Bull Board UI → http://localhost:3099
     depends_on:
       - redis
 

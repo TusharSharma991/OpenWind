@@ -29,13 +29,9 @@ import { join } from "node:path";
 const ZITADEL_BASE = process.env["ZITADEL_BASE_URL"] ?? "http://localhost:8080";
 const ADMIN_EMAIL =
   process.env["ZITADEL_ADMIN_EMAIL"] ?? "admin@platform.local";
-const ADMIN_PASSWORD = process.env["ZITADEL_ADMIN_PASSWORD"];
-if (!ADMIN_PASSWORD) {
-  console.error(
-    "[setup-auth] ERROR: ZITADEL_ADMIN_PASSWORD env var is required — set it in your shell or .env.local and retry.",
-  );
-  process.exit(1);
-}
+const ADMIN_PASSWORD = process.env["ZITADEL_ADMIN_PASSWORD"] ?? "Admin1234!";
+// Accept a pre-generated PAT directly (bypasses the auth flow entirely)
+const ADMIN_PAT = process.env["ZITADEL_ADMIN_PAT"];
 const PROJECT_NAME = "Platform";
 const APP_NAME = "platform-api";
 const INTROSPECTION_SA_NAME = "platform-introspection";
@@ -87,31 +83,39 @@ async function zitadelFetch(
 }
 
 // ── Step 1: Authenticate ──────────────────────────────────────────────────────
+// Zitadel v2 removed the password grant type. We use the Sessions API instead:
+// 1. Create a session with username + password → get a session token
+// 2. Create an OIDC auth request + callback using the session token
+// 3. Extract the access token from the callback
+// Alternatively pass ZITADEL_ADMIN_PAT to skip this entirely.
 
 async function getAdminToken(): Promise<string> {
-  log("Authenticating as admin...");
-
-  const res = await fetch(`${ZITADEL_BASE}/oauth/v2/token`, {
-    method: "POST",
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "password",
-      username: ADMIN_EMAIL,
-      password: ADMIN_PASSWORD,
-      scope: "openid profile email urn:zitadel:iam:org:project:id:zitadel:aud",
-    }),
-  });
-
-  if (!res.ok) {
-    const body = await res.text();
-    fail(`Failed to authenticate: ${res.status} ${body}`);
+  // If a PAT is provided directly, skip the full auth flow
+  if (ADMIN_PAT) {
+    log("Using ZITADEL_ADMIN_PAT directly.");
+    return ADMIN_PAT;
   }
 
-  const data = (await res.json()) as { access_token?: string };
-  if (!data.access_token) fail("No access_token in auth response");
-  log("Admin token obtained.");
-  return data.access_token;
+  // Zitadel v2 removed the password grant and requires client authentication for
+  // the Sessions API. A Personal Access Token (PAT) is the correct approach for
+  // automated local dev setup.
+  //
+  // One-time steps to generate a PAT:
+  //   1. Open http://localhost:8080 in your browser
+  //   2. Log in as admin@platform.local / Admin1234!
+  //   3. Click your avatar (top-right) → "Personal Access Tokens"
+  //   4. Click "+ New" → set no expiry → copy the token
+  //   5. Re-run: ZITADEL_ADMIN_PAT=<token> pnpm setup-auth
+  //
+  fail(
+    `ZITADEL_ADMIN_PAT env var is required.\n\n` +
+      `  Zitadel v2 does not support password grant. Generate a PAT:\n` +
+      `  1. Open http://localhost:8080\n` +
+      `  2. Log in as ${ADMIN_EMAIL} / ${ADMIN_PASSWORD}\n` +
+      `  3. Avatar → Personal Access Tokens → New (no expiry)\n` +
+      `  4. Copy the token\n` +
+      `  5. Run: ZITADEL_ADMIN_PAT=<token> pnpm setup-auth\n`,
+  );
 }
 
 // ── Step 2: Create project (idempotent) ───────────────────────────────────────

@@ -1,3 +1,4 @@
+import { serve } from "@hono/node-server";
 import { logger } from "@platform/logger";
 import { createApp } from "./app.js";
 
@@ -6,4 +7,6 @@ const port = 3000;
 
 logger.info({ port }, "API server starting");
 
-export default { port, fetch: app.fetch };
+serve({ fetch: app.fetch, port }, () => {
+  logger.info({ port }, "API server listening");
+});

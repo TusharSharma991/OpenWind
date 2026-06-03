@@ -25,6 +25,9 @@ importers:
       "@typescript-eslint/parser":
         specifier: ^8.0.0
         version: 8.59.3(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3)
+      dotenv-cli:
+        specifier: ^11.0.0
+        version: 11.0.0
       eslint:
         specifier: ^9.0.0
         version: 9.39.4(jiti@2.6.1)
@@ -98,6 +101,9 @@ importers:
 
   apps/api:
     dependencies:
+      "@hono/node-server":
+        specifier: ^2.0.4
+        version: 2.0.4(hono@4.12.18)
       "@hono/zod-validator":
         specifier: ^0.4.0
         version: 0.4.3(hono@4.12.18)(zod@3.25.76)
@@ -529,6 +535,9 @@ importers:
 
   packages/config:
     dependencies:
+      dotenv:
+        specifier: ^17.4.2
+        version: 17.4.2
       zod:
         specifier: ^3.23.0
         version: 3.25.76
@@ -570,6 +579,9 @@ importers:
       "@platform/config":
         specifier: workspace:*
         version: link:../config
+      dotenv:
+        specifier: ^17.4.2
+        version: 17.4.2
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(postgres@3.4.9)
@@ -2319,6 +2331,15 @@ packages:
       }
     engines: { node: ^18.18.0 || ^20.9.0 || >=21.1.0 }
 
+  "@hono/node-server@2.0.4":
+    resolution:
+      {
+        integrity: sha512-Ut3y0dMMPWy6bZ2kVfx25EOVbZlm15dhF4mOsezMlhpNHy+4MkU1qN9Y6lnruYi4wPmFzimGX2X7LF/FwHli4A==,
+      }
+    engines: { node: ">=20" }
+    peerDependencies:
+      hono: ^4
+
   "@hono/zod-validator@0.4.3":
     resolution:
       {
@@ -4019,6 +4040,34 @@ packages:
         integrity: sha512-QM8q3zDe58hqUqjraQOmzZ1LIH9SWQJTlEKCH4kJ2oQvLZk7RbQXvtDM2XEq3fwkV9CCvvH4LA0AV+ogFsBM2Q==,
       }
     engines: { node: ">=8" }
+
+  dotenv-cli@11.0.0:
+    resolution:
+      {
+        integrity: sha512-r5pA8idbk7GFWuHEU7trSTflWcdBpQEK+Aw17UrSHjS6CReuhrrPcyC3zcQBPQvhArRHnBo/h6eLH1fkCvNlww==,
+      }
+    hasBin: true
+
+  dotenv-expand@12.0.3:
+    resolution:
+      {
+        integrity: sha512-uc47g4b+4k/M/SeaW1y4OApx+mtLWl92l5LMPP0GNXctZqELk+YGgOPIIC5elYmUH4OuoK3JLhuRUYegeySiFA==,
+      }
+    engines: { node: ">=12" }
+
+  dotenv@16.6.1:
+    resolution:
+      {
+        integrity: sha512-uBq4egWHTcTt33a72vpSG0z3HnPuIl6NqYcTrKEg2azoEyl2hpW0zqlxysq2pK9HlDIHyHyakeYaYnSAwd8bow==,
+      }
+    engines: { node: ">=12" }
+
+  dotenv@17.4.2:
+    resolution:
+      {
+        integrity: sha512-nI4U3TottKAcAD9LLud4Cb7b2QztQMUEfHbvhTH09bqXTxnSie8WnjPALV/WMCrJZ6UV/qHJ6L03OqO3LcdYZw==,
+      }
+    engines: { node: ">=12" }
 
   drizzle-kit@0.31.10:
     resolution:
@@ -7870,6 +7919,10 @@ snapshots:
       "@eslint/core": 0.17.0
       levn: 0.4.1
 
+  "@hono/node-server@2.0.4(hono@4.12.18)":
+    dependencies:
+      hono: 4.12.18
+
   "@hono/zod-validator@0.4.3(hono@4.12.18)(zod@3.25.76)":
     dependencies:
       hono: 4.12.18
@@ -8909,6 +8962,21 @@ snapshots:
   dot-prop@5.3.0:
     dependencies:
       is-obj: 2.0.0
+
+  dotenv-cli@11.0.0:
+    dependencies:
+      cross-spawn: 7.0.6
+      dotenv: 17.4.2
+      dotenv-expand: 12.0.3
+      minimist: 1.2.8
+
+  dotenv-expand@12.0.3:
+    dependencies:
+      dotenv: 16.6.1
+
+  dotenv@16.6.1: {}
+
+  dotenv@17.4.2: {}
 
   drizzle-kit@0.31.10:
     dependencies:

@@ -50,3 +50,6 @@ coverage/
 
 # Vite
 *.local
+
+# Internal team reference (never publish)
+INTERNAL.md

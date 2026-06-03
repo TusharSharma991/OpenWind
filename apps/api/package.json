@@ -14,6 +14,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@hono/node-server": "^2.0.4",
     "@hono/zod-validator": "^0.4.0",
     "@platform/auth": "workspace:*",
     "@platform/automation-engine": "workspace:*",

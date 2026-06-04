@@ -1,3 +1,5 @@
+-- analytics: excluded (payload mirrors outbox_events which mirrors entity_instances.fields — same PII risk)
+
 -- Down migration (rollback):
 -- DROP POLICY IF EXISTS "dead_letter_events_tenant_isolation" ON "dead_letter_events";
 -- ALTER TABLE "dead_letter_events" DISABLE ROW LEVEL SECURITY;

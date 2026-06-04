@@ -22,7 +22,8 @@
     "db:seed": "turbo run db:seed --filter=@platform/db",
     "db:studio": "turbo run db:studio --filter=@platform/db",
     "clean": "turbo run clean && find . -name 'node_modules' -type d -prune -exec rm -rf '{}' +",
-    "ci": "pnpm commitlint --from HEAD~1 --to HEAD && pnpm format:check && pnpm lint && pnpm typecheck && pnpm build && pnpm test",
+    "ci": "pnpm commitlint --from HEAD~1 --to HEAD && pnpm format:check && pnpm lint && pnpm typecheck && pnpm build && pnpm test && pnpm check-analytics-annotations",
+    "check-analytics-annotations": "tsx scripts/check-analytics-annotations.ts",
     "prepare": "husky",
     "setup-auth": "tsx scripts/setup-dev-auth.ts",
     "setup-bao": "tsx scripts/setup-dev-bao.ts"

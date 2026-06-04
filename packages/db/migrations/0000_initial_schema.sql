@@ -1,3 +1,10 @@
+-- analytics: see migration 0009 for the full per-table analytics_user grant policy.
+-- Tables in this file: entity_fields (included, excl. config), entity_instances
+-- (included, excl. fields), entity_relations (included), entity_types (included),
+-- workflow_events (via workflow_events_masked view only), workflow_states (included),
+-- workflow_transitions (included), workflows (included), automation_executions
+-- (included), automation_rules (included, excl. actions).
+
 CREATE TABLE "entity_fields" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"entity_type_id" uuid NOT NULL,

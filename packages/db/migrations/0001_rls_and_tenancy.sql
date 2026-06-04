@@ -200,14 +200,18 @@ CREATE POLICY tenant_write ON api_keys
   WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::UUID);
 
 -- ── 13. Grant api_keys table to app roles (no-op if roles don't exist) ──────
+--
+-- analytics: excluded (key_hash is a credential; superseded by migration 0009
+--            which sets an explicit per-column grant policy for analytics_user)
+-- NOTE: the analytics_user GRANT SELECT below is intentionally removed here.
+-- Migration 0009 (ALTER DEFAULT PRIVILEGES + explicit grants) supersedes it.
 
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_user') THEN
     GRANT SELECT, INSERT, UPDATE, DELETE ON api_keys TO app_user;
   END IF;
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'analytics_user') THEN
-    GRANT SELECT ON api_keys TO analytics_user;
-  END IF;
+  -- analytics_user grant intentionally omitted — see migration 0009 for the
+  -- explicit analytics access policy (api_keys is excluded: key_hash is a credential).
 END
 $$;

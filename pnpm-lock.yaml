@@ -510,6 +510,9 @@ importers:
       ioredis:
         specifier: ^5.0.0
         version: 5.10.1
+      ipaddr.js:
+        specifier: ^2.4.0
+        version: 2.4.0
       zod:
         specifier: ^3.23.0
         version: 3.25.76
@@ -4863,6 +4866,13 @@ packages:
         integrity: sha512-HuEDBTI70aYdx1v6U97SbNx9F1+svQKBDo30o0b9fw055LMepzpOOd0Ccg9Q6tbqmBSJaMuY0fB7yw9/vjBYCA==,
       }
     engines: { node: ">=12.22.0" }
+
+  ipaddr.js@2.4.0:
+    resolution:
+      {
+        integrity: sha512-9VGk3HGanVE6JoZXHiCpnGy5X0jYDnN4EA4lntFPj+1vIWlFhIylq2CrrCOJH9EAhc5CYhq18F2Av2tgoAPsYQ==,
+      }
+    engines: { node: ">= 10" }
 
   is-array-buffer@3.0.5:
     resolution:
@@ -9513,6 +9523,8 @@ snapshots:
       standard-as-callback: 2.1.0
     transitivePeerDependencies:
       - supports-color
+
+  ipaddr.js@2.4.0: {}
 
   is-array-buffer@3.0.5:
     dependencies:

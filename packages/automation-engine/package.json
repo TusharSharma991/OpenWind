@@ -21,6 +21,7 @@
     "bullmq": "^5.0.0",
     "drizzle-orm": "^0.45.2",
     "ioredis": "^5.0.0",
+    "ipaddr.js": "^2.4.0",
     "zod": "^3.23.0"
   },
   "devDependencies": {

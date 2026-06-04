@@ -463,6 +463,7 @@ export async function addEntityField(
     ...row,
     config: row.config as Record<string, unknown>,
     fieldType: row.fieldType as EntityField["fieldType"],
+    sensitivity: row.sensitivity as EntityField["sensitivity"],
   };
 }
 
@@ -509,6 +510,7 @@ async function loadEntityFields(
     ...r,
     config: r.config as Record<string, unknown>,
     fieldType: r.fieldType as EntityField["fieldType"],
+    sensitivity: r.sensitivity as EntityField["sensitivity"],
   }));
 }
 

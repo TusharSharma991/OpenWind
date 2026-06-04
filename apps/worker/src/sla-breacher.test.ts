@@ -49,22 +49,23 @@ vi.mock("@platform/workflow-engine", () => ({}));
 let capturedProcessor: ((job: unknown) => Promise<void>) | null = null;
 const capturedFailedHandlers: Array<(job: unknown, err: Error) => void> = [];
 
+// vitest 4.x: mockImplementation must use a regular function (not arrow) when
+// the mock is used with `new` — arrow functions are not constructable.
 vi.mock("bullmq", () => ({
-  Worker: vi
-    .fn()
-    .mockImplementation(
-      (_queue: string, processor: (job: unknown) => Promise<void>) => {
-        capturedProcessor = processor;
-        return {
-          on: vi.fn(
-            (event: string, handler: (job: unknown, err: Error) => void) => {
-              if (event === "failed") capturedFailedHandlers.push(handler);
-            },
-          ),
-          close: vi.fn(),
-        };
-      },
-    ),
+  Worker: vi.fn().mockImplementation(function (
+    _queue: string,
+    processor: (job: unknown) => Promise<void>,
+  ) {
+    capturedProcessor = processor;
+    return {
+      on: vi.fn(
+        (event: string, handler: (job: unknown, err: Error) => void) => {
+          if (event === "failed") capturedFailedHandlers.push(handler);
+        },
+      ),
+      close: vi.fn(),
+    };
+  }),
 }));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

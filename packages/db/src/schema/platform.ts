@@ -3,6 +3,7 @@ import {
   uuid,
   text,
   jsonb,
+  bigint,
   timestamp,
   index,
   unique,
@@ -70,6 +71,117 @@ export const tenantUsers = pgTable(
     uniqueTenantUser: unique("tenant_users_tenant_user_unique").on(
       t.tenantId,
       t.userId,
+    ),
+  }),
+);
+
+/**
+ * files — tenant-scoped file metadata with AV scan status tracking.
+ * Actual file bytes live in S3; this table tracks the lifecycle.
+ * RLS: enforced via app.tenant_id GUC.
+ */
+export const files = pgTable(
+  "files",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    moduleSlug: text("module_slug").notNull(),
+    entityId: uuid("entity_id"),
+    originalName: text("original_name").notNull(),
+    /** S3 path: {tenantId}/{moduleSlug}/{entityId}/{uuid}-{filename} */
+    storageKey: text("storage_key").notNull(),
+    mimeType: text("mime_type").notNull(),
+    sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
+    /** pending | clean | quarantined | scan_failed | deleted */
+    scanStatus: text("scan_status").default("pending").notNull(),
+    uploadedBy: uuid("uploaded_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => ({
+    tenantScanIdx: index("files_tenant_scan_idx").on(t.tenantId, t.scanStatus),
+    tenantEntityIdx: index("files_tenant_entity_idx").on(
+      t.tenantId,
+      t.entityId,
+    ),
+  }),
+);
+
+/**
+ * adminAuditLog — append-only audit log for all entity mutations.
+ * GRANT: INSERT + SELECT only for app_user; no UPDATE or DELETE.
+ * RLS: USING only policy (app_user cannot read rows outside their tenant).
+ */
+export const adminAuditLog = pgTable(
+  "admin_audit_log",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    actorId: text("actor_id").notNull(),
+    /** user | api_key | system */
+    actorType: text("actor_type").notNull(),
+    resourceType: text("resource_type").notNull(),
+    resourceId: uuid("resource_id").notNull(),
+    /** created | updated | deleted | transitioned | restored */
+    action: text("action").notNull(),
+    /** null for create actions; PII-redacted */
+    beforeSnapshot: jsonb("before_snapshot"),
+    /** null for delete actions; PII-redacted */
+    afterSnapshot: jsonb("after_snapshot"),
+    metadata: jsonb("metadata"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => ({
+    tenantResourceIdx: index("audit_log_tenant_resource_idx").on(
+      t.tenantId,
+      t.resourceType,
+      t.resourceId,
+    ),
+    tenantActorIdx: index("audit_log_tenant_actor_idx").on(
+      t.tenantId,
+      t.actorId,
+    ),
+    tenantCreatedIdx: index("audit_log_tenant_created_idx").on(
+      t.tenantId,
+      t.createdAt,
+    ),
+  }),
+);
+
+/**
+ * viewConfigs — per-tenant UI configuration for entity list/detail/form.
+ * Unique per (tenant, entity_type_slug). Module seeds use ON CONFLICT DO NOTHING
+ * so tenant overrides are never clobbered by reinstalls.
+ */
+export const viewConfigs = pgTable(
+  "view_configs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    entityTypeSlug: text("entity_type_slug").notNull(),
+    /** [{ field, label, width?, sortable? }] */
+    listColumns: jsonb("list_columns").default([]).notNull(),
+    /** [{ group, fields[] }] */
+    detailLayout: jsonb("detail_layout").default([]).notNull(),
+    /** [field_slug, ...] */
+    formFieldOrder: jsonb("form_field_order").default([]).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => ({
+    tenantSlugUnique: unique("view_configs_tenant_slug_unique").on(
+      t.tenantId,
+      t.entityTypeSlug,
     ),
   }),
 );

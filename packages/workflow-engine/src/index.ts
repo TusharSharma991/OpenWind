@@ -7,6 +7,11 @@ export {
 } from "./engine.js";
 export { evaluateConditionTree } from "./condition-evaluator.js";
 export {
+  redactMetadata,
+  buildSensitivityMap,
+  type FieldSensitivity,
+} from "./redact.js";
+export {
   createWorkflow,
   getWorkflow,
   listWorkflows,

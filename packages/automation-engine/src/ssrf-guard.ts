@@ -140,28 +140,26 @@ export async function validateWebhookUrl(
   // 2. Parse extra operator-configured CIDRs
   const extraParsed = parseCidrs(extraCidrs);
 
-  // 3. Resolve hostname → IP(s) with a hard timeout
+  // 3. Resolve hostname → IP(s) with a hard timeout.
+  // A single hoisted timeoutId is cleared in the finally block regardless of
+  // which branch (resolve or reject) wins — no timer leak.
   let addresses: string[];
-  const timer = setTimeout(() => {
-    // AbortController signal is not used by node:dns/promises directly;
-    // we rely on the fact that dns.lookup rejects when the process exits the
-    // timer — but to be safe we track this separately via Promise.race
-  }, DNS_TIMEOUT_MS);
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
   try {
     const lookupPromise = dns
       .lookup(hostname, { all: true })
       .then((res) => res.map((r) => r.address));
 
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(
         () =>
           reject(
             Object.assign(new Error("DNS_TIMEOUT"), { name: "AbortError" }),
           ),
         DNS_TIMEOUT_MS,
-      ),
-    );
+      );
+    });
 
     addresses = await Promise.race([lookupPromise, timeoutPromise]);
   } catch (err) {
@@ -178,7 +176,7 @@ export async function validateWebhookUrl(
       reason: isTimeout ? "dns-timeout" : "dns-error",
     });
   } finally {
-    clearTimeout(timer);
+    clearTimeout(timeoutId);
   }
 
   if (addresses.length === 0) {

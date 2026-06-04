@@ -122,6 +122,9 @@ $$;
 -- values replaced at query time.  Application-layer redaction (engine.ts) is
 -- the primary defence; this view is a secondary safety net.
 
+-- entity_instances is joined once per row in the outer query so that
+-- ei.entity_type_id is available to the inner aggregate without a
+-- correlated subquery per metadata key (avoids N×K index scans).
 CREATE OR REPLACE VIEW workflow_events_masked AS
 SELECT
   we.id,
@@ -137,8 +140,8 @@ SELECT
   we.created_at,
   -- Rebuild the metadata JSONB, replacing PII/financial field values with [REDACTED].
   -- Fields not found in entity_fields (non-field metadata keys like 'comment',
-  -- 'triggeredBy') pass through verbatim — they are matched by the LEFT JOIN
-  -- returning NULL sensitivity, which is not in ('pii', 'financial').
+  -- 'triggeredBy') pass through verbatim — the LEFT JOIN returns NULL sensitivity,
+  -- which is not in ('pii', 'financial').
   COALESCE(
     (
       SELECT jsonb_object_agg(
@@ -151,17 +154,13 @@ SELECT
       )
       FROM jsonb_each(we.metadata) AS kv(key, value)
       LEFT JOIN entity_fields ef
-        ON ef.entity_type_id = (
-          SELECT ei.entity_type_id
-          FROM entity_instances ei
-          WHERE ei.id = we.instance_id
-          LIMIT 1
-        )
+        ON ef.entity_type_id = ei.entity_type_id  -- resolved once per outer row
         AND ef.name = kv.key
     ),
     '{}'::jsonb
   ) AS metadata
-FROM workflow_events we;
+FROM workflow_events we
+LEFT JOIN entity_instances ei ON ei.id = we.instance_id;
 
 -- Grant analytics_user access to the masked view only (not the base table)
 DO $$

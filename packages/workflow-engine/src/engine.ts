@@ -1,4 +1,4 @@
-import { eq, and, isNotNull, isNull, sql } from "drizzle-orm";
+import { eq, and, or, isNotNull, isNull, sql } from "drizzle-orm";
 import type { DbOrTx } from "@platform/db";
 import {
   entityInstances,
@@ -215,7 +215,18 @@ export async function executeTransition(
         sensitivity: entityFields.sensitivity,
       })
       .from(entityFields)
-      .where(eq(entityFields.entityTypeId, instance.entityTypeId));
+      .where(
+        and(
+          eq(entityFields.entityTypeId, instance.entityTypeId),
+          // Explicit tenantId guard — consistent with all other tenant-scoped
+          // queries in this codebase; also safe in contexts where RLS is off.
+          // System fields (tenantId IS NULL) are included via the OR.
+          or(
+            isNull(entityFields.tenantId),
+            eq(entityFields.tenantId, tenantId),
+          ),
+        ),
+      );
 
     const sensitivityMap = buildSensitivityMap(
       fieldRows.map((r) => ({

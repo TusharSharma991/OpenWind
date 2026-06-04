@@ -5,9 +5,12 @@
  *
  * Security invariants:
  *  - URL is validated against SSRF block list BEFORE any network call
- *  - TCP connection is pinned to the DNS-resolved IP via a one-shot https.Agent
- *    with a custom `lookup` callback — no second DNS resolution at connect time
- *    (prevents DNS rebinding)
+ *  - TCP connection is pinned to the DNS-resolved IP via a one-shot https/http
+ *    Agent with a custom `lookup` callback — no second DNS resolution at connect
+ *    time (prevents DNS rebinding)
+ *  - Uses node:http(s).request (NOT global fetch) because Node's fetch is
+ *    Undici-based and silently ignores the `agent` option — the `@ts-expect-error`
+ *    work-around does not actually pin the connection
  *  - TLS SNI and certificate validation use the original hostname — the URL and
  *    Host header are never rewritten to an IP address
  *  - Blocked attempts are logged with tenantId, ruleId, targetUrl, resolvedIp,
@@ -92,53 +95,74 @@ export async function executeWebhookAction(
     ? new https.Agent({ lookup: lookupFn as never })
     : new http.Agent({ lookup: lookupFn as never });
 
-  // ── 4. Dispatch ───────────────────────────────────────────────────────────
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const res = await fetch(url, {
+  // ── 4. Dispatch via node:http(s).request — honours the pinned agent ─────
+  // IMPORTANT: global fetch (Undici) silently ignores the `agent` option and
+  // performs its own DNS resolution, which would re-open the DNS rebinding
+  // vector.  node:https.request / node:http.request use the agent's `lookup`
+  // callback correctly, ensuring the connection goes to the pre-validated IP.
+  await new Promise<void>((resolve, reject) => {
+    const parsedUrl = new URL(url);
+    const requestOptions: https.RequestOptions = {
       method,
-      signal: controller.signal,
+      hostname: parsedUrl.hostname,
+      port: parsedUrl.port || (isHttps ? 443 : 80),
+      path: parsedUrl.pathname + parsedUrl.search,
       headers: {
         "Content-Type": "application/json",
         "User-Agent": "OpenWind-Webhook/1.0",
+        "Content-Length": Buffer.byteLength(body),
         ...headers,
       },
-      body,
-      // @ts-expect-error — Node 18+ fetch accepts dispatcher/agent via undici internals;
-      // the cast is safe here: we are providing a standard http(s).Agent for connection pinning
       agent,
-    });
+      timeout: timeoutMs,
+    };
 
-    if (!res.ok) {
-      logger.warn(
-        { tenantId, ruleId, url, status: res.status },
-        "automation: webhook action received non-2xx response",
+    const req = (isHttps ? https : http).request(requestOptions, (res) => {
+      const status = res.statusCode ?? 0;
+      // Drain the response to free the socket
+      res.resume();
+      if (status < 200 || status >= 300) {
+        logger.warn(
+          { tenantId, ruleId, url, status },
+          "automation: webhook action received non-2xx response",
+        );
+        reject(
+          new AutomationError("ACTION_FAILED", {
+            url,
+            status,
+            reason: "non-2xx-response",
+          }),
+        );
+        return;
+      }
+      logger.info(
+        { tenantId, ruleId, url, status },
+        "automation: webhook action delivered",
       );
-      throw new AutomationError("ACTION_FAILED", {
-        url,
-        status: res.status,
-        reason: "non-2xx-response",
-      });
-    }
-
-    logger.info(
-      { tenantId, ruleId, url, status: res.status },
-      "automation: webhook action delivered",
-    );
-  } catch (err) {
-    if (err instanceof AutomationError) throw err;
-    const isTimeout =
-      (err as { name?: string }).name === "AbortError" ||
-      (err as { code?: string }).code === "ABORT_ERR";
-    throw new AutomationError("ACTION_FAILED", {
-      url,
-      reason: isTimeout ? "timeout" : "network-error",
-      detail: String(err),
+      resolve();
     });
-  } finally {
-    clearTimeout(timer);
-    agent.destroy();
-  }
+
+    req.on("timeout", () => {
+      req.destroy();
+      reject(
+        new AutomationError("ACTION_FAILED", {
+          url,
+          reason: "timeout",
+        }),
+      );
+    });
+
+    req.on("error", (err) => {
+      reject(
+        new AutomationError("ACTION_FAILED", {
+          url,
+          reason: "network-error",
+          detail: String(err),
+        }),
+      );
+    });
+
+    req.write(body);
+    req.end();
+  });
 }

@@ -1,7 +1,7 @@
 import { createMiddleware } from "hono/factory";
 import { randomUUID } from "node:crypto";
 
-export const correlationId = () =>
+export const correlationId = (): ReturnType<typeof createMiddleware> =>
   createMiddleware(async (c, next) => {
     const id = c.req.header("x-request-id") ?? randomUUID();
     c.set("requestId", id);

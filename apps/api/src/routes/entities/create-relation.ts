@@ -16,7 +16,7 @@ export const createRelationHandler = factory.createHandlers(
   requireRole("admin", "agent"),
   zValidator("json", CreateRelationSchema),
   async (c) => {
-    const fromInstanceId = c.req.param("id")!;
+    const fromInstanceId = c.req.param("id") ?? "";
     const input = c.req.valid("json");
     const { tenantId } = c.get("auth");
 

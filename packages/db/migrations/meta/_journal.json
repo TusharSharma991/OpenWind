@@ -50,6 +50,41 @@
       "when": 1778749338305,
       "tag": "0004_workflow_events_idempotency_key",
       "breakpoints": false
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1778749338306,
+      "tag": "0005_dead_letter_events",
+      "breakpoints": false
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1778749338307,
+      "tag": "0006_remove_internal_table_rls",
+      "breakpoints": false
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1778749338308,
+      "tag": "0007_tenant_users",
+      "breakpoints": false
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1778749338309,
+      "tag": "0008_modules",
+      "breakpoints": false
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1778749338310,
+      "tag": "0009_view_configs",
+      "breakpoints": false
     }
   ]
 }

@@ -1,0 +1,239 @@
+import fs from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { eq, sql } from "drizzle-orm";
+import { db, withTenantContext, modules, tenants } from "@platform/db";
+import { logger } from "@platform/logger";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+export function getWorkspaceRoot(): string {
+  let dir = __dirname;
+  for (let i = 0; i < 8; i++) {
+    if (existsSync(join(dir, "pnpm-workspace.yaml"))) {
+      return dir;
+    }
+    const parent = join(dir, "..");
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return process.cwd(); // fallback
+}
+
+export class ModuleService {
+  /**
+   * seedRegistry - Populates default standard modules into the database
+   */
+  static async seedRegistry(): Promise<void> {
+    const standardModules = [
+      {
+        slug: "helpdesk",
+        name: "Helpdesk",
+        description: "Support ticket and customer knowledge base management",
+        version: "0.0.1",
+        isSystem: false,
+        minPlan: "standard",
+      },
+      {
+        slug: "reimbursements",
+        name: "Reimbursements",
+        description:
+          "Expense claim and receipt submission and approval workflows",
+        version: "0.0.1",
+        isSystem: false,
+        minPlan: "standard",
+      },
+      {
+        slug: "crm",
+        name: "CRM",
+        description: "Sales pipeline, contacts, deals, and activity tracking",
+        version: "0.0.1",
+        isSystem: false,
+        minPlan: "standard",
+      },
+    ];
+
+    logger.info("Seeding modules registry...");
+    for (const mod of standardModules) {
+      await db
+        .insert(modules)
+        .values({
+          slug: mod.slug,
+          name: mod.name,
+          description: mod.description,
+          version: mod.version,
+          isSystem: mod.isSystem,
+          minPlan: mod.minPlan,
+        })
+        .onConflictDoUpdate({
+          target: modules.slug,
+          set: {
+            name: mod.name,
+            description: mod.description,
+            version: mod.version,
+            updatedAt: new Date(),
+          },
+        });
+    }
+    logger.info("Modules registry seeded.");
+  }
+
+  /**
+   * listModules - Returns all registered modules with installation status for a tenant
+   */
+  static async listModules(
+    tenantId: string,
+  ): Promise<Record<string, unknown>[]> {
+    const [tenant] = await db
+      .select()
+      .from(tenants)
+      .where(eq(tenants.id, tenantId))
+      .limit(1);
+
+    const allModules = await db.select().from(modules);
+    const installedList = (
+      tenant?.config as Record<string, unknown> | undefined
+    )?.installed_modules;
+    const installed = Array.isArray(installedList)
+      ? (installedList as string[])
+      : [];
+
+    return allModules.map((m) => ({
+      ...m,
+      installed: installed.includes(m.slug),
+    }));
+  }
+
+  /**
+   * installModule - Installs a module for a tenant by running seed SQLs and updating config
+   */
+  static async installModule(tenantId: string, slug: string): Promise<void> {
+    const [moduleRecord] = await db
+      .select()
+      .from(modules)
+      .where(eq(modules.slug, slug))
+      .limit(1);
+
+    if (!moduleRecord) {
+      throw new Error(`Module not found: ${slug}`);
+    }
+
+    // Run inside tenant transaction context to respect RLS
+    await withTenantContext(tenantId, async (tx) => {
+      // 1. Fetch tenant config inside tx
+      const [tenant] = await tx
+        .select()
+        .from(tenants)
+        .where(eq(tenants.id, tenantId))
+        .limit(1);
+
+      if (!tenant) {
+        throw new Error(`Tenant not found: ${tenantId}`);
+      }
+
+      const config = (tenant.config ?? {}) as Record<string, unknown>;
+      const rawList = config.installed_modules;
+      const installedList: string[] = Array.isArray(rawList)
+        ? (rawList as string[])
+        : [];
+
+      if (installedList.includes(slug)) {
+        // Already installed
+        return;
+      }
+
+      // 2. Read and run seed SQL files
+      const seedDir = join(getWorkspaceRoot(), "modules", slug, "seed");
+      if (existsSync(seedDir)) {
+        const files = await fs.readdir(seedDir);
+        const sqlFiles = files
+          .filter((f) => f.endsWith(".sql"))
+          .sort((a, b) => a.localeCompare(b));
+
+        for (const file of sqlFiles) {
+          const filePath = join(seedDir, file);
+          const sqlContent = await fs.readFile(filePath, "utf8");
+
+          // Process placeholders
+          const processedSql = sqlContent
+            .replaceAll("{TENANT_ID}", tenantId)
+            .replaceAll("{MODULE_ID}", moduleRecord.id);
+
+          if (processedSql.trim().length > 0) {
+            await tx.execute(sql.raw(processedSql));
+          }
+        }
+      } else {
+        logger.warn(
+          { slug, seedDir },
+          "No seed directory found for module during install",
+        );
+      }
+
+      // 3. Update installed modules list
+      installedList.push(slug);
+      await tx
+        .update(tenants)
+        .set({
+          config: {
+            ...config,
+            installed_modules: installedList,
+          },
+          updatedAt: new Date(),
+        })
+        .where(eq(tenants.id, tenantId));
+    });
+  }
+
+  /**
+   * uninstallModule - Uninstalls a module by removing from installed list
+   */
+  static async uninstallModule(tenantId: string, slug: string): Promise<void> {
+    const [moduleRecord] = await db
+      .select()
+      .from(modules)
+      .where(eq(modules.slug, slug))
+      .limit(1);
+
+    if (!moduleRecord) {
+      throw new Error(`Module not found: ${slug}`);
+    }
+
+    await withTenantContext(tenantId, async (tx) => {
+      const [tenant] = await tx
+        .select()
+        .from(tenants)
+        .where(eq(tenants.id, tenantId))
+        .limit(1);
+
+      if (!tenant) {
+        throw new Error(`Tenant not found: ${tenantId}`);
+      }
+
+      const config = (tenant.config ?? {}) as Record<string, unknown>;
+      const rawList = config.installed_modules;
+      const installedList: string[] = Array.isArray(rawList)
+        ? (rawList as string[])
+        : [];
+
+      if (!installedList.includes(slug)) {
+        return; // Already uninstalled
+      }
+
+      const newInstalledList = installedList.filter((m) => m !== slug);
+
+      await tx
+        .update(tenants)
+        .set({
+          config: {
+            ...config,
+            installed_modules: newInstalledList,
+          },
+          updatedAt: new Date(),
+        })
+        .where(eq(tenants.id, tenantId));
+    });
+  }
+}

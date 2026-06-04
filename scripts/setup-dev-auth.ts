@@ -189,9 +189,45 @@ async function ensureOidcApp(
 
   const existing = searchRes.result?.find((a) => a.name === APP_NAME);
   if (existing?.oidcConfig?.clientId) {
-    log(
-      `OIDC app "${APP_NAME}" already exists — skipping. NOTE: client secret cannot be recovered; regenerate if needed.`,
-    );
+    log(`OIDC app "${APP_NAME}" already exists — updating configuration.`);
+    try {
+      await zitadelFetch(
+        `/management/v1/projects/${projectId}/apps/${existing.id}/oidc`,
+        token,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            redirectUris: [
+              "http://localhost:3001/auth/callback",
+              "http://localhost:3000/auth/callback",
+            ],
+            responseTypes: ["OIDC_RESPONSE_TYPE_CODE"],
+            grantTypes: [
+              "OIDC_GRANT_TYPE_AUTHORIZATION_CODE",
+              "OIDC_GRANT_TYPE_REFRESH_TOKEN",
+            ],
+            appType: "OIDC_APP_TYPE_WEB",
+            authMethodType: "OIDC_AUTH_METHOD_TYPE_BASIC",
+            postLogoutRedirectUris: [
+              "http://localhost:3001",
+              "http://localhost:3001/login",
+              "http://localhost:3000",
+            ],
+            accessTokenType: "OIDC_TOKEN_TYPE_JWT",
+            accessTokenRoleAssertion: true,
+            idTokenRoleAssertion: true,
+            idTokenUserinfoAssertion: true,
+            accessTokenLifetime: `${TOKEN_EXPIRY_SECONDS}s`,
+            idTokenLifetime: `${TOKEN_EXPIRY_SECONDS}s`,
+          }),
+        },
+      );
+      log(`Successfully updated existing OIDC app settings.`);
+    } catch (err) {
+      log(
+        `Warning: could not update existing OIDC app configuration — ${String(err)}`,
+      );
+    }
     return {
       clientId: existing.oidcConfig.clientId,
       clientSecret: "<existing — regenerate if needed>",
@@ -205,7 +241,10 @@ async function ensureOidcApp(
       method: "POST",
       body: JSON.stringify({
         name: APP_NAME,
-        redirectUris: ["http://localhost:3000/auth/callback"],
+        redirectUris: [
+          "http://localhost:3001/auth/callback",
+          "http://localhost:3000/auth/callback",
+        ],
         responseTypes: ["OIDC_RESPONSE_TYPE_CODE"],
         grantTypes: [
           "OIDC_GRANT_TYPE_AUTHORIZATION_CODE",
@@ -213,7 +252,10 @@ async function ensureOidcApp(
         ],
         appType: "OIDC_APP_TYPE_WEB",
         authMethodType: "OIDC_AUTH_METHOD_TYPE_BASIC",
-        postLogoutRedirectUris: ["http://localhost:3000"],
+        postLogoutRedirectUris: [
+          "http://localhost:3001",
+          "http://localhost:3000",
+        ],
         accessTokenType: "OIDC_TOKEN_TYPE_JWT",
         accessTokenRoleAssertion: true,
         idTokenRoleAssertion: true,
@@ -346,6 +388,10 @@ function writeEnvLocal(vars: Record<string, string>): void {
   );
 
   for (const [k, v] of Object.entries(vars)) {
+    if (v.includes("<existing") && updated.has(k)) {
+      // Keep existing value
+      continue;
+    }
     updated.set(k, v);
   }
 
@@ -384,7 +430,8 @@ async function main(): Promise<void> {
 
   writeEnvLocal({
     ZITADEL_ISSUER: issuer,
-    ZITADEL_AUDIENCE: oidcClientId,
+    // Zitadel puts the PROJECT ID in the JWT aud claim, not the OIDC client ID.
+    ZITADEL_AUDIENCE: projectId,
     ZITADEL_INTROSPECTION_URL: introspectionUrl,
     ZITADEL_INTROSPECTION_CLIENT_ID: introspectionClientId,
     ZITADEL_INTROSPECTION_CLIENT_SECRET: introspectionClientSecret,

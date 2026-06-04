@@ -76,6 +76,13 @@ export const requireAuth = (db?: DbOrTx): MiddlewareHandler =>
 
       const auth = extractAuthContext(claims);
       if (!auth) {
+        logger.warn(
+          {
+            sub: claims.sub,
+            orgId: claims["urn:zitadel:iam:org:id"] ?? "(missing)",
+          },
+          "JWT missing required claims — sub or urn:zitadel:iam:org:id not present",
+        );
         return c.json(
           { error: "UNAUTHORIZED", message: "Missing required claims" },
           401,

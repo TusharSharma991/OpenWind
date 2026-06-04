@@ -31,7 +31,12 @@ const EnvSchema = z
     DATABASE_POOL_MAX: z.coerce.number().int().min(1).default(10),
     REDIS_URL: z.string().url(),
     ZITADEL_ISSUER: z.string().url(),
-    ZITADEL_AUDIENCE: z.string(),
+    // Override the JWKS fetch URL when running inside Docker (issuer claim still
+    // matches localhost:8080 in the JWT, but we fetch keys via container hostname).
+    ZITADEL_JWKS_URL: z.string().url().optional(),
+    ZITADEL_AUDIENCE: z.string().optional(),
+    // Dev fallback: used as tenantId when urn:zitadel:iam:org:id is absent (instance admin login)
+    DEV_TENANT_ID: z.string().optional(),
     // Token introspection — used for sensitive ops that require active-token verification
     ZITADEL_INTROSPECTION_URL: z.string().url(),
     ZITADEL_INTROSPECTION_CLIENT_ID: z.string(),

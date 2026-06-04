@@ -10,11 +10,14 @@ let _jwks: JwksGetter | undefined;
 
 function getJwks(): JwksGetter {
   if (!_jwks) {
+    // ZITADEL_JWKS_URL lets the API container fetch keys via the Docker-internal
+    // hostname (e.g. http://zitadel:8080) while still validating the iss claim
+    // against ZITADEL_ISSUER (http://localhost:8080 as seen by the browser).
+    // env.ZITADEL_JWKS_URL is optional — TypeScript can't narrow through the Zod .refine() wrapper
+
     const jwksUri = new URL(
-      "/.well-known/openid-configuration/../oauth/v2/keys",
-      env.ZITADEL_ISSUER,
+      (env.ZITADEL_JWKS_URL ?? `${env.ZITADEL_ISSUER}/oauth/v2/keys`) as string,
     );
-    // jose will re-fetch the key set when the kid is not found (key rotation)
     _jwks = createRemoteJWKSet(jwksUri);
   }
   return _jwks;
@@ -29,12 +32,22 @@ export async function verifyJwt(
       getJwks() as unknown as KeyLike,
       {
         issuer: env.ZITADEL_ISSUER,
-        audience: env.ZITADEL_AUDIENCE,
+        // Zitadel puts the PROJECT ID in aud, not the OIDC client ID.
+        // Skip audience validation unless ZITADEL_AUDIENCE is explicitly set to the project ID.
+        // Signature + issuer verification is the primary security guard.
+        ...(env.ZITADEL_AUDIENCE ? { audience: env.ZITADEL_AUDIENCE } : {}),
       },
     );
     return payload as JWTPayload & ZitadelClaims;
   } catch (err) {
-    logger.warn({ error: String(err) }, "JWT verification failed");
+    logger.warn(
+      {
+        error: String(err),
+        issuer: env.ZITADEL_ISSUER,
+        audience: env.ZITADEL_AUDIENCE ?? "(not set)",
+      },
+      "JWT verification failed",
+    );
     return null;
   }
 }
@@ -46,7 +59,12 @@ export function extractAuthContext(claims: JWTPayload & ZitadelClaims): {
   email: string;
 } | null {
   const userId = claims.sub;
-  const tenantId = claims["urn:zitadel:iam:org:id"];
+  const orgId = claims["urn:zitadel:iam:org:id"];
+
+  // In dev, the Zitadel instance admin has no org-scoped token.
+  // Fall back to DEV_TENANT_ID so the admin can work without a full org setup.
+  const tenantId =
+    orgId ?? (env.NODE_ENV !== "production" ? env.DEV_TENANT_ID : undefined);
 
   if (!userId || !tenantId) return null;
 

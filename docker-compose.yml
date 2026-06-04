@@ -212,18 +212,16 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "wget -qO- http://127.0.0.1:8080/debug/healthz | grep -q ok",
-        ]
+      test: ["CMD", "/app/zitadel", "ready"]
       interval: 10s
       timeout: 5s
-      retries: 20
-      start_period: 30s
+      retries: 30
+      start_period: 60s
 
-  # ── Novu (Notifications) ───────────────────────────────────────────────────
+  # ── Novu (Notifications) — profile:notifications ───────────────────────────
+  # Not started by default. Run with: docker compose --profile notifications up -d
   novu-api:
+    profiles: [notifications]
     image: ghcr.io/novuhq/novu/api:latest
     restart: unless-stopped
     environment:
@@ -242,6 +240,7 @@ services:
       - redis
 
   novu-worker:
+    profiles: [notifications]
     image: ghcr.io/novuhq/novu/worker:latest
     restart: unless-stopped
     environment:
@@ -256,34 +255,38 @@ services:
       - redis
 
   novu-web:
+    profiles: [notifications]
     image: ghcr.io/novuhq/novu/web:latest
     restart: unless-stopped
     environment:
       REACT_APP_API_URL: http://localhost:3010
     ports:
-      - "4200:4200" # Novu dashboard → http://localhost:4200
+      - "4200:4200"
 
   novu-mongo:
+    profiles: [notifications]
     image: mongo:7
     restart: unless-stopped
     volumes:
       - novu_mongo_data:/data/db
 
-  # ── Mailhog (local email trap) ─────────────────────────────────────────────
+  # ── Mailhog (local email trap) — profile:tools ─────────────────────────────
   mailhog:
+    profiles: [tools]
     image: mailhog/mailhog:latest
     restart: unless-stopped
     ports:
-      - "1025:1025" # SMTP
-      - "8025:8025" # Web UI → http://localhost:8025
+      - "1025:1025"
+      - "8025:8025"
     environment:
       MH_STORAGE: maildir
       MH_MAILDIR_PATH: /mailhog-data
     volumes:
       - mailhog_data:/mailhog-data
 
-  # ── Bull Board (queue dashboard) ───────────────────────────────────────────
+  # ── Bull Board (queue dashboard) — profile:tools ───────────────────────────
   bullboard:
+    profiles: [tools]
     image: deadly0/bull-board:latest
     restart: unless-stopped
     environment:
@@ -291,9 +294,57 @@ services:
       REDIS_PORT: 6379
       REDIS_USE_TLS: "false"
     ports:
-      - "3099:3000" # Bull Board UI → http://localhost:3099
+      - "3099:3000"
     depends_on:
       - redis
+
+  # ── API (Hono / Node) ─────────────────────────────────────────────────────
+  # Runs with tsx so source changes are picked up on container restart.
+  # env_file provides all secrets; environment overrides service URLs so
+  # container-to-container networking works (pgbouncer:5432 not localhost:6432).
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    env_file:
+      - path: .env.local
+        required: false
+    environment:
+      DATABASE_URL: postgres://app_user:app_user_dev_password@pgbouncer:5432/platform
+      REDIS_URL: redis://redis:6379
+      # Zitadel routes by Host header — must match EXTERNALDOMAIN (localhost).
+      # extra_hosts maps localhost → Zitadel container so JWKS/introspection
+      # fetches from the API container hit the right service.
+      ZITADEL_JWKS_URL: http://localhost:8080/oauth/v2/keys
+      ZITADEL_INTROSPECTION_URL: http://localhost:8080/oauth/v2/introspect
+      OPENBAO_ADDR: http://openbao:8200
+      S3_ENDPOINT: http://minio:9000
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    extra_hosts:
+      - "localhost:host-gateway"
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      openbao:
+        condition: service_healthy
+
+  # ── Admin UI (React + Refine) ──────────────────────────────────────────────
+  # Static SPA served via `serve`. Zitadel env vars are baked in at build time
+  # by Vite — pass them as build args from .env.local or shell environment.
+  admin-ui:
+    build:
+      context: .
+      dockerfile: apps/admin-ui/Dockerfile
+    env_file:
+      - path: .env.local
+        required: false # skip gracefully if file absent (CI, prod)
+    ports:
+      - "3001:3000" # Admin UI → http://localhost:3001
+    restart: unless-stopped
 
 # ─────────────────────────────────────────────────────────────────────────────
 volumes:

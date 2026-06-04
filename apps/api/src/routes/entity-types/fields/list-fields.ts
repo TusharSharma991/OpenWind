@@ -8,7 +8,7 @@ export const listEntityFieldsHandler = factory.createHandlers(
   requireAuth(),
   requireRole("admin"),
   async (c) => {
-    const typeId = c.req.param("typeId")!;
+    const typeId = c.req.param("typeId") ?? "";
     const { tenantId } = c.get("auth");
 
     try {

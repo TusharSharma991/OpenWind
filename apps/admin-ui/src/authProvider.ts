@@ -1,0 +1,110 @@
+import { UserManager, WebStorageStateStore } from "oidc-client-ts";
+import type { AuthProvider } from "@refinedev/core";
+
+declare const window: Window & {
+  __CONFIG__?: {
+    ZITADEL_ISSUER?: string;
+    ZITADEL_OIDC_CLIENT_ID?: string;
+    ZITADEL_OIDC_CLIENT_SECRET?: string;
+  };
+};
+
+// Runtime config (Docker) wins; Vite build-time env vars (local dev) are the fallback.
+// import.meta.env keys are not statically declared so we cast to a generic record.
+const viteEnv = import.meta.env as Record<string, string | undefined>;
+const cfg = window.__CONFIG__ ?? {};
+const issuer =
+  cfg.ZITADEL_ISSUER ??
+  viteEnv["VITE_ZITADEL_ISSUER"] ??
+  "http://localhost:8080";
+const clientId =
+  cfg.ZITADEL_OIDC_CLIENT_ID ?? viteEnv["VITE_ZITADEL_OIDC_CLIENT_ID"] ?? "";
+const clientSecret =
+  cfg.ZITADEL_OIDC_CLIENT_SECRET ??
+  viteEnv["VITE_ZITADEL_OIDC_CLIENT_SECRET"] ??
+  "";
+
+export const userManager = new UserManager({
+  authority: issuer,
+  client_id: clientId,
+  client_secret: clientSecret,
+  redirect_uri: window.location.origin + "/auth/callback",
+  response_type: "code",
+  scope:
+    "openid profile email urn:zitadel:iam:org:project:roles urn:zitadel:iam:org:id offline_access",
+  post_logout_redirect_uri: window.location.origin + "/login",
+  userStore: new WebStorageStateStore({ store: window.localStorage }),
+  automaticSilentRenew: false,
+  loadUserInfo: true,
+});
+
+export const authProvider: AuthProvider = {
+  login: async () => {
+    await userManager.signinRedirect();
+    return { success: true };
+  },
+  logout: async () => {
+    await userManager.removeUser();
+    await userManager.clearStaleState();
+    return { success: true, redirectTo: "/login" };
+  },
+  onError: (error: unknown) => {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "status" in error &&
+      "isAuthError" in error
+    ) {
+      const e = error as { status: number; isAuthError: boolean };
+      if (e.status === 401 && e.isAuthError) {
+        return Promise.resolve({
+          logout: true,
+          redirectTo: "/login",
+          error: error as Error,
+        });
+      }
+    }
+    return Promise.resolve({ error: error as Error });
+  },
+  check: async () => {
+    if (window.location.pathname === "/auth/callback") {
+      return { authenticated: true };
+    }
+    const user = await userManager.getUser();
+    if (user && !user.expired) {
+      return { authenticated: true };
+    }
+    return {
+      authenticated: false,
+      redirectTo: "/login",
+      error: new Error("Unauthenticated"),
+    };
+  },
+  getPermissions: async () => {
+    const user = await userManager.getUser();
+    if (user?.profile) {
+      const rolesMap = (user.profile["urn:zitadel:iam:org:project:roles"] ??
+        {}) as Record<string, Record<string, Record<string, string>>>;
+      return Object.keys(rolesMap);
+    }
+    return [];
+  },
+  getIdentity: async () => {
+    const user = await userManager.getUser();
+    if (user?.profile) {
+      return {
+        id: user.profile.sub,
+        name:
+          user.profile.name ??
+          user.profile.preferred_username ??
+          user.profile.email ??
+          "Admin User",
+        email: user.profile.email ?? "",
+        avatar:
+          user.profile.picture ??
+          `https://api.dicebear.com/7.x/initials/svg?seed=${user.profile.name ?? "Admin"}`,
+      };
+    }
+    return null;
+  },
+};

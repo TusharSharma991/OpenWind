@@ -6,6 +6,7 @@ import {
   timestamp,
   index,
   unique,
+  boolean,
 } from "drizzle-orm/pg-core";
 
 export const tenants = pgTable("tenants", {
@@ -17,6 +18,22 @@ export const tenants = pgTable("tenants", {
   // text + CHECK (see migration 0001) so new states don't require ALTER TYPE
   status: text("status").default("active").notNull(),
   config: jsonb("config").default({}).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+export const modules = pgTable("modules", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  slug: text("slug").notNull().unique(),
+  name: text("name").notNull(),
+  description: text("description"),
+  version: text("version").notNull(),
+  isSystem: boolean("is_system").default(false).notNull(),
+  minPlan: text("min_plan").default("standard").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),

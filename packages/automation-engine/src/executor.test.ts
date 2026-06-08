@@ -57,6 +57,10 @@ vi.mock("@platform/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
+vi.mock("@platform/config", () => ({
+  env: { SSRF_BLOCK_CIDRS: [] },
+}));
+
 const { executeAutomationRules } = await import("./executor.js");
 
 const TENANT_ID = "aaaaaaaa-0000-4000-a000-000000000001";

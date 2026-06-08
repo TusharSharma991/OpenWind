@@ -12,6 +12,7 @@ const UpdateFieldSchema = z
     config: z.record(z.unknown()).optional(),
     isRequired: z.boolean().optional(),
     sortOrder: z.number().int().min(0).optional(),
+    sensitivity: z.enum(["public", "internal", "pii", "financial"]).optional(),
   })
   .refine((v) => Object.keys(v).length > 0, {
     message: "At least one field must be provided",

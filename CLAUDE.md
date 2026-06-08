@@ -549,6 +549,7 @@ docs(adr): record decision on field validation strategy
 - [ ] No `any` types introduced
 - [ ] No direct `process.env` access introduced
 - [ ] RLS policy present on all new tenant-scoped tables
+- [ ] `analytics_user` access explicitly declared on all new tables — every new migration with `CREATE TABLE` must include either `-- analytics: excluded (reason)` or `-- analytics: included(col1,col2,...)` (see ADR-001 Analytics Access Policy addendum)
 - [ ] Claude review passed (automated check in CI)
 
 ---

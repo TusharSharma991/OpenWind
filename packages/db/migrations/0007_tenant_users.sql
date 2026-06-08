@@ -3,6 +3,8 @@
 -- ALTER TABLE "tenant_users" DISABLE ROW LEVEL SECURITY;
 -- DROP TABLE IF EXISTS "tenant_users";
 
+-- analytics: excluded (user_id is PII under GDPR; see ADR-001 analytics access policy)
+
 -- tenant_users is a shadow table populated by the auth middleware on every
 -- successful JWT verification (fire-and-forget INSERT ON CONFLICT DO NOTHING).
 -- It is used exclusively by the entity engine to validate user_ref field values:

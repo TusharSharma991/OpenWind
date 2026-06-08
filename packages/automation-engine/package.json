@@ -21,12 +21,13 @@
     "bullmq": "^5.0.0",
     "drizzle-orm": "^0.45.2",
     "ioredis": "^5.0.0",
+    "ipaddr.js": "^2.4.0",
     "zod": "^3.23.0"
   },
   "devDependencies": {
     "@platform/tsconfig": "workspace:*",
     "@types/node": "^25.7.0",
     "typescript": "^5.5.0",
-    "vitest": "^2.0.0"
+    "vitest": "^4.1.0"
   }
 }

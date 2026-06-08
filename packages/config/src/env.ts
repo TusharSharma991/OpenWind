@@ -21,6 +21,22 @@ const EnvSchema = z
     S3_ACCESS_KEY: z.string(),
     S3_SECRET_KEY: z.string(),
     ANTHROPIC_API_KEY: z.string(),
+    // SSRF protection — comma-separated extra CIDR ranges to block on outbound webhooks
+    // (hardcoded RFC 1918 / loopback / link-local ranges are always blocked regardless)
+    SSRF_BLOCK_CIDRS: z
+      .string()
+      .optional()
+      .transform((v) =>
+        v
+          ? v
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : [],
+      ),
+    // ClamAV — virus scanning for uploaded files (2A platform services)
+    CLAMAV_HOST: z.string().default("localhost"),
+    CLAMAV_PORT: z.coerce.number().int().min(1).max(65535).default(3310),
     // OpenBao — Transit envelope encryption for connector credentials
     OPENBAO_ADDR: z.string().url(),
     OPENBAO_TRANSIT_KEY: z.string().default("platform-credentials"),

@@ -81,16 +81,32 @@ export async function executeWebhookAction(
   // is preserved so that TLS SNI and certificate CN/SAN validation work
   // correctly against the remote server's certificate.
   const isHttps = url.startsWith("https:");
+  // Node's net module may call the lookup callback with `opts.all = true`
+  // (happy-eyeballs / multiple-address path).  When `all` is truthy the
+  // callback must receive an *array* of { address, family } objects; when
+  // falsy (single-address path) it must receive (null, string, number).
+  // Passing a bare string when all=true causes Node to read `.address` off
+  // each character of the string, resolving to `undefined`, and throwing:
+  //   TypeError [ERR_INVALID_IP_ADDRESS]: Invalid IP address: undefined
   const lookupFn = (
     _hostname: string,
-    _opts: Record<string, unknown>,
-    callback: (err: Error | null, address: string, family: number) => void,
+    opts: { all?: boolean },
+    callback: (
+      err: Error | null,
+      address: string | Array<{ address: string; family: number }>,
+      family?: number,
+    ) => void,
   ): void => {
-    // Determine address family from the validated IP
     const family = validatedIp.includes(":") ? 6 : 4;
-    callback(null, validatedIp, family);
+    if (opts.all) {
+      callback(null, [{ address: validatedIp, family }]);
+    } else {
+      callback(null, validatedIp, family);
+    }
   };
 
+  // `lookup` is typed as the overloaded `dns.lookup` signature which Node
+  // types differently from our narrower callback shape — cast required.
   const agent = isHttps
     ? new https.Agent({ lookup: lookupFn as never })
     : new http.Agent({ lookup: lookupFn as never });

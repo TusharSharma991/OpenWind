@@ -273,3 +273,60 @@ These questions were surfaced during architecture review and have not yet been r
 | **MT-03** | What is the maximum supported tenant count before the shared-schema model warrants a partitioning or sharding review? Define a concrete row-count threshold that triggers an architecture review (e.g., 10M rows in `entity_instances`).                                                                          | Phase 3 |
 | **MT-04** | Are platform-wide tables (`entity_types`, `workflow_templates`) versioned? If a platform update changes a shared entity type, how are all tenant instances migrated?                                                                                                                                              | Phase 2 |
 | **MT-05** | What are the data retention policies for `outbox_events`, `workflow_events`, and `automation_executions`? Are there per-tier differences? Partial answer in [issue #5](https://github.com/TinyPhi/OpenWind/issues/5) (outbox retention), but `workflow_events` and `automation_executions` are not yet addressed. | Phase 2 |
+
+---
+
+## Addendum: Analytics Access Policy
+
+**Added:** 2026-05-22 — closes issue #2 item 3  
+**Migration:** `0009_analytics_user_grants.sql`
+
+### Problem
+
+`analytics_user` was granted `BYPASSRLS` to support cross-tenant reporting queries (Metabase, Phase 2D). The original ADR noted "specific tables" but did not enumerate them. The result was an undefined access scope — any new table was silently readable by `analytics_user` unless someone explicitly revoked it.
+
+### Decision
+
+**Explicit opt-in, default deny.** `analytics_user` has zero access to any table unless a migration explicitly grants it.
+
+Migration `0009` implements this in three steps:
+
+1. `ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE SELECT ON TABLES FROM analytics_user` — new tables are inaccessible by default at the database level, independent of application code or CI checks.
+2. `REVOKE ALL ON ALL TABLES` — strips any grants added before this migration.
+3. Per-table, per-column `GRANT SELECT` — only the columns listed are readable.
+
+### Per-table access policy
+
+| Table                                                    | analytics_user access                                                             | Reason                                            |
+| -------------------------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------- |
+| `tenants`                                                | `id, name, slug, plan, status, created_at, updated_at`                            | No sensitive config                               |
+| `entity_types`                                           | All columns                                                                       | No sensitive data                                 |
+| `entity_fields`                                          | All columns incl. `sensitivity`                                                   | Sensitivity is metadata, not a secret             |
+| `entity_instances`                                       | All columns **except `fields`**                                                   | `fields` JSONB may contain raw PII                |
+| `entity_relations`                                       | All columns                                                                       | No sensitive data                                 |
+| `workflows` / `workflow_states` / `workflow_transitions` | All columns                                                                       | Config only, no PII                               |
+| `workflow_events`                                        | **Via `workflow_events_masked` view only**                                        | `metadata` JSONB may contain PII/financial values |
+| `automation_rules`                                       | `id, tenant_id, name, is_enabled, trigger_type, priority, created_at, updated_at` | `actions` JSONB may contain webhook URLs/API keys |
+| `automation_executions`                                  | All columns                                                                       | Result JSONB contains counts only                 |
+| `outbox_events`                                          | **Excluded**                                                                      | Payload mirrors `entity_instances.fields`         |
+| `dead_letter_events`                                     | **Excluded**                                                                      | Same as `outbox_events`                           |
+| `api_keys`                                               | **Excluded**                                                                      | `key_hash` is a credential                        |
+| `tenant_users`                                           | **Excluded**                                                                      | `user_id` is PII under GDPR                       |
+| `connector_credentials`                                  | **Excluded**                                                                      | `credentials` is encrypted ciphertext             |
+
+### `workflow_events_masked` view
+
+`analytics_user` accesses `workflow_events` only via the `workflow_events_masked` view, which replaces values for fields with `sensitivity IN ('pii', 'financial')` with `"[REDACTED]"` at query time. This is a secondary safety net — the primary defence is application-layer redaction at INSERT time in `executeTransition`.
+
+### Convention for future migrations
+
+Every migration that creates a new table **must** include one of these annotations on a comment line:
+
+```sql
+-- analytics: excluded (reason why analytics_user must not access this table)
+-- analytics: included(col1, col2, col3)
+```
+
+CI lint (implemented in migration `0009`) scans all migration files for new `CREATE TABLE` statements and fails if no `-- analytics:` annotation is present. PRs adding new tables without this annotation will not pass CI.
+
+This convention is enforced at the CI level; the `ALTER DEFAULT PRIVILEGES` in migration `0009` is the database-level backstop.

@@ -3,6 +3,7 @@ import type { Redis } from "ioredis";
 import type { DbOrTx } from "@platform/db";
 import { automationRules, automationExecutions } from "@platform/db";
 import { logger } from "@platform/logger";
+import { env } from "@platform/config";
 import { evaluateConditionTree } from "@platform/workflow-engine";
 import type { ConditionTree } from "@platform/workflow-engine";
 import { TriggerEventSchema } from "./event-schemas.js";
@@ -12,6 +13,10 @@ import type { ActionConfig } from "./types.js";
 import { executeNotifyAction } from "./actions/notify.js";
 import { executeSetFieldAction } from "./actions/set-field.js";
 import { executeTransitionAction } from "./actions/transition.js";
+import {
+  executeWebhookAction,
+  type WebhookActionConfig,
+} from "./actions/webhook.js";
 import { isOpen, recordFailure, reset } from "./circuit-breaker.js";
 
 const MAX_DEPTH = 10;
@@ -102,6 +107,7 @@ export async function executeAutomationRules(
           const skipped = await runAction(
             ruleTx,
             tenantId,
+            rule.id,
             event,
             action,
             depth,
@@ -163,6 +169,7 @@ export async function executeAutomationRules(
 async function runAction(
   db: DbOrTx,
   tenantId: string,
+  ruleId: string,
   event: TriggerEvent,
   action: ActionConfig,
   depth: number,
@@ -203,6 +210,15 @@ async function runAction(
           event,
           config as unknown as Parameters<typeof executeTransitionAction>[3],
           depth,
+        );
+        break;
+      case "webhook":
+        await executeWebhookAction(
+          tenantId,
+          ruleId,
+          event,
+          config as unknown as WebhookActionConfig,
+          { extraBlockCidrs: env.SSRF_BLOCK_CIDRS },
         );
         break;
       default:

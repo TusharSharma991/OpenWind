@@ -66,6 +66,7 @@ export async function getValidationSchema(
     ...r,
     config: r.config as Record<string, unknown>,
     fieldType: r.fieldType as EntityField["fieldType"],
+    sensitivity: r.sensitivity as EntityField["sensitivity"],
   }));
 
   try {

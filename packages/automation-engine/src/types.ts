@@ -66,7 +66,9 @@ export class AutomationError extends Error {
       | "RULE_CREATE_FAILED"
       | "MAX_DEPTH_EXCEEDED"
       | "ACTION_FAILED"
-      | "INVALID_EVENT_PAYLOAD",
+      | "INVALID_EVENT_PAYLOAD"
+      | "WEBHOOK_SSRF_BLOCKED"
+      | "DNS_RESOLUTION_TIMEOUT",
     public readonly meta?: Record<string, unknown>,
   ) {
     super(code);

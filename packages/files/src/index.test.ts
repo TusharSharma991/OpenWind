@@ -13,7 +13,9 @@ const mockGetSignedUrl = vi.fn();
 const mockS3Send = vi.fn();
 
 vi.mock("@aws-sdk/client-s3", () => ({
-  S3Client: vi.fn().mockImplementation(() => ({ send: mockS3Send })),
+  S3Client: vi.fn().mockImplementation(function () {
+    return { send: mockS3Send };
+  }),
   DeleteObjectCommand: vi.fn(),
   PutObjectCommand: vi.fn(),
   GetObjectCommand: vi.fn(),
@@ -27,10 +29,9 @@ vi.mock("@aws-sdk/s3-request-presigner", () => ({
 const mockQueueAdd = vi.fn();
 const mockQueueClose = vi.fn();
 vi.mock("bullmq", () => ({
-  Queue: vi.fn().mockImplementation(() => ({
-    add: mockQueueAdd,
-    close: mockQueueClose,
-  })),
+  Queue: vi.fn().mockImplementation(function () {
+    return { add: mockQueueAdd, close: mockQueueClose };
+  }),
 }));
 
 vi.mock("@platform/logger", () => ({
@@ -289,16 +290,14 @@ describe("getDownloadUrl", () => {
       select: vi.fn().mockReturnValue({
         from: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnValue({
-            limit: vi
-              .fn()
-              .mockResolvedValue([
-                {
-                  id: FILE_ID,
-                  scanStatus,
-                  storageKey: "key",
-                  tenantId: TENANT_ID,
-                },
-              ]),
+            limit: vi.fn().mockResolvedValue([
+              {
+                id: FILE_ID,
+                scanStatus,
+                storageKey: "key",
+                tenantId: TENANT_ID,
+              },
+            ]),
           }),
         }),
       }),

@@ -186,7 +186,8 @@ export class ModuleService {
         return;
       }
 
-      // 2. Read and run seed SQL files
+      // 2. Read and run seed SQL files. Seeds must be single SQL statements
+      //    (use CTEs, not DO $$ blocks) so Drizzle execute() can handle them.
       const seedDir = join(getWorkspaceRoot(), "modules", slug, "seed");
       if (existsSync(seedDir)) {
         const files = await fs.readdir(seedDir);
@@ -198,7 +199,6 @@ export class ModuleService {
           const filePath = join(seedDir, file);
           const sqlContent = await fs.readFile(filePath, "utf8");
 
-          // Process placeholders
           const processedSql = sqlContent
             .replaceAll("{TENANT_ID}", tenantId)
             .replaceAll("{MODULE_ID}", moduleRecord.id);

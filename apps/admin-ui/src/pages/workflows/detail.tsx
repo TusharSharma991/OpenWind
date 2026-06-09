@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { useOne } from "@refinedev/core";
 import { useParams, Link } from "react-router-dom";
 import { fetchWithAuth, API_URL } from "../../lib/api.js";
@@ -32,6 +32,42 @@ type WorkflowFull = {
   states: WorkflowState[];
   transitions: WorkflowTransition[];
 };
+
+type EntityField = {
+  id: string;
+  name: string;
+  label: string;
+  fieldType: string;
+  isRequired: boolean;
+  isIndexed: boolean;
+  sortOrder: number;
+};
+
+type AddFieldForm = {
+  name: string;
+  label: string;
+  fieldType: string;
+  isRequired: boolean;
+};
+
+const EMPTY_FIELD: AddFieldForm = {
+  name: "",
+  label: "",
+  fieldType: "text",
+  isRequired: false,
+};
+
+const FIELD_TYPES = [
+  { value: "text", label: "Text" },
+  { value: "longtext", label: "Long Text" },
+  { value: "number", label: "Number" },
+  { value: "currency", label: "Currency" },
+  { value: "date", label: "Date" },
+  { value: "boolean", label: "Boolean" },
+  { value: "enum", label: "Enum (select)" },
+  { value: "email", label: "Email" },
+  { value: "url", label: "URL" },
+];
 
 type AddStateForm = {
   name: string;
@@ -143,6 +179,14 @@ export function WorkflowDetail(): React.ReactElement {
     id: id ?? "missing",
   });
 
+  const [fields, setFields] = useState<EntityField[]>([]);
+  const [fieldsLoading, setFieldsLoading] = useState(false);
+  const [showAddField, setShowAddField] = useState(false);
+  const [fieldForm, setFieldForm] = useState<AddFieldForm>(EMPTY_FIELD);
+  const [savingField, setSavingField] = useState(false);
+  const [fieldError, setFieldError] = useState<string | null>(null);
+  const [deletingFieldId, setDeletingFieldId] = useState<string | null>(null);
+
   const [showAddState, setShowAddState] = useState(false);
   const [stateForm, setStateForm] = useState<AddStateForm>(EMPTY_STATE);
   const [savingState, setSavingState] = useState(false);
@@ -155,6 +199,65 @@ export function WorkflowDetail(): React.ReactElement {
   const [savingTrans, setSavingTrans] = useState(false);
   const [transError, setTransError] = useState<string | null>(null);
   const [deletingTransId, setDeletingTransId] = useState<string | null>(null);
+
+  const fetchFields = useCallback((entityTypeId: string): void => {
+    setFieldsLoading(true);
+    fetchWithAuth(`${API_URL}/entity-types/${entityTypeId}/fields`)
+      .then((res) => {
+        setFields((res as { data?: EntityField[] }).data ?? []);
+      })
+      .catch(() => setFields([]))
+      .finally(() => setFieldsLoading(false));
+  }, []);
+
+  const entityTypeId = data?.data.entityTypeId;
+  useEffect(() => {
+    if (entityTypeId) fetchFields(entityTypeId);
+  }, [entityTypeId, fetchFields]);
+
+  async function handleAddField(e: React.FormEvent): Promise<void> {
+    e.preventDefault();
+    if (!workflow?.entityTypeId) return;
+    setSavingField(true);
+    setFieldError(null);
+    try {
+      await fetchWithAuth(
+        `${API_URL}/entity-types/${workflow.entityTypeId}/fields`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            name: fieldForm.name.trim(),
+            label: fieldForm.label.trim(),
+            fieldType: fieldForm.fieldType,
+            isRequired: fieldForm.isRequired,
+          }),
+        },
+      );
+      setShowAddField(false);
+      setFieldForm(EMPTY_FIELD);
+      fetchFields(workflow.entityTypeId);
+    } catch (err) {
+      setFieldError(err instanceof Error ? err.message : "Failed to add field");
+    } finally {
+      setSavingField(false);
+    }
+  }
+
+  async function handleDeleteField(fieldId: string): Promise<void> {
+    if (!workflow?.entityTypeId) return;
+    setDeletingFieldId(fieldId);
+    try {
+      await fetchWithAuth(
+        `${API_URL}/entity-types/${workflow.entityTypeId}/fields/${fieldId}`,
+        { method: "DELETE" },
+      );
+      fetchFields(workflow.entityTypeId);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to delete field");
+    } finally {
+      setDeletingFieldId(null);
+    }
+  }
 
   async function handleAddState(e: React.FormEvent): Promise<void> {
     e.preventDefault();
@@ -341,6 +444,81 @@ export function WorkflowDetail(): React.ReactElement {
           transitions={workflow.transitions}
           initialState={workflow.initialState}
         />
+      </div>
+
+      {/* Fields panel */}
+      <div className="data-panel" style={{ marginBottom: "24px" }}>
+        <div className="panel-header">
+          <h3 className="panel-title">Fields</h3>
+          <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+            <span className="badge badge-muted">{fields.length}</span>
+            <button
+              className="btn-primary btn-sm"
+              onClick={() => setShowAddField(true)}
+            >
+              + Add Field
+            </button>
+          </div>
+        </div>
+        {fieldsLoading ? (
+          <div style={{ padding: "20px", textAlign: "center" }}>
+            <div className="spinner" style={{ margin: "0 auto" }} />
+          </div>
+        ) : fields.length === 0 ? (
+          <div
+            className="empty-state"
+            style={{ padding: "28px", fontSize: "13px" }}
+          >
+            <p>No fields yet. Add fields to capture data on records.</p>
+          </div>
+        ) : (
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Label</th>
+                <th>Type</th>
+                <th>Required</th>
+                <th style={{ width: "48px" }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...fields]
+                .sort((a, b) => a.sortOrder - b.sortOrder)
+                .map((f) => (
+                  <tr key={f.id}>
+                    <td>
+                      <code className="code-inline">{f.name}</code>
+                    </td>
+                    <td style={{ fontWeight: 500 }}>{f.label}</td>
+                    <td>
+                      <span className="badge badge-muted">{f.fieldType}</span>
+                    </td>
+                    <td>
+                      {f.isRequired ? (
+                        <span className="badge badge-primary">Yes</span>
+                      ) : (
+                        <span className="text-muted-sm">—</span>
+                      )}
+                    </td>
+                    <td>
+                      <button
+                        className="btn-danger-sm"
+                        disabled={deletingFieldId === f.id}
+                        onClick={() => {
+                          if (confirm(`Delete field "${f.label}"?`))
+                            void handleDeleteField(f.id);
+                        }}
+                        title="Delete field"
+                      >
+                        {deletingFieldId === f.id ? "…" : "✕"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
       {/* States table */}
@@ -533,6 +711,114 @@ export function WorkflowDetail(): React.ReactElement {
           </tbody>
         </table>
       </div>
+
+      {/* Add Field modal */}
+      {showAddField && (
+        <div className="modal-overlay" onClick={() => setShowAddField(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">Add Field</h3>
+              <button
+                className="modal-close"
+                onClick={() => setShowAddField(false)}
+              >
+                ×
+              </button>
+            </div>
+            <form onSubmit={(e) => void handleAddField(e)}>
+              <div className="modal-body">
+                {fieldError && (
+                  <div
+                    className="alert alert-error"
+                    style={{ marginBottom: "16px" }}
+                  >
+                    {fieldError}
+                  </div>
+                )}
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label">Label *</label>
+                    <input
+                      className="form-input"
+                      placeholder="e.g. Customer Name"
+                      value={fieldForm.label}
+                      onChange={(e) => {
+                        const label = e.target.value;
+                        const name = label
+                          .toLowerCase()
+                          .replace(/\s+/g, "_")
+                          .replace(/[^a-z0-9_]/g, "");
+                        setFieldForm((f) => ({ ...f, label, name }));
+                      }}
+                      required
+                      autoFocus
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Field Name *</label>
+                    <input
+                      className="form-input"
+                      placeholder="e.g. customer_name"
+                      value={fieldForm.name}
+                      onChange={(e) =>
+                        setFieldForm((f) => ({ ...f, name: e.target.value }))
+                      }
+                      pattern="^[a-z_][a-z0-9_]*$"
+                      title="snake_case only"
+                      required
+                    />
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Field Type *</label>
+                  <select
+                    className="form-input"
+                    value={fieldForm.fieldType}
+                    onChange={(e) =>
+                      setFieldForm((f) => ({ ...f, fieldType: e.target.value }))
+                    }
+                  >
+                    {FIELD_TYPES.map((ft) => (
+                      <option key={ft.value} value={ft.value}>
+                        {ft.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <label className="form-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={fieldForm.isRequired}
+                    onChange={(e) =>
+                      setFieldForm((f) => ({
+                        ...f,
+                        isRequired: e.target.checked,
+                      }))
+                    }
+                  />
+                  <span>Required field</span>
+                </label>
+              </div>
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => setShowAddField(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  disabled={savingField}
+                >
+                  {savingField ? "Adding…" : "Add Field"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Add State modal */}
       {showAddState && (

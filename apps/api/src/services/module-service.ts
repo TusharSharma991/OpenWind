@@ -116,7 +116,8 @@ export class ModuleService {
   }
 
   /**
-   * listModules - Returns all registered modules with installation status for a tenant
+   * listModules - Returns all registered modules with installation status for a tenant.
+   * Auto-seeds the registry on first call or after a reset so templates always appear.
    */
   static async listModules(
     tenantId: string,
@@ -127,7 +128,13 @@ export class ModuleService {
       .where(eq(tenants.id, tenantId))
       .limit(1);
 
-    const allModules = await db.select().from(modules);
+    let allModules = await db.select().from(modules);
+
+    // Auto-seed if the registry is empty (first boot or after a data reset)
+    if (allModules.length === 0) {
+      await ModuleService.seedRegistry();
+      allModules = await db.select().from(modules);
+    }
     const installedList = (
       tenant?.config as Record<string, unknown> | undefined
     )?.installed_modules;

@@ -2,8 +2,14 @@ import fs from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { eq, sql } from "drizzle-orm";
-import { db, withTenantContext, modules, tenants } from "@platform/db";
+import { eq } from "drizzle-orm";
+import {
+  db,
+  withTenantContext,
+  executeRawInTenantContext,
+  modules,
+  tenants,
+} from "@platform/db";
 import { logger } from "@platform/logger";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -162,59 +168,58 @@ export class ModuleService {
       throw new Error(`Module not found: ${slug}`);
     }
 
-    // Run inside tenant transaction context to respect RLS
-    await withTenantContext(tenantId, async (tx) => {
-      // 1. Fetch tenant config inside tx
-      const [tenant] = await tx
-        .select()
-        .from(tenants)
-        .where(eq(tenants.id, tenantId))
-        .limit(1);
+    // 1. Check if already installed (read tenant config)
+    const [tenantCheck] = await db
+      .select()
+      .from(tenants)
+      .where(eq(tenants.id, tenantId))
+      .limit(1);
 
-      if (!tenant) {
-        throw new Error(`Tenant not found: ${tenantId}`);
-      }
+    if (!tenantCheck) {
+      throw new Error(`Tenant not found: ${tenantId}`);
+    }
 
-      const config = (tenant.config ?? {}) as Record<string, unknown>;
-      const rawList = config.installed_modules;
-      const installedList: string[] = Array.isArray(rawList)
-        ? (rawList as string[])
-        : [];
+    const config = (tenantCheck.config ?? {}) as Record<string, unknown>;
+    const rawList = config.installed_modules;
+    const installedList: string[] = Array.isArray(rawList)
+      ? (rawList as string[])
+      : [];
 
-      if (installedList.includes(slug)) {
-        // Already installed
-        return;
-      }
+    if (installedList.includes(slug)) {
+      return; // Already installed
+    }
 
-      // 2. Read and run seed SQL files. Seeds must be single SQL statements
-      //    (use CTEs, not DO $$ blocks) so Drizzle execute() can handle them.
-      const seedDir = join(getWorkspaceRoot(), "modules", slug, "seed");
-      if (existsSync(seedDir)) {
-        const files = await fs.readdir(seedDir);
-        const sqlFiles = files
-          .filter((f) => f.endsWith(".sql"))
-          .sort((a, b) => a.localeCompare(b));
+    // 2. Run seed SQL files using simple query protocol (supports data-modifying
+    //    CTEs). Each file is a single CTE chain executed inside its own
+    //    tenant-scoped transaction via executeRawInTenantContext.
+    const seedDir = join(getWorkspaceRoot(), "modules", slug, "seed");
+    if (existsSync(seedDir)) {
+      const files = await fs.readdir(seedDir);
+      const sqlFiles = files
+        .filter((f) => f.endsWith(".sql"))
+        .sort((a, b) => a.localeCompare(b));
 
-        for (const file of sqlFiles) {
-          const filePath = join(seedDir, file);
-          const sqlContent = await fs.readFile(filePath, "utf8");
+      for (const file of sqlFiles) {
+        const filePath = join(seedDir, file);
+        const sqlContent = await fs.readFile(filePath, "utf8");
 
-          const processedSql = sqlContent
-            .replaceAll("{TENANT_ID}", tenantId)
-            .replaceAll("{MODULE_ID}", moduleRecord.id);
+        const processedSql = sqlContent
+          .replaceAll("{TENANT_ID}", tenantId)
+          .replaceAll("{MODULE_ID}", moduleRecord.id);
 
-          if (processedSql.trim().length > 0) {
-            await tx.execute(sql.raw(processedSql));
-          }
+        if (processedSql.trim().length > 0) {
+          await executeRawInTenantContext(tenantId, processedSql);
         }
-      } else {
-        logger.warn(
-          { slug, seedDir },
-          "No seed directory found for module during install",
-        );
       }
+    } else {
+      logger.warn(
+        { slug, seedDir },
+        "No seed directory found for module during install",
+      );
+    }
 
-      // 3. Update installed modules list
+    // 3. Update installed modules list inside a Drizzle transaction
+    await withTenantContext(tenantId, async (tx) => {
       installedList.push(slug);
       await tx
         .update(tenants)

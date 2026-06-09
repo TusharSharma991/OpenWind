@@ -34,6 +34,7 @@ import {
   resolveLookupFields,
   resolveLookupFieldsBatch,
 } from "./lookup-resolver.js";
+import { fireEntityAuditHook } from "./audit-hook.js";
 
 type EntityValidator = (
   fields: Record<string, unknown>,
@@ -127,6 +128,22 @@ export async function createEntity(
     },
     "Entity created",
   );
+
+  await fireEntityAuditHook({
+    db,
+    tenantId,
+    actorId: input.createdBy ?? "system",
+    actorType: input.createdBy !== undefined ? "user" : "system",
+    resourceType: entityType.name,
+    resourceId: row.id,
+    action: "created",
+    beforeSnapshot: null,
+    afterSnapshot: row.fields as Record<string, unknown>,
+    entityFields: allFields.map((f) => ({
+      name: f.name,
+      sensitivity: f.sensitivity,
+    })),
+  });
 
   return rowToInstance(row);
 }
@@ -288,6 +305,24 @@ export async function updateEntity(
     if (!row) throw new EntityError("ENTITY_NOT_FOUND", { instanceId });
 
     logger.info({ tenantId, instanceId }, "Entity updated");
+
+    await fireEntityAuditHook({
+      db,
+      tenantId,
+      actorId: input.actorId ?? "system",
+      actorType:
+        input.actorType ?? (input.actorId !== undefined ? "user" : "system"),
+      resourceType: entityType.name,
+      resourceId: instanceId,
+      action: "updated",
+      beforeSnapshot: existing.fields as Record<string, unknown>,
+      afterSnapshot: row.fields as Record<string, unknown>,
+      entityFields: allFields.map((f) => ({
+        name: f.name,
+        sensitivity: f.sensitivity,
+      })),
+    });
+
     return rowToInstance(row);
   }
 
@@ -315,9 +350,11 @@ export async function deleteEntity(
   db: DbOrTx,
   tenantId: string,
   instanceId: string,
+  actorId?: string,
 ): Promise<void> {
+  // Load the full row so we can capture the before-snapshot for the audit log.
   const [row] = await db
-    .select({ id: entityInstances.id })
+    .select()
     .from(entityInstances)
     .where(
       and(
@@ -341,6 +378,27 @@ export async function deleteEntity(
     );
 
   logger.info({ tenantId, instanceId }, "Entity soft-deleted");
+
+  const [entityType, allFields] = await Promise.all([
+    loadEntityType(db, row.entityTypeId),
+    loadEntityFields(db, row.entityTypeId, tenantId),
+  ]);
+
+  await fireEntityAuditHook({
+    db,
+    tenantId,
+    actorId: actorId ?? "system",
+    actorType: actorId !== undefined ? "user" : "system",
+    resourceType: entityType.name,
+    resourceId: instanceId,
+    action: "deleted",
+    beforeSnapshot: row.fields as Record<string, unknown>,
+    afterSnapshot: null,
+    entityFields: allFields.map((f) => ({
+      name: f.name,
+      sensitivity: f.sensitivity,
+    })),
+  });
 }
 
 export async function listEntities(

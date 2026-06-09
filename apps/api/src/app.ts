@@ -13,6 +13,26 @@ import { filesRouter } from "./routes/files/index.js";
 import { adminRouter } from "./routes/admin/index.js";
 import { preferencesRouter } from "./routes/preferences/index.js";
 import { openApiSpec } from "./openapi.js";
+import { registerEntityAuditHook } from "@platform/entity-engine";
+import { writeAuditEntry } from "@platform/audit";
+
+// ── PII-aware entity audit hook ───────────────────────────────────────────────
+// Registered once at module load so it is active for every entity mutation.
+// The hook receives the same db/tx as the mutation — audit is in the same
+// connection and, when the caller uses withTenantContext, the same transaction.
+registerEntityAuditHook(async (p) => {
+  await writeAuditEntry(p.db, {
+    tenantId: p.tenantId,
+    actorId: p.actorId,
+    actorType: p.actorType,
+    resourceType: p.resourceType,
+    resourceId: p.resourceId,
+    action: p.action,
+    beforeSnapshot: p.beforeSnapshot,
+    afterSnapshot: p.afterSnapshot,
+    entityFields: p.entityFields,
+  });
+});
 
 export function createApp(): Hono {
   const app = new Hono();

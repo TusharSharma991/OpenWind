@@ -10,10 +10,10 @@ export const deleteEntityHandler = factory.createHandlers(
   requireIntrospection(),
   async (c) => {
     const id = c.req.param("id") ?? "";
-    const { tenantId } = c.get("auth");
+    const { tenantId, userId } = c.get("auth");
 
     try {
-      await deleteEntity(db, tenantId, id);
+      await deleteEntity(db, tenantId, id, userId);
       return c.body(null, 204);
     } catch (err) {
       return handleEntityError(c, err);

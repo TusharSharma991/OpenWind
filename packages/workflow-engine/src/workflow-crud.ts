@@ -67,7 +67,7 @@ function rowToTransition(
 // Tenants can read system workflows (tenantId = null) and their own.
 // Writes (create/delete states/transitions) are restricted to tenant-owned rows.
 
-function visibleTo(tenantId: string) {
+function visibleTo(tenantId: string): ReturnType<typeof or> {
   return or(isNull(workflows.tenantId), eq(workflows.tenantId, tenantId));
 }
 
@@ -130,12 +130,16 @@ export async function getWorkflow(
 export async function listWorkflows(
   db: DbOrTx,
   tenantId: string,
-  entityTypeId: string,
+  entityTypeId?: string,
 ): Promise<WorkflowDefinition[]> {
   const rows = await db
     .select()
     .from(workflows)
-    .where(and(eq(workflows.entityTypeId, entityTypeId), visibleTo(tenantId)))
+    .where(
+      entityTypeId
+        ? and(eq(workflows.entityTypeId, entityTypeId), visibleTo(tenantId))
+        : visibleTo(tenantId),
+    )
     .orderBy(asc(workflows.createdAt));
 
   return rows.map(rowToWorkflow);

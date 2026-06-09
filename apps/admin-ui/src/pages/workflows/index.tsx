@@ -2,6 +2,8 @@ import React from "react";
 import { useList } from "@refinedev/core";
 import { useNavigate } from "react-router-dom";
 
+type EntityType = { id: string; name: string; plural: string };
+
 type Workflow = {
   id: string;
   name: string;
@@ -12,8 +14,12 @@ type Workflow = {
 
 export function Workflows(): React.ReactElement {
   const { data, isLoading } = useList<Workflow>({ resource: "workflows" });
+  const { data: etData } = useList<EntityType>({ resource: "entity-types" });
   const navigate = useNavigate();
   const workflows = data?.data ?? [];
+  const entityTypes = etData?.data ?? [];
+
+  const etMap = new Map(entityTypes.map((e) => [e.id, e.name]));
 
   if (isLoading) {
     return (
@@ -41,14 +47,22 @@ export function Workflows(): React.ReactElement {
             states, transitions, SLA timers, and role-based guards.
           </p>
         </div>
-        <div className="stat-pill">{workflows.length} workflows</div>
+        <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
+          <div className="stat-pill">{workflows.length} workflows</div>
+          <button
+            className="btn-primary"
+            onClick={() => navigate("/workflows/new")}
+          >
+            + New Workflow
+          </button>
+        </div>
       </div>
 
       {workflows.length === 0 ? (
         <div className="empty-state">
           <div className="empty-icon">⟳</div>
           <h4>No workflows defined</h4>
-          <p>Install a module or define a workflow on an entity type.</p>
+          <p>Install a module or create a workflow for an entity type.</p>
         </div>
       ) : (
         <div className="data-panel">
@@ -99,7 +113,8 @@ export function Workflows(): React.ReactElement {
                   </td>
                   <td>
                     <span className="badge badge-primary">
-                      {wf.entityTypeId}
+                      {etMap.get(wf.entityTypeId) ??
+                        wf.entityTypeId.slice(0, 8) + "…"}
                     </span>
                   </td>
                   <td>

@@ -2,6 +2,9 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger as honoLogger } from "hono/logger";
 import { env } from "@platform/config";
+import { db } from "@platform/db";
+import { requireAuth } from "@platform/auth";
+import type { AuthContext } from "@platform/auth";
 import { correlationId } from "./middleware/correlation-id.js";
 import { handleError } from "./middleware/error-handler.js";
 import { rateLimit } from "./middleware/rate-limit.js";
@@ -12,9 +15,13 @@ import { automationRulesRouter } from "./routes/automation-rules/index.js";
 import { apiKeysRouter } from "./routes/api-keys/index.js";
 import { modulesRouter } from "./routes/modules/index.js";
 import { viewConfigsRouter } from "./routes/view-configs/index.js";
+import { rolesRouter } from "./routes/platform/roles.js";
+import { usersRouter } from "./routes/platform/users.js";
 
-export function createApp(): Hono {
-  const app = new Hono();
+type AppVars = { Variables: { auth: AuthContext } };
+
+export function createApp(): Hono<AppVars> {
+  const app = new Hono<AppVars>();
 
   // Middleware order matters:
   // 1. CORS — before everything so preflight OPTIONS requests are handled immediately
@@ -42,6 +49,15 @@ export function createApp(): Hono {
 
   app.get("/health", (c) => c.json({ status: "ok", env: env.NODE_ENV }));
 
+  // Temporary debug route — shows the parsed auth context for the current token.
+  // Remove once role assignment issues are resolved.
+  if (env.NODE_ENV !== "production") {
+    app.get("/auth/debug", requireAuth(db), (c) => {
+      const auth = c.get("auth") as AuthContext;
+      return c.json({ data: auth });
+    });
+  }
+
   app.route("/entity-types", entityTypesRouter);
   app.route("/entities", entitiesRouter);
   app.route("/workflows", workflowsRouter);
@@ -49,6 +65,8 @@ export function createApp(): Hono {
   app.route("/api-keys", apiKeysRouter);
   app.route("/modules", modulesRouter);
   app.route("/admin/view-configs", viewConfigsRouter);
+  app.route("/roles", rolesRouter);
+  app.route("/users", usersRouter);
 
   return app;
 }

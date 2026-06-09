@@ -199,6 +199,7 @@ async function ensureOidcApp(
           body: JSON.stringify({
             redirectUris: [
               "http://localhost:3001/auth/callback",
+              "http://localhost:3004/auth/callback",
               "http://localhost:3000/auth/callback",
             ],
             responseTypes: ["OIDC_RESPONSE_TYPE_CODE"],
@@ -211,6 +212,8 @@ async function ensureOidcApp(
             postLogoutRedirectUris: [
               "http://localhost:3001",
               "http://localhost:3001/login",
+              "http://localhost:3004",
+              "http://localhost:3004/login",
               "http://localhost:3000",
             ],
             accessTokenType: "OIDC_TOKEN_TYPE_JWT",
@@ -243,6 +246,7 @@ async function ensureOidcApp(
         name: APP_NAME,
         redirectUris: [
           "http://localhost:3001/auth/callback",
+          "http://localhost:3004/auth/callback",
           "http://localhost:3000/auth/callback",
         ],
         responseTypes: ["OIDC_RESPONSE_TYPE_CODE"],
@@ -254,6 +258,9 @@ async function ensureOidcApp(
         authMethodType: "OIDC_AUTH_METHOD_TYPE_BASIC",
         postLogoutRedirectUris: [
           "http://localhost:3001",
+          "http://localhost:3001/login",
+          "http://localhost:3004",
+          "http://localhost:3004/login",
           "http://localhost:3000",
         ],
         accessTokenType: "OIDC_TOKEN_TYPE_JWT",
@@ -290,7 +297,84 @@ async function ensureOidcApp(
   return { clientId: created.clientId, clientSecret: created.clientSecret };
 }
 
-// ── Step 4: Create introspection service account ──────────────────────────────
+// ── Step 4: Create admin role + grant it to the initial admin user ────────────
+
+async function ensureAdminRoleAndGrant(
+  token: string,
+  projectId: string,
+): Promise<void> {
+  // 4a. Create the "admin" role in the project (idempotent)
+  log(`Ensuring "admin" role exists in project ${projectId}...`);
+  try {
+    await zitadelFetch(`/management/v1/projects/${projectId}/roles`, token, {
+      method: "POST",
+      body: JSON.stringify({
+        roleKey: "admin",
+        displayName: "Admin",
+        group: "platform",
+      }),
+    });
+    log(`Created "admin" role.`);
+  } catch (err) {
+    const msg = String(err);
+    // Zitadel returns 409 / "already exists" when the role is present
+    if (msg.includes("409") || msg.toLowerCase().includes("already exist")) {
+      log(`"admin" role already exists — skipping.`);
+    } else {
+      log(`Warning: could not create admin role — ${msg}`);
+    }
+  }
+
+  // 4b. Find the initial admin user so we can grant them the role
+  log(`Looking up admin user (${ADMIN_EMAIL})...`);
+  const searchRes = (await zitadelFetch("/management/v1/users/_search", token, {
+    method: "POST",
+    body: JSON.stringify({
+      queries: [
+        {
+          emailQuery: {
+            emailAddress: ADMIN_EMAIL,
+            method: "TEXT_QUERY_METHOD_EQUALS",
+          },
+        },
+      ],
+    }),
+  })) as { result?: Array<{ id: string; userName: string }> };
+
+  const adminUser = searchRes.result?.[0];
+  if (!adminUser) {
+    log(
+      `Warning: could not find user "${ADMIN_EMAIL}" — skipping role grant. ` +
+        `Create a user grant manually in Zitadel → Project → Authorizations.`,
+    );
+    return;
+  }
+
+  log(
+    `Found admin user (id=${adminUser.id}). Granting "admin" project role...`,
+  );
+
+  // 4c. Grant the admin project role to the user (idempotent via conflict ignore)
+  try {
+    await zitadelFetch(`/management/v1/users/${adminUser.id}/grants`, token, {
+      method: "POST",
+      body: JSON.stringify({
+        projectId,
+        roleKeys: ["admin"],
+      }),
+    });
+    log(`Granted "admin" role to ${ADMIN_EMAIL}.`);
+  } catch (err) {
+    const msg = String(err);
+    if (msg.includes("409") || msg.toLowerCase().includes("already exist")) {
+      log(`"admin" role already granted to ${ADMIN_EMAIL} — skipping.`);
+    } else {
+      log(`Warning: could not grant admin role — ${msg}`);
+    }
+  }
+}
+
+// ── Step 5: Create introspection service account ──────────────────────────────
 
 async function ensureIntrospectionAccount(token: string): Promise<string> {
   log(`Ensuring machine account "${INTROSPECTION_SA_NAME}"...`);
@@ -419,6 +503,7 @@ async function main(): Promise<void> {
   const projectId = await ensureProject(adminToken);
   const { clientId: oidcClientId, clientSecret: oidcClientSecret } =
     await ensureOidcApp(adminToken, projectId);
+  await ensureAdminRoleAndGrant(adminToken, projectId);
   const saUserId = await ensureIntrospectionAccount(adminToken);
   const {
     clientId: introspectionClientId,

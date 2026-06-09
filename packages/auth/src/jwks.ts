@@ -2,7 +2,7 @@ import { createRemoteJWKSet, jwtVerify } from "jose";
 import type { JWTPayload, KeyLike } from "jose";
 import { env } from "@platform/config";
 import { logger } from "@platform/logger";
-import type { ZitadelClaims } from "./types.js";
+import type { ZitadelClaims, AuthContext } from "./types.js";
 
 type JwksGetter = ReturnType<typeof createRemoteJWKSet>;
 
@@ -52,19 +52,17 @@ export async function verifyJwt(
   }
 }
 
-export function extractAuthContext(claims: JWTPayload & ZitadelClaims): {
-  userId: string;
-  tenantId: string;
-  roles: string[];
-  email: string;
-} | null {
+export function extractAuthContext(
+  claims: JWTPayload & ZitadelClaims,
+): AuthContext | null {
   const userId = claims.sub;
   const orgId = claims["urn:zitadel:iam:org:id"];
 
-  // In dev, the Zitadel instance admin has no org-scoped token.
-  // Fall back to DEV_TENANT_ID so the admin can work without a full org setup.
+  // In dev, always use DEV_TENANT_ID so all users (admin + org members) hit
+  // the same seeded tenant. Zitadel org UUIDs in the JWT would otherwise map
+  // to non-existent tenants and return empty data for portal users.
   const tenantId =
-    orgId ?? (env.NODE_ENV !== "production" ? env.DEV_TENANT_ID : undefined);
+    env.NODE_ENV !== "production" ? (env.DEV_TENANT_ID ?? orgId) : orgId;
 
   if (!userId || !tenantId) return null;
 
@@ -72,10 +70,18 @@ export function extractAuthContext(claims: JWTPayload & ZitadelClaims): {
   const rolesMap = claims["urn:zitadel:iam:org:project:roles"] ?? {};
   const roles = Object.keys(rolesMap);
 
+  const displayName =
+    claims.name ??
+    ([claims.given_name, claims.family_name].filter(Boolean).join(" ") ||
+      null) ??
+    claims.email ??
+    userId;
+
   return {
     userId,
     tenantId,
     roles,
     email: claims.email ?? "",
+    displayName,
   };
 }

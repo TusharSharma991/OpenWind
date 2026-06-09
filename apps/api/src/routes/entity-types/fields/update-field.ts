@@ -1,7 +1,7 @@
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { requireAuth, requireRole } from "@platform/auth";
-import { db } from "@platform/db";
+import { requireAuth } from "@platform/auth";
+import { withTenantContext } from "@platform/db";
 import { updateEntityField } from "@platform/entity-engine";
 import { factory } from "../factory.js";
 import { handleEntityError } from "../../../lib/handle-entity-error.js";
@@ -19,7 +19,6 @@ const UpdateFieldSchema = z
 
 export const updateEntityFieldHandler = factory.createHandlers(
   requireAuth(),
-  requireRole("admin"),
   zValidator("json", UpdateFieldSchema),
   async (c) => {
     const typeId = c.req.param("typeId") ?? "";
@@ -28,12 +27,8 @@ export const updateEntityFieldHandler = factory.createHandlers(
     const { tenantId } = c.get("auth");
 
     try {
-      const field = await updateEntityField(
-        db,
-        tenantId,
-        typeId,
-        fieldId,
-        input,
+      const field = await withTenantContext(tenantId, (tx) =>
+        updateEntityField(tx, tenantId, typeId, fieldId, input),
       );
       return c.json({ data: field });
     } catch (err) {

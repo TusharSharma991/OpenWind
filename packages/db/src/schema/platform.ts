@@ -76,6 +76,10 @@ export const tenantUsers = pgTable(
     tenantId: uuid("tenant_id").notNull(),
     /** External user ID — Zitadel JWT sub claim value */
     userId: text("user_id").notNull(),
+    /** Email from JWT — updated on each login */
+    email: text("email"),
+    /** Display name from JWT name/given_name claim — updated on each login */
+    displayName: text("display_name"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

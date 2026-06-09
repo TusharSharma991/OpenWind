@@ -1,18 +1,17 @@
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { requireAuth, requireRole } from "@platform/auth";
+import { requireAuth } from "@platform/auth";
 import { db } from "@platform/db";
 import { listWorkflows } from "@platform/workflow-engine";
 import { factory } from "./factory.js";
 import { handleWorkflowError } from "../../lib/handle-workflow-error.js";
 
 const ListWorkflowsQuerySchema = z.object({
-  entityTypeId: z.string().uuid(),
+  entityTypeId: z.string().uuid().optional(),
 });
 
 export const listWorkflowsHandler = factory.createHandlers(
   requireAuth(),
-  requireRole("admin"),
   zValidator("query", ListWorkflowsQuerySchema),
   async (c) => {
     const { entityTypeId } = c.req.valid("query");

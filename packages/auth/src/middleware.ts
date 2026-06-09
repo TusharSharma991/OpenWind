@@ -108,8 +108,19 @@ export const requireAuth = (db?: DbOrTx): MiddlewareHandler =>
       await withTenantContext(auth.tenantId, (tx) =>
         tx
           .insert(tenantUsers)
-          .values({ tenantId: auth.tenantId, userId: auth.userId })
-          .onConflictDoNothing(),
+          .values({
+            tenantId: auth.tenantId,
+            userId: auth.userId,
+            email: auth.email || null,
+            displayName: auth.displayName || null,
+          })
+          .onConflictDoUpdate({
+            target: [tenantUsers.tenantId, tenantUsers.userId],
+            set: {
+              email: auth.email || null,
+              displayName: auth.displayName || null,
+            },
+          }),
       ).catch((err: unknown) => {
         logger.warn(
           { err, tenantId: auth.tenantId },
@@ -206,6 +217,7 @@ async function resolveApiKey(
     tenantId: row.tenantId,
     roles: row.scopes,
     email: "",
+    displayName: `API Key ${row.id.slice(0, 8)}`,
   };
 }
 

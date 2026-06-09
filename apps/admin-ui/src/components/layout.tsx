@@ -1,8 +1,12 @@
-import React from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useLogout, useGetIdentity } from "@refinedev/core";
 import { Link, useLocation } from "react-router-dom";
+import { userManager } from "../authProvider.js";
+import { useEntityTypes, toTypeSlug } from "../entity-type-context.js";
 
-const NAV_ITEMS = [
+// ── Admin nav items ──────────────────────────────────────────────────────────
+
+const ADMIN_NAV = [
   {
     route: "/",
     label: "Dashboard",
@@ -24,7 +28,7 @@ const NAV_ITEMS = [
   },
   {
     route: "/modules",
-    label: "Modules",
+    label: "Templates",
     icon: (
       <svg
         xmlns="http://www.w3.org/2000/svg"
@@ -81,7 +85,7 @@ const NAV_ITEMS = [
   },
 ];
 
-const SETTINGS_ITEM = {
+const SETTINGS_NAV = {
   route: "/settings",
   label: "Settings",
   icon: (
@@ -106,12 +110,25 @@ const SETTINGS_ITEM = {
   ),
 };
 
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function getRolesFromProfile(
+  profile: Record<string, unknown> | undefined,
+): string[] {
+  if (!profile) return [];
+  const rolesMap = (profile["urn:zitadel:iam:org:project:roles"] ??
+    {}) as Record<string, unknown>;
+  return Object.keys(rolesMap);
+}
+
+// ── Layout ───────────────────────────────────────────────────────────────────
+
 export function Layout({
   children,
 }: {
   children: React.ReactNode;
 }): React.ReactElement {
-  const { mutate: logout } = useLogout();
+  const { mutate: refineLogout } = useLogout();
   const { data: identity } = useGetIdentity<{
     id: string;
     name: string;
@@ -119,16 +136,63 @@ export function Layout({
     avatar: string;
   }>();
   const location = useLocation();
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [roles, setRoles] = useState<string[]>([]);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const profileRef = useRef<HTMLDivElement>(null);
 
-  const pageTitle =
-    location.pathname === "/settings"
-      ? "Settings"
-      : (NAV_ITEMS.find((item) =>
-          item.route === "/"
-            ? location.pathname === "/"
-            : location.pathname === item.route ||
-              location.pathname.startsWith(item.route + "/"),
-        )?.label ?? "OpenWind");
+  // Entity types needed for customer sidebar
+  const { entityTypes, modules } = useEntityTypes();
+
+  useEffect(() => {
+    void userManager.getUser().then((u) => {
+      setRoles(
+        getRolesFromProfile(u?.profile as Record<string, unknown> | undefined),
+      );
+    });
+  }, []);
+
+  useEffect(() => {
+    function close(e: MouseEvent): void {
+      if (profileRef.current && !profileRef.current.contains(e.target as Node))
+        setProfileOpen(false);
+    }
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, []);
+
+  // Customer = has "user" or "customer" role but NOT admin or agent
+  const isCustomer =
+    (roles.includes("user") || roles.includes("customer")) &&
+    !roles.includes("admin") &&
+    !roles.includes("agent");
+  const roleLabel = isCustomer
+    ? roles.includes("user")
+      ? "User"
+      : "Customer"
+    : roles.includes("agent")
+      ? "Agent"
+      : "Administrator";
+
+  const name = identity?.name ?? (isCustomer ? "User" : "Admin");
+  const email = identity?.email ?? "";
+  const _initials =
+    name
+      .split(" ")
+      .slice(0, 2)
+      .map((w: string) => w[0])
+      .join("")
+      .toUpperCase() || "U";
+
+  function handleLogout(): void {
+    if (isCustomer) {
+      void userManager.removeUser().then(() => {
+        window.location.href = "/login";
+      });
+    } else {
+      refineLogout();
+    }
+  }
 
   function isActive(route: string): boolean {
     if (route === "/") return location.pathname === "/";
@@ -137,64 +201,189 @@ export function Layout({
     );
   }
 
-  return (
-    <div className="app-container">
-      <aside className="sidebar">
-        <div className="sidebar-logo">
-          <div className="logo-icon">W</div>
-          <div className="logo-text">OpenWind</div>
-        </div>
+  // ── Installed modules for customer sidebar ──────────────────────────────
+  const installedById = new Map(
+    modules.filter((m) => m.installed).map((m) => [m.id, m]),
+  );
+  const visibleTypes = entityTypes.filter(
+    (et) => !et.moduleId || installedById.has(et.moduleId),
+  );
+  const byModule = visibleTypes.reduce<Record<string, typeof entityTypes>>(
+    (acc, et) => {
+      const key = et.moduleId ?? "__custom__";
+      (acc[key] ??= []).push(et);
+      return acc;
+    },
+    {},
+  );
+  const moduleNames = new Map(
+    modules.filter((m) => m.installed).map((m) => [m.id, m.name]),
+  );
 
-        <nav className="sidebar-menu">
-          {NAV_ITEMS.map((item) => (
-            <Link
-              key={item.route}
-              to={item.route}
-              className={`menu-item ${isActive(item.route) ? "active" : ""}`}
-            >
-              {item.icon}
-              <span>{item.label}</span>
-            </Link>
-          ))}
-
-          <div className="nav-divider" />
-
-          <Link
-            to={SETTINGS_ITEM.route}
-            className={`menu-item ${isActive(SETTINGS_ITEM.route) ? "active" : ""}`}
+  // ── Shared topnav ───────────────────────────────────────────────────────
+  const topnav = (
+    <header className="main-header">
+      <div className="header-title-section">
+        <button
+          className="admin-hamburger"
+          onClick={() => setSidebarOpen((o) => !o)}
+          aria-label="Toggle sidebar"
+        >
+          <span />
+          <span />
+          <span />
+        </button>
+        <div className="logo-icon">W</div>
+        <div className="logo-text">OpenWind</div>
+        {isCustomer && (
+          <span
+            style={{
+              fontSize: "11px",
+              padding: "2px 8px",
+              borderRadius: "4px",
+              background: "hsla(250,84%,60%,.15)",
+              color: "var(--accent-primary)",
+              fontWeight: 600,
+              marginLeft: "4px",
+            }}
           >
-            {SETTINGS_ITEM.icon}
-            <span>{SETTINGS_ITEM.label}</span>
-          </Link>
-        </nav>
-      </aside>
+            Portal
+          </span>
+        )}
+      </div>
 
-      <div className="main-wrapper">
-        <header className="main-header">
-          <div className="header-title-section">
-            <div className="breadcrumbs">OpenWind / Admin Console</div>
-            <h1 className="header-title">{pageTitle}</h1>
-          </div>
+      <div
+        className="header-user"
+        ref={profileRef}
+        style={{ position: "relative" }}
+      >
+        <button
+          style={{
+            background: "none",
+            border: "none",
+            padding: 0,
+            cursor: "pointer",
+            borderRadius: "50%",
+            display: "flex",
+          }}
+          onClick={() => setProfileOpen((o) => !o)}
+          aria-label="Open profile"
+        >
+          <img
+            src={
+              identity?.avatar ??
+              `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}`
+            }
+            alt="Avatar"
+            className="header-avatar"
+          />
+        </button>
 
-          <div className="header-user">
-            <div className="header-user-info">
-              <span className="header-user-name">
-                {identity?.name ?? "Admin"}
-              </span>
-              <span className="header-user-role">Administrator</span>
+        {profileOpen && (
+          <div
+            style={{
+              position: "absolute",
+              top: "calc(100% + 10px)",
+              right: 0,
+              width: "240px",
+              background: "var(--bg-secondary)",
+              border: "1px solid var(--border-color)",
+              borderRadius: "var(--radius-md)",
+              boxShadow: "var(--shadow-lg)",
+              zIndex: 200,
+              overflow: "hidden",
+              animation: "popup-in .12s ease",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "12px",
+                padding: "16px",
+              }}
+            >
+              <img
+                src={
+                  identity?.avatar ??
+                  `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}`
+                }
+                alt="Avatar"
+                style={{
+                  width: "42px",
+                  height: "42px",
+                  borderRadius: "50%",
+                  flexShrink: 0,
+                }}
+              />
+              <div style={{ minWidth: 0 }}>
+                <div
+                  style={{
+                    fontSize: "14px",
+                    fontWeight: 600,
+                    color: "var(--text-primary)",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {name}
+                </div>
+                <div
+                  style={{
+                    fontSize: "12px",
+                    color: "var(--text-muted)",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {email}
+                </div>
+                <div
+                  style={{
+                    fontSize: "11px",
+                    color: "var(--accent-primary)",
+                    fontWeight: 500,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.5px",
+                    marginTop: "2px",
+                  }}
+                >
+                  {roleLabel}
+                </div>
+              </div>
             </div>
-            <img
-              src={
-                identity?.avatar ??
-                `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(identity?.name ?? "Admin")}`
-              }
-              alt="Avatar"
-              className="header-avatar"
+            <div
+              style={{
+                height: "1px",
+                background: "var(--border-color)",
+                margin: "0 16px",
+              }}
             />
             <button
-              className="header-logout-btn"
-              onClick={() => logout()}
-              title="Sign out"
+              onClick={handleLogout}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "10px",
+                width: "100%",
+                padding: "12px 16px",
+                fontSize: "13px",
+                fontWeight: 500,
+                color: "var(--danger)",
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.background =
+                  "hsla(350,80%,60%,.1)";
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.background =
+                  "none";
+              }}
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -202,6 +391,8 @@ export function Layout({
                 viewBox="0 0 24 24"
                 strokeWidth="2"
                 stroke="currentColor"
+                width="16"
+                height="16"
               >
                 <path
                   strokeLinecap="round"
@@ -209,10 +400,139 @@ export function Layout({
                   d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75"
                 />
               </svg>
+              Sign out
             </button>
           </div>
-        </header>
+        )}
+      </div>
+    </header>
+  );
 
+  // ── Customer layout ─────────────────────────────────────────────────────
+  if (isCustomer) {
+    return (
+      <div className="app-container">
+        {topnav}
+        <div className="app-body">
+          <aside
+            className={`sidebar ${sidebarOpen ? "sidebar-open" : "sidebar-collapsed"}`}
+          >
+            <nav
+              style={{
+                padding: "12px 8px",
+                display: "flex",
+                flexDirection: "column",
+                gap: "2px",
+              }}
+            >
+              <Link
+                to="/home"
+                className={`menu-item ${!sidebarOpen ? "menu-item-icon-only" : ""} ${location.pathname === "/home" ? "active" : ""}`}
+                title={!sidebarOpen ? "Home" : undefined}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  strokeWidth="2"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"
+                  />
+                </svg>
+                {sidebarOpen && <span>Home</span>}
+              </Link>
+
+              {Object.entries(byModule).map(([mod, types]) => (
+                <div key={mod}>
+                  {sidebarOpen && (
+                    <div className="customer-nav-group-label">
+                      {mod === "__custom__"
+                        ? "Custom"
+                        : (moduleNames.get(mod) ?? mod)}
+                    </div>
+                  )}
+                  {types.map((et) => {
+                    const slug = toTypeSlug(et.plural || et.name);
+                    const active = location.pathname.startsWith(
+                      `/records/${slug}`,
+                    );
+                    return (
+                      <Link
+                        key={et.id}
+                        to={`/records/${slug}`}
+                        className={`menu-item ${!sidebarOpen ? "menu-item-icon-only" : ""} ${active ? "active" : ""}`}
+                        title={!sidebarOpen ? et.plural || et.name : undefined}
+                      >
+                        <span
+                          style={{
+                            fontSize: "16px",
+                            width: "18px",
+                            textAlign: "center",
+                          }}
+                        >
+                          {et.icon ?? et.name.slice(0, 1)}
+                        </span>
+                        {sidebarOpen && <span>{et.plural || et.name}</span>}
+                      </Link>
+                    );
+                  })}
+                </div>
+              ))}
+
+              <div className="nav-divider" />
+              <Link
+                to="/settings"
+                className={`menu-item ${!sidebarOpen ? "menu-item-icon-only" : ""} ${isActive("/settings") ? "active" : ""}`}
+                title={!sidebarOpen ? "Settings" : undefined}
+              >
+                {SETTINGS_NAV.icon}
+                {sidebarOpen && <span>Settings</span>}
+              </Link>
+            </nav>
+          </aside>
+          <main className="main-content">{children}</main>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Admin / Agent layout ────────────────────────────────────────────────
+  return (
+    <div className="app-container">
+      {topnav}
+      <div className="app-body">
+        <aside
+          className={`sidebar ${sidebarOpen ? "sidebar-open" : "sidebar-collapsed"}`}
+        >
+          <nav className="sidebar-menu">
+            {ADMIN_NAV.map((item) => (
+              <Link
+                key={item.route}
+                to={item.route}
+                className={`menu-item ${!sidebarOpen ? "menu-item-icon-only" : ""} ${isActive(item.route) ? "active" : ""}`}
+                title={!sidebarOpen ? item.label : undefined}
+              >
+                {item.icon}
+                {sidebarOpen && <span>{item.label}</span>}
+              </Link>
+            ))}
+
+            <div className="nav-divider" />
+
+            <Link
+              to={SETTINGS_NAV.route}
+              className={`menu-item ${!sidebarOpen ? "menu-item-icon-only" : ""} ${isActive(SETTINGS_NAV.route) ? "active" : ""}`}
+              title={!sidebarOpen ? SETTINGS_NAV.label : undefined}
+            >
+              {SETTINGS_NAV.icon}
+              {sidebarOpen && <span>{SETTINGS_NAV.label}</span>}
+            </Link>
+          </nav>
+        </aside>
         <main className="main-content">{children}</main>
       </div>
     </div>

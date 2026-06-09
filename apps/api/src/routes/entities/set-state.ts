@@ -12,7 +12,7 @@ const SetStateSchema = z.object({
 
 export const setEntityStateHandler = factory.createHandlers(
   requireAuth(),
-  requireRole("admin", "agent"),
+  requireRole("admin", "agent", "customer"),
   zValidator("json", SetStateSchema),
   async (c) => {
     const id = c.req.param("id") ?? "";

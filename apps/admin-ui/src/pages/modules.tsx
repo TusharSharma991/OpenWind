@@ -60,7 +60,7 @@ export function Modules(): React.ReactElement {
     return (
       <div className="loading-center">
         <div className="spinner" />
-        <span className="loader-text">Loading modules…</span>
+        <span className="loader-text">Loading templates…</span>
       </div>
     );
   }
@@ -77,10 +77,10 @@ export function Modules(): React.ReactElement {
         }}
       >
         <div>
-          <h2 className="page-title">Module Registry</h2>
+          <h2 className="page-title">Templates</h2>
           <p className="page-subtitle">
-            Install and manage business modules. Each module seeds entity types,
-            workflows, and automation rules into your tenant.
+            Pre-built workflow templates. Install one to get a ready-made record
+            type, fields, and workflow — customise it from there.
           </p>
         </div>
         <div style={{ display: "flex", gap: "10px" }}>

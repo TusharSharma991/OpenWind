@@ -25,6 +25,7 @@
     "@platform/secrets": "workspace:*",
     "@platform/workflow-engine": "workspace:*",
     "hono": "^4.5.0",
+    "jose": "^5.0.0",
     "ioredis": "^5.4.0",
     "zod": "^3.23.0"
   },

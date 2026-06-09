@@ -140,6 +140,9 @@ importers:
       ioredis:
         specifier: ^5.4.0
         version: 5.10.1
+      jose:
+        specifier: ^5.0.0
+        version: 5.10.0
       zod:
         specifier: ^3.23.0
         version: 3.25.76
@@ -168,6 +171,9 @@ importers:
       "@platform/ui":
         specifier: workspace:*
         version: link:../../packages/ui
+      oidc-client-ts:
+        specifier: ^3.5.0
+        version: 3.5.0
       react:
         specifier: ^18.3.0
         version: 18.3.1

@@ -333,8 +333,8 @@ services:
         condition: service_healthy
 
   # ── Admin UI (React + Refine) ──────────────────────────────────────────────
-  # Static SPA served via `serve`. Zitadel env vars are baked in at build time
-  # by Vite — pass them as build args from .env.local or shell environment.
+  # Static SPA served via `serve`. Zitadel env vars injected at container start
+  # by docker-entrypoint.sh into window.__CONFIG__ — no rebuild needed.
   admin-ui:
     build:
       context: .
@@ -345,6 +345,15 @@ services:
     ports:
       - "3001:3000" # Admin UI → http://localhost:3001
     restart: unless-stopped
+
+  # ── Portal (end-user React app) ────────────────────────────────────────────
+  # Portal is retired — customer UI merged into admin-ui (RBAC-controlled, port 3001).
+  # portal:
+  #   build:
+  #     context: .
+  #     dockerfile: apps/portal/Dockerfile
+  #   ports:
+  #     - "3004:3000"
 
 # ─────────────────────────────────────────────────────────────────────────────
 volumes:

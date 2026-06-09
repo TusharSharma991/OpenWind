@@ -203,9 +203,11 @@ export class ModuleService {
         const filePath = join(seedDir, file);
         const sqlContent = await fs.readFile(filePath, "utf8");
 
+        // Replace tokens and add ::uuid casts so postgres-js simple-protocol
+        // text literals satisfy uuid column type expectations.
         const processedSql = sqlContent
-          .replaceAll("{TENANT_ID}", tenantId)
-          .replaceAll("{MODULE_ID}", moduleRecord.id);
+          .replaceAll("'{TENANT_ID}'", `'${tenantId}'::uuid`)
+          .replaceAll("'{MODULE_ID}'", `'${moduleRecord.id}'::uuid`);
 
         if (processedSql.trim().length > 0) {
           await executeRawInTenantContext(tenantId, processedSql);

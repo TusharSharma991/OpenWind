@@ -6,12 +6,12 @@ WITH
   ),
   _fields AS (
     INSERT INTO entity_fields (id, entity_type_id, tenant_id, name, label, field_type, is_required, is_indexed, sort_order, config)
-    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'title',        'Title',        'text',     true,  false, 0, '{}' FROM et UNION ALL
-    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'amount',       'Amount',       'currency', true,  false, 1, '{}' FROM et UNION ALL
-    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'category',     'Category',     'enum',     true,  false, 2, '{"options":[{"value":"travel","label":"Travel"},{"value":"meals","label":"Meals"},{"value":"accommodation","label":"Accommodation"},{"value":"equipment","label":"Equipment"},{"value":"other","label":"Other"}]}' FROM et UNION ALL
-    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'expense_date', 'Expense Date', 'date',     true,  false, 3, '{}' FROM et UNION ALL
-    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'description',  'Description',  'longtext', false, false, 4, '{}' FROM et UNION ALL
-    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'receipt',      'Receipt Note', 'text',     false, false, 5, '{}' FROM et
+    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'title',        'Title',        'text',     true,  false, 0, '{}'::jsonb FROM et UNION ALL
+    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'amount',       'Amount',       'currency', true,  false, 1, '{}'::jsonb FROM et UNION ALL
+    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'category',     'Category',     'enum',     true,  false, 2, '{"options":[{"value":"travel","label":"Travel"},{"value":"meals","label":"Meals"},{"value":"accommodation","label":"Accommodation"},{"value":"equipment","label":"Equipment"},{"value":"other","label":"Other"}]}'::jsonb FROM et UNION ALL
+    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'expense_date', 'Expense Date', 'date',     true,  false, 3, '{}'::jsonb FROM et UNION ALL
+    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'description',  'Description',  'longtext', false, false, 4, '{}'::jsonb FROM et UNION ALL
+    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'receipt',      'Receipt Note', 'text',     false, false, 5, '{}'::jsonb FROM et
   ),
   wf AS (
     INSERT INTO workflows (id, tenant_id, entity_type_id, name, initial_state)
@@ -27,8 +27,8 @@ WITH
     SELECT gen_random_uuid(), wf.id, 'rejected',  'Rejected',  '#ef4444', true,  4 FROM wf
   )
 INSERT INTO workflow_transitions (id, workflow_id, from_state, to_state, label, allowed_roles, requires_comment, requires_fields)
-SELECT gen_random_uuid(), wf.id, 'draft',     'submitted', 'Submit',       '["admin","agent","user"]', false, '[]' FROM wf UNION ALL
-SELECT gen_random_uuid(), wf.id, 'submitted', 'approved',  'Approve',      '["admin"]',                false, '[]' FROM wf UNION ALL
-SELECT gen_random_uuid(), wf.id, 'submitted', 'rejected',  'Reject',       '["admin"]',                true,  '[]' FROM wf UNION ALL
-SELECT gen_random_uuid(), wf.id, 'approved',  'paid',      'Mark Paid',    '["admin"]',                false, '[]' FROM wf UNION ALL
-SELECT gen_random_uuid(), wf.id, 'submitted', 'draft',     'Return Draft', '["admin","user"]',         true,  '[]' FROM wf;
+SELECT gen_random_uuid(), wf.id, 'draft',     'submitted', 'Submit',       ARRAY['admin','agent','user'], false, ARRAY[]::text[] FROM wf UNION ALL
+SELECT gen_random_uuid(), wf.id, 'submitted', 'approved',  'Approve',      ARRAY['admin'],                false, ARRAY[]::text[] FROM wf UNION ALL
+SELECT gen_random_uuid(), wf.id, 'submitted', 'rejected',  'Reject',       ARRAY['admin'],                true,  ARRAY[]::text[] FROM wf UNION ALL
+SELECT gen_random_uuid(), wf.id, 'approved',  'paid',      'Mark Paid',    ARRAY['admin'],                false, ARRAY[]::text[] FROM wf UNION ALL
+SELECT gen_random_uuid(), wf.id, 'submitted', 'draft',     'Return Draft', ARRAY['admin','user'],         true,  ARRAY[]::text[] FROM wf;

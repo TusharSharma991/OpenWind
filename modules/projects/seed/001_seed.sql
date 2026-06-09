@@ -6,12 +6,12 @@ WITH
   ),
   _fields AS (
     INSERT INTO entity_fields (id, entity_type_id, tenant_id, name, label, field_type, is_required, is_indexed, sort_order, config)
-    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'title',        'Title',        'text',     true,  false, 0, '{}' FROM et UNION ALL
-    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'description',  'Description',  'longtext', false, false, 1, '{}' FROM et UNION ALL
-    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'priority',     'Priority',     'enum',     false, false, 2, '{"options":[{"value":"low","label":"Low","color":"#6b7280"},{"value":"medium","label":"Medium","color":"#f59e0b"},{"value":"high","label":"High","color":"#ef4444"}]}' FROM et UNION ALL
-    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'due_date',     'Due Date',     'date',     false, false, 3, '{}' FROM et UNION ALL
-    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'assignee',     'Assignee',     'text',     false, false, 4, '{}' FROM et UNION ALL
-    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'story_points', 'Story Points', 'number',   false, false, 5, '{}' FROM et
+    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'title',        'Title',        'text',     true,  false, 0, '{}'::jsonb FROM et UNION ALL
+    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'description',  'Description',  'longtext', false, false, 1, '{}'::jsonb FROM et UNION ALL
+    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'priority',     'Priority',     'enum',     false, false, 2, '{"options":[{"value":"low","label":"Low","color":"#6b7280"},{"value":"medium","label":"Medium","color":"#f59e0b"},{"value":"high","label":"High","color":"#ef4444"}]}'::jsonb FROM et UNION ALL
+    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'due_date',     'Due Date',     'date',     false, false, 3, '{}'::jsonb FROM et UNION ALL
+    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'assignee',     'Assignee',     'text',     false, false, 4, '{}'::jsonb FROM et UNION ALL
+    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'story_points', 'Story Points', 'number',   false, false, 5, '{}'::jsonb FROM et
   ),
   wf AS (
     INSERT INTO workflows (id, tenant_id, entity_type_id, name, initial_state)
@@ -28,11 +28,11 @@ WITH
     SELECT gen_random_uuid(), wf.id, 'cancelled',   'Cancelled',   '#ef4444', true,  5 FROM wf
   )
 INSERT INTO workflow_transitions (id, workflow_id, from_state, to_state, label, allowed_roles, requires_comment, requires_fields)
-SELECT gen_random_uuid(), wf.id, 'backlog',     'todo',        'Plan',           '["admin","agent"]', false, '[]' FROM wf UNION ALL
-SELECT gen_random_uuid(), wf.id, 'todo',        'in_progress', 'Start',          '["admin","agent"]', false, '[]' FROM wf UNION ALL
-SELECT gen_random_uuid(), wf.id, 'in_progress', 'in_review',   'Submit Review',  '["admin","agent"]', false, '[]' FROM wf UNION ALL
-SELECT gen_random_uuid(), wf.id, 'in_review',   'done',        'Approve',        '["admin","agent"]', false, '[]' FROM wf UNION ALL
-SELECT gen_random_uuid(), wf.id, 'in_review',   'in_progress', 'Request Changes','["admin","agent"]', true,  '[]' FROM wf UNION ALL
-SELECT gen_random_uuid(), wf.id, 'in_progress', 'done',        'Quick Done',     '["admin","agent"]', false, '[]' FROM wf UNION ALL
-SELECT gen_random_uuid(), wf.id, 'todo',        'cancelled',   'Cancel',         '["admin","agent"]', true,  '[]' FROM wf UNION ALL
-SELECT gen_random_uuid(), wf.id, 'in_progress', 'todo',        'Block',          '["admin","agent"]', true,  '[]' FROM wf;
+SELECT gen_random_uuid(), wf.id, 'backlog',     'todo',        'Plan',           ARRAY['admin','agent'], false, ARRAY[]::text[] FROM wf UNION ALL
+SELECT gen_random_uuid(), wf.id, 'todo',        'in_progress', 'Start',          ARRAY['admin','agent'], false, ARRAY[]::text[] FROM wf UNION ALL
+SELECT gen_random_uuid(), wf.id, 'in_progress', 'in_review',   'Submit Review',  ARRAY['admin','agent'], false, ARRAY[]::text[] FROM wf UNION ALL
+SELECT gen_random_uuid(), wf.id, 'in_review',   'done',        'Approve',        ARRAY['admin','agent'], false, ARRAY[]::text[] FROM wf UNION ALL
+SELECT gen_random_uuid(), wf.id, 'in_review',   'in_progress', 'Request Changes',ARRAY['admin','agent'], true,  ARRAY[]::text[] FROM wf UNION ALL
+SELECT gen_random_uuid(), wf.id, 'in_progress', 'done',        'Quick Done',     ARRAY['admin','agent'], false, ARRAY[]::text[] FROM wf UNION ALL
+SELECT gen_random_uuid(), wf.id, 'todo',        'cancelled',   'Cancel',         ARRAY['admin','agent'], true,  ARRAY[]::text[] FROM wf UNION ALL
+SELECT gen_random_uuid(), wf.id, 'in_progress', 'todo',        'Block',          ARRAY['admin','agent'], true,  ARRAY[]::text[] FROM wf;

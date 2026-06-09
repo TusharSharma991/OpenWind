@@ -6,12 +6,12 @@ WITH
   ),
   _fields AS (
     INSERT INTO entity_fields (id, entity_type_id, tenant_id, name, label, field_type, is_required, is_indexed, sort_order, config)
-    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'invoice_number', 'Invoice #',    'text',     true,  false, 0, '{}' FROM et UNION ALL
-    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'client_name',   'Client Name',  'text',     true,  false, 1, '{}' FROM et UNION ALL
-    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'client_email',  'Client Email', 'text',     false, false, 2, '{}' FROM et UNION ALL
-    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'amount',        'Amount',       'currency', true,  false, 3, '{}' FROM et UNION ALL
-    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'due_date',      'Due Date',     'date',     true,  false, 4, '{}' FROM et UNION ALL
-    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'description',   'Description',  'longtext', false, false, 5, '{}' FROM et
+    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'invoice_number', 'Invoice #',    'text',     true,  false, 0, '{}'::jsonb FROM et UNION ALL
+    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'client_name',   'Client Name',  'text',     true,  false, 1, '{}'::jsonb FROM et UNION ALL
+    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'client_email',  'Client Email', 'text',     false, false, 2, '{}'::jsonb FROM et UNION ALL
+    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'amount',        'Amount',       'currency', true,  false, 3, '{}'::jsonb FROM et UNION ALL
+    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'due_date',      'Due Date',     'date',     true,  false, 4, '{}'::jsonb FROM et UNION ALL
+    SELECT gen_random_uuid(), et.id, '{TENANT_ID}', 'description',   'Description',  'longtext', false, false, 5, '{}'::jsonb FROM et
   ),
   wf AS (
     INSERT INTO workflows (id, tenant_id, entity_type_id, name, initial_state)
@@ -28,11 +28,11 @@ WITH
     SELECT gen_random_uuid(), wf.id, 'cancelled', 'Cancelled', '#6b7280', true,  5 FROM wf
   )
 INSERT INTO workflow_transitions (id, workflow_id, from_state, to_state, label, allowed_roles, requires_comment, requires_fields)
-SELECT gen_random_uuid(), wf.id, 'draft',   'sent',      'Send Invoice',   '["admin","agent"]', false, '[]' FROM wf UNION ALL
-SELECT gen_random_uuid(), wf.id, 'sent',    'viewed',    'Mark Viewed',    '["admin","agent"]', false, '[]' FROM wf UNION ALL
-SELECT gen_random_uuid(), wf.id, 'sent',    'paid',      'Record Payment', '["admin","agent"]', false, '[]' FROM wf UNION ALL
-SELECT gen_random_uuid(), wf.id, 'viewed',  'paid',      'Record Payment', '["admin","agent"]', false, '[]' FROM wf UNION ALL
-SELECT gen_random_uuid(), wf.id, 'sent',    'overdue',   'Mark Overdue',   '["admin","agent"]', false, '[]' FROM wf UNION ALL
-SELECT gen_random_uuid(), wf.id, 'viewed',  'overdue',   'Mark Overdue',   '["admin","agent"]', false, '[]' FROM wf UNION ALL
-SELECT gen_random_uuid(), wf.id, 'overdue', 'paid',      'Record Payment', '["admin","agent"]', false, '[]' FROM wf UNION ALL
-SELECT gen_random_uuid(), wf.id, 'draft',   'cancelled', 'Cancel',         '["admin","agent"]', false, '[]' FROM wf;
+SELECT gen_random_uuid(), wf.id, 'draft',   'sent',      'Send Invoice',   ARRAY['admin','agent'], false, ARRAY[]::text[] FROM wf UNION ALL
+SELECT gen_random_uuid(), wf.id, 'sent',    'viewed',    'Mark Viewed',    ARRAY['admin','agent'], false, ARRAY[]::text[] FROM wf UNION ALL
+SELECT gen_random_uuid(), wf.id, 'sent',    'paid',      'Record Payment', ARRAY['admin','agent'], false, ARRAY[]::text[] FROM wf UNION ALL
+SELECT gen_random_uuid(), wf.id, 'viewed',  'paid',      'Record Payment', ARRAY['admin','agent'], false, ARRAY[]::text[] FROM wf UNION ALL
+SELECT gen_random_uuid(), wf.id, 'sent',    'overdue',   'Mark Overdue',   ARRAY['admin','agent'], false, ARRAY[]::text[] FROM wf UNION ALL
+SELECT gen_random_uuid(), wf.id, 'viewed',  'overdue',   'Mark Overdue',   ARRAY['admin','agent'], false, ARRAY[]::text[] FROM wf UNION ALL
+SELECT gen_random_uuid(), wf.id, 'overdue', 'paid',      'Record Payment', ARRAY['admin','agent'], false, ARRAY[]::text[] FROM wf UNION ALL
+SELECT gen_random_uuid(), wf.id, 'draft',   'cancelled', 'Cancel',         ARRAY['admin','agent'], false, ARRAY[]::text[] FROM wf;

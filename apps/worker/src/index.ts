@@ -3,6 +3,8 @@ import { startOutboxPoller, stopOutboxPoller } from "./outbox-poller.js";
 import { stopAutomationWorker } from "./automation-worker.js";
 import { startSlaScheduler, stopSlaScheduler } from "./sla-scheduler.js";
 import { slaBreacher } from "./sla-breacher.js";
+import { stopAvScanWorker } from "./av-scan.js";
+import { scheduleFileCleanup, stopFileCleanupWorker } from "./file-cleanup.js";
 
 logger.info("Worker process starting");
 
@@ -10,7 +12,11 @@ logger.info("Worker process starting");
 startOutboxPoller();
 startSlaScheduler();
 
-// automationWorker and slaBreacher start processing on import above
+// Schedule recurring file cleanup (idempotent — safe to call on every restart)
+void scheduleFileCleanup();
+
+// automationWorker, slaBreacher, avScanWorker, fileCleanupWorker all
+// start processing on import above.
 
 async function shutdown(): Promise<void> {
   logger.info("Worker shutting down");
@@ -19,6 +25,8 @@ async function shutdown(): Promise<void> {
     stopSlaScheduler(),
     stopAutomationWorker(),
     slaBreacher.close(),
+    stopAvScanWorker(),
+    stopFileCleanupWorker(),
   ]);
   process.exit(0);
 }

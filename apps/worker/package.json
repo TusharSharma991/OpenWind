@@ -12,10 +12,13 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.0.0",
     "@platform/automation-engine": "workspace:*",
     "@platform/config": "workspace:*",
     "@platform/db": "workspace:*",
+    "@platform/files": "workspace:*",
     "@platform/logger": "workspace:*",
+    "@platform/notifications": "workspace:*",
     "@platform/workflow-engine": "workspace:*",
     "bullmq": "^5.0.0",
     "drizzle-orm": "^0.45.2",

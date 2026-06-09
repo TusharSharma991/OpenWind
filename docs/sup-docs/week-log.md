@@ -5,6 +5,50 @@
 
 ---
 
+## 2026-06-09 — 2A Phase 1 + 2 complete; SSRF/PII PR merged
+
+**Session type:** Implementation
+**Branch state:** `feat/PLAT-12-platform-services-2a`, ahead of `main`, PR open
+
+### Completed this session
+
+**SSRF + PII hardening (PR #73 — merged)**
+
+- Fixed `opts.all = true` crash in `webhook.ts` `lookupFn` (`ERR_INVALID_IP_ADDRESS` on Docker happy-eyeballs path)
+- PR reviewed by abmish, all 6 blockers resolved, CI green, merged to main
+
+**2A Phase 1 — packages**
+
+- `@platform/notifications`: Novu wrapper, user preference CRUD, `sendNotification`, `getUserPreferences`, `updateUserPreferences`
+- `@platform/files`: `initiateUpload` (S3 presigned PUT, quota guard, AV scan queue enqueue), `completeUpload`, `downloadFile`, `deleteFile`, `FileError`
+- `@platform/audit`: `writeAuditEntry`, `queryAuditLog`, PII redaction via `redactMetadata` + `buildSensitivityMap`
+- DB migrations 0007–0009: `files`, `view_configs`, `audit_log` tables (all with RLS, tenant indexes)
+
+**2A Phase 2 — API routes + workers**
+
+- `apps/api`: file initiate/complete/download/delete routes, admin audit log + view-config routes, notification preferences get/patch routes, `/openapi.json` endpoint, shared Redis client
+- `apps/worker`: av-scan BullMQ worker (ClamAV INSTREAM TCP, lazy S3, quarantine notification), file-cleanup hourly recurring worker (purges stale pending files, implicit quota via row deletion)
+- 34 tests: 12 file API route tests, 3 av-scan tests, 4 file-cleanup tests (all green)
+
+**Test infra fixes**
+
+- vitest 4.x: `S3Client` and `net.Socket` constructor mocks must use `function` keyword (not arrow function)
+- BullMQ Worker processor captured at import time; `beforeEach` must NOT clear the reference
+
+### Phase snapshot
+
+- Phase 1: **100% complete**
+- Phase 2 — 2A: **~65%** (Phase 3 integration tests T19–T23 remain)
+- Phase 2 — 2B/2C/2D: 0% (next)
+
+### Next actions
+
+- [ ] 2A Phase 3 (T19–T23): isolation + integration tests for files, audit, view-configs; full upload flow; quarantine flow
+- [ ] Start 2B: module system + seed SQL for helpdesk, CRM, reimbursements
+- [ ] T18 (PII-aware snapshots): wire `buildSensitivityMap` + `redactMetadata` into entity engine hooks
+
+---
+
 ## 2026-05-22 — Phase 1 complete, Phase 2 triage
 
 **Session type:** Analysis + cleanup

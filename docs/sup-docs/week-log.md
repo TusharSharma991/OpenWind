@@ -5,6 +5,41 @@
 
 ---
 
+## 2026-06-09 — 2A Phase 3 complete (T18–T23); PR #85 updated
+
+**Session type:** Implementation
+**Branch state:** `feat/PLAT-12-platform-services-2a`, ahead of `main`, PR #85 open
+
+### Completed this session
+
+**2A Phase 3 — PII-aware audit snapshots + integration / isolation tests**
+
+- **T18 — audit hook in entity engine**: added `audit-hook.ts` with `registerEntityAuditHook` / `fireEntityAuditHook` / `isEntityAuditHookRegistered`. Preserves `packages/entity-engine → packages/db only` dependency rule — hook is a callback registered by `apps/api` at startup, not a direct import.
+- Entity engine `createEntity`, `updateEntity`, `deleteEntity` now fire the hook with before/after snapshots and the field sensitivity map.
+- `apps/api/src/app.ts` registers `writeAuditEntry` as the hook at module load, inside the same DB transaction.
+- **T19 — files RLS isolation test**: 5 assertions — cross-tenant read blocked, own-tenant read allowed, cross-tenant delete returns FILE_NOT_FOUND, cross-tenant `confirmUpload` throws FileError.
+- **T20 — audit_log RLS isolation test**: 4 assertions — cross-tenant raw SELECT blocked, `queryAuditLog` API scoped to correct tenant.
+- **T21 — view_configs RLS isolation test**: 5 assertions — cross-tenant read + write (INSERT WITH CHECK) blocked.
+- **T22 — upload flow integration**: 6 tests — `initiateUpload` → `confirmUpload` → `getDownloadUrl` → quarantine guard → `deleteFile` → size limit guard.
+- **T23 — quarantine lifecycle integration**: 6 tests — `pending` download blocked, quarantined blocked, `scan_failed` blocked, clean succeeds, idempotent re-download.
+- Fixed wrong function names (`completeUpload` → `confirmUpload(db, redis, tenantId, fileId)`, `downloadFile` → `getDownloadUrl`) in all three test files.
+- Fixed `FieldSensitivity` re-export: `workflow-engine/index.ts` now re-exports it from `@platform/entity-engine` so `@platform/audit` can import transitively.
+- All 141 unit tests pass. Integration/isolation tests require `docker compose up -d` (expected).
+
+### Phase snapshot
+
+- Phase 1: **100% complete**
+- Phase 2 — 2A: **~95%** (pending: CI green on Docker test suite before merge)
+- Phase 2 — 2B/2C/2D: 0% (next)
+
+### Next actions
+
+- [ ] CI must pass on full Docker stack before merging PR #85
+- [ ] Start 2B: module system + seed SQL for helpdesk, CRM, reimbursements
+- [ ] Phase exit decision (2A → 2B) requires human sign-off
+
+---
+
 ## 2026-06-09 — 2A Phase 1 + 2 complete; SSRF/PII PR merged
 
 **Session type:** Implementation

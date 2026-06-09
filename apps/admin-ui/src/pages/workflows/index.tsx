@@ -2,8 +2,6 @@ import React from "react";
 import { useList } from "@refinedev/core";
 import { useNavigate } from "react-router-dom";
 
-type EntityType = { id: string; name: string; plural: string };
-
 type Workflow = {
   id: string;
   name: string;
@@ -14,12 +12,8 @@ type Workflow = {
 
 export function Workflows(): React.ReactElement {
   const { data, isLoading } = useList<Workflow>({ resource: "workflows" });
-  const { data: etData } = useList<EntityType>({ resource: "entity-types" });
   const navigate = useNavigate();
   const workflows = data?.data ?? [];
-  const entityTypes = etData?.data ?? [];
-
-  const etMap = new Map(entityTypes.map((e) => [e.id, e.name]));
 
   if (isLoading) {
     return (
@@ -112,9 +106,11 @@ export function Workflows(): React.ReactElement {
                     </div>
                   </td>
                   <td>
-                    <span className="badge badge-primary">
-                      {etMap.get(wf.entityTypeId) ??
-                        wf.entityTypeId.slice(0, 8) + "…"}
+                    <span
+                      className="badge badge-muted"
+                      style={{ fontSize: "11px" }}
+                    >
+                      {wf.entityTypeId.slice(0, 8)}…
                     </span>
                   </td>
                   <td>

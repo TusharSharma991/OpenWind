@@ -1,242 +1,411 @@
 import React, { useEffect, useState } from "react";
-import { useGetIdentity, useList } from "@refinedev/core";
+import { useGetIdentity } from "@refinedev/core";
+import { useNavigate } from "react-router-dom";
+import { fetchWithAuth, API_URL } from "../lib/api.js";
 import { userManager } from "../authProvider.js";
-import type { User } from "oidc-client-ts";
 
-type ModuleRecord = {
+type Workflow = {
   id: string;
   name: string;
-  slug: string;
-  installed: boolean;
+  entityTypeId: string;
+  states: {
+    name: string;
+    label: string;
+    color: string | null;
+    isTerminal: boolean;
+  }[];
 };
 
+type WorkflowStat = {
+  workflow: Workflow;
+  total: number;
+  open: number;
+};
+
+const CARD_GRADIENTS = [
+  "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+  "linear-gradient(135deg, #f093fb 0%, #f5576c 100%)",
+  "linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)",
+  "linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)",
+  "linear-gradient(135deg, #fa709a 0%, #fee140 100%)",
+  "linear-gradient(135deg, #a18cd1 0%, #fbc2eb 100%)",
+  "linear-gradient(135deg, #fccb90 0%, #d57eeb 100%)",
+];
+
 export function Dashboard(): React.ReactElement {
+  const navigate = useNavigate();
   const { data: identity } = useGetIdentity<{
     id: string;
     name: string;
     email: string;
   }>();
-  const { data: modulesData, isLoading: modulesLoading } =
-    useList<ModuleRecord>({
-      resource: "modules",
-    });
 
-  const [user, setUser] = useState<User | null>(null);
+  const [stats, setStats] = useState<WorkflowStat[]>([]);
+  const [installedCount, setInstalledCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [roles, setRoles] = useState<string[]>([]);
 
   useEffect(() => {
     void userManager.getUser().then((u) => {
-      setUser(u);
+      const profile = u?.profile as Record<string, unknown> | undefined;
+      const rolesMap = (profile?.["urn:zitadel:iam:org:project:roles"] ??
+        {}) as Record<string, unknown>;
+      setRoles(Object.keys(rolesMap));
     });
   }, []);
 
-  const profile = user?.profile;
-  const tenantId =
-    typeof profile?.["urn:zitadel:iam:org:id"] === "string"
-      ? profile["urn:zitadel:iam:org:id"]
-      : "Loading...";
-  const rolesMap = (profile?.["urn:zitadel:iam:org:project:roles"] ??
-    {}) as Record<string, unknown>;
-  const roles = Object.keys(rolesMap);
+  useEffect(() => {
+    Promise.all([
+      fetchWithAuth(`${API_URL}/workflows`),
+      fetchWithAuth(`${API_URL}/modules`),
+    ])
+      .then(async ([wfRes, modRes]) => {
+        const workflows = (wfRes as { data?: Workflow[] }).data ?? [];
+        const mods = (modRes as { data?: { installed: boolean }[] }).data ?? [];
+        setInstalledCount(mods.filter((m) => m.installed).length);
+
+        const wfStats = await Promise.all(
+          workflows.map(async (wf) => {
+            try {
+              const recRes = await fetchWithAuth(
+                `${API_URL}/entities?entityTypeId=${wf.entityTypeId}`,
+              );
+              const records =
+                (recRes as { data?: { currentState: string | null }[] }).data ??
+                [];
+              const terminalNames = new Set(
+                wf.states.filter((s) => s.isTerminal).map((s) => s.name),
+              );
+              const open = records.filter(
+                (r) => !terminalNames.has(r.currentState ?? ""),
+              ).length;
+              return { workflow: wf, total: records.length, open };
+            } catch {
+              return { workflow: wf, total: 0, open: 0 };
+            }
+          }),
+        );
+        setStats(wfStats);
+      })
+      .catch(() => {
+        setStats([]);
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  const totalRecords = stats.reduce((sum, s) => sum + s.total, 0);
+  const totalOpen = stats.reduce((sum, s) => sum + s.open, 0);
+  const name = identity?.name ?? "Admin";
 
   return (
     <div>
-      {/* Welcome Card */}
-      <div className="data-panel" style={{ marginBottom: "24px" }}>
-        <h2 style={{ fontSize: "24px", marginBottom: "8px" }}>
-          Welcome back, {identity?.name ?? "Admin User"}!
+      {/* Welcome */}
+      <div style={{ marginBottom: "28px" }}>
+        <h2 className="page-title">
+          Welcome back, {name.split(" ")[0] ?? name} 👋
         </h2>
-        <p style={{ color: "var(--text-secondary)" }}>
-          OpenWind platform is fully active. You are connected as a tenant
-          administrator.
+        <p className="page-subtitle">
+          Here's an overview of your workflows and records.
         </p>
       </div>
 
-      {/* Stats Cards */}
-      <div className="card-grid">
-        <div className="stat-card">
-          <div className="stat-header">
-            <span className="stat-title">Active Tenant ID</span>
-            <div className="stat-icon">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-                strokeWidth="2"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
-                />
-              </svg>
-            </div>
-          </div>
-          <div
-            className="stat-value"
-            style={{
-              fontSize: "15px",
-              fontFamily: "monospace",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              wordBreak: "break-all",
-            }}
-          >
-            {tenantId}
-          </div>
-          <div className="stat-desc">
-            Organization context loaded from Zitadel claims
-          </div>
-        </div>
-
-        <div className="stat-card">
-          <div className="stat-header">
-            <span className="stat-title">User Roles</span>
-            <div className="stat-icon">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-                strokeWidth="2"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.57-.598-3.75h-.152c-3.196 0-6.1-1.249-8.25-3.286zm0 13.036h.008v.008H12v-.008z"
-                />
-              </svg>
-            </div>
-          </div>
-          <div className="stat-value" style={{ fontSize: "20px" }}>
-            {roles.length > 0 ? (
-              <div
-                style={{
-                  display: "flex",
-                  gap: "6px",
-                  flexWrap: "wrap",
-                  marginTop: "4px",
-                }}
-              >
-                {roles.map((role) => (
-                  <span key={role} className="badge badge-primary">
-                    {role}
-                  </span>
-                ))}
-              </div>
-            ) : (
-              <span className="badge badge-primary">No explicit roles</span>
-            )}
-          </div>
-          <div className="stat-desc" style={{ marginTop: "8px" }}>
-            Assigned project roles mapped to session
-          </div>
-        </div>
-
-        <div className="stat-card">
-          <div className="stat-header">
-            <span className="stat-title">Installed Modules</span>
-            <div className="stat-icon">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-                strokeWidth="2"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M6 13.5V3.75m0 9.75a1.5 1.5 0 010 3m0-3a1.5 1.5 0 000 3m0 0V21m0-4.5h12M12 10.5V3.75m0 6.75a1.5 1.5 0 010 3m0-3a1.5 1.5 0 000 3m0 0V21m0-4.5H3m12-4.5V3.75m0 6.75a1.5 1.5 0 010 3m0-3a1.5 1.5 0 000 3m0 0V21m0-4.5h-12"
-                />
-              </svg>
-            </div>
-          </div>
-          <div className="stat-value">
-            {modulesLoading ? "..." : (modulesData?.data.length ?? 0)}
-          </div>
-          <div className="stat-desc">
-            Dynamic modules active in tenant registry
-          </div>
-        </div>
+      {/* Top stat strip */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+          gap: "16px",
+          marginBottom: "32px",
+        }}
+      >
+        <StatCard
+          label="Workflows"
+          value={loading ? "…" : String(stats.length)}
+          icon="⟳"
+          gradient="linear-gradient(135deg, #667eea 0%, #764ba2 100%)"
+          onClick={() => navigate("/workflows")}
+        />
+        <StatCard
+          label="Total Records"
+          value={loading ? "…" : String(totalRecords)}
+          icon="📋"
+          gradient="linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)"
+          onClick={() => navigate("/records")}
+        />
+        <StatCard
+          label="Open / Active"
+          value={loading ? "…" : String(totalOpen)}
+          icon="🔄"
+          gradient="linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)"
+          onClick={() => navigate("/records")}
+        />
+        <StatCard
+          label="Templates"
+          value={loading ? "…" : String(installedCount)}
+          icon="🧩"
+          gradient="linear-gradient(135deg, #fa709a 0%, #fee140 100%)"
+          onClick={() => navigate("/modules")}
+        />
       </div>
 
-      {/* Module Registry Verification */}
-      <div className="data-panel">
+      {/* Workflow breakdown */}
+      <div className="data-panel" style={{ marginBottom: "24px" }}>
         <div className="panel-header">
-          <h3 className="panel-title">System Module Status</h3>
-          <span className="badge badge-success">API Connected</span>
+          <h3 className="panel-title">Workflows at a Glance</h3>
+          <button
+            className="btn-primary btn-sm"
+            onClick={() => navigate("/workflows/new")}
+          >
+            + New Workflow
+          </button>
         </div>
 
-        {modulesLoading ? (
-          <p style={{ color: "var(--text-secondary)" }}>
-            Querying module registry...
-          </p>
-        ) : modulesData?.data && modulesData.data.length > 0 ? (
-          <div className="metadata-grid" style={{ gridTemplateColumns: "1fr" }}>
-            {modulesData.data.map((mod) => (
-              <div
-                key={mod.id}
-                className="metadata-item flex justify-between align-center"
-                style={{ padding: "16px 20px" }}
-              >
-                <div>
-                  <h4 style={{ fontSize: "16px", marginBottom: "4px" }}>
-                    {mod.name}
-                  </h4>
-                  <p style={{ color: "var(--text-muted)", fontSize: "13px" }}>
-                    Slug:{" "}
-                    <span style={{ fontFamily: "monospace" }}>{mod.slug}</span>
-                  </p>
-                </div>
-                <span
-                  className={`badge ${mod.installed ? "badge-success" : "badge-primary"}`}
-                >
-                  {mod.installed ? "Installed" : "Available"}
-                </span>
-              </div>
-            ))}
+        {loading ? (
+          <div style={{ padding: "32px", textAlign: "center" }}>
+            <div className="spinner" style={{ margin: "0 auto" }} />
+          </div>
+        ) : stats.length === 0 ? (
+          <div className="empty-state" style={{ padding: "40px" }}>
+            <div className="empty-icon">⟳</div>
+            <h4>No workflows yet</h4>
+            <p>Create your first workflow to start tracking records.</p>
+            <button
+              className="btn-primary"
+              style={{ marginTop: "12px" }}
+              onClick={() => navigate("/workflows/new")}
+            >
+              + New Workflow
+            </button>
           </div>
         ) : (
-          <p style={{ color: "var(--text-secondary)" }}>
-            No modules registered in the system database yet.
-          </p>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+              gap: "16px",
+              padding: "4px",
+            }}
+          >
+            {stats.map((s, i) => {
+              const gradient =
+                CARD_GRADIENTS[i % CARD_GRADIENTS.length] ?? CARD_GRADIENTS[0];
+              const activeStates = s.workflow.states.filter(
+                (st) => !st.isTerminal,
+              );
+              const pct =
+                s.total > 0 ? Math.round((s.open / s.total) * 100) : 0;
+
+              return (
+                <div
+                  key={s.workflow.id}
+                  onClick={() => navigate(`/records/${s.workflow.id}`)}
+                  style={{
+                    borderRadius: "14px",
+                    overflow: "hidden",
+                    cursor: "pointer",
+                    border: "1px solid var(--border-color)",
+                    background: "var(--bg-secondary)",
+                    transition: "transform .15s, box-shadow .15s",
+                  }}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLDivElement).style.transform =
+                      "translateY(-2px)";
+                    (e.currentTarget as HTMLDivElement).style.boxShadow =
+                      "var(--shadow-lg)";
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLDivElement).style.transform =
+                      "translateY(0)";
+                    (e.currentTarget as HTMLDivElement).style.boxShadow =
+                      "none";
+                  }}
+                >
+                  <div
+                    style={{ background: gradient, padding: "18px 20px 14px" }}
+                  >
+                    <div
+                      style={{
+                        fontSize: "15px",
+                        fontWeight: 700,
+                        color: "#fff",
+                      }}
+                    >
+                      {s.workflow.name}
+                    </div>
+                    <div
+                      style={{ display: "flex", gap: "16px", marginTop: "8px" }}
+                    >
+                      <div style={{ textAlign: "center" }}>
+                        <div
+                          style={{
+                            fontSize: "22px",
+                            fontWeight: 800,
+                            color: "#fff",
+                          }}
+                        >
+                          {s.total}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: "10px",
+                            color: "rgba(255,255,255,.7)",
+                            textTransform: "uppercase",
+                          }}
+                        >
+                          Total
+                        </div>
+                      </div>
+                      <div style={{ textAlign: "center" }}>
+                        <div
+                          style={{
+                            fontSize: "22px",
+                            fontWeight: 800,
+                            color: "#fff",
+                          }}
+                        >
+                          {s.open}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: "10px",
+                            color: "rgba(255,255,255,.7)",
+                            textTransform: "uppercase",
+                          }}
+                        >
+                          Open
+                        </div>
+                      </div>
+                      <div style={{ textAlign: "center" }}>
+                        <div
+                          style={{
+                            fontSize: "22px",
+                            fontWeight: 800,
+                            color: "#fff",
+                          }}
+                        >
+                          {pct}%
+                        </div>
+                        <div
+                          style={{
+                            fontSize: "10px",
+                            color: "rgba(255,255,255,.7)",
+                            textTransform: "uppercase",
+                          }}
+                        >
+                          Active
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ padding: "12px 16px 14px" }}>
+                    <div
+                      style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}
+                    >
+                      {activeStates.slice(0, 5).map((st) => (
+                        <span
+                          key={st.name}
+                          style={{
+                            padding: "2px 6px",
+                            borderRadius: "4px",
+                            fontSize: "10px",
+                            fontWeight: 600,
+                            background: st.color
+                              ? `${st.color}22`
+                              : "var(--bg-tertiary)",
+                            color: st.color ?? "var(--text-muted)",
+                          }}
+                        >
+                          {st.label}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
 
-      {/* Zitadel Session Metadata */}
-      <div className="data-panel">
-        <div className="panel-header">
-          <h3 className="panel-title">Identity Provider Session Tokens</h3>
-        </div>
-        <p style={{ color: "var(--text-secondary)", marginBottom: "16px" }}>
-          The active OIDC authorization details are printed below for system
-          integration validation:
-        </p>
-        <div className="metadata-grid">
-          <div className="metadata-item">
-            <div className="metadata-label">Access Token (Truncated)</div>
-            <div className="metadata-value">
-              {user?.access_token
-                ? `${user.access_token.substring(0, 32)}...`
-                : "None"}
-            </div>
+      {/* Roles */}
+      {roles.length > 0 && (
+        <div className="data-panel">
+          <div className="panel-header">
+            <h3 className="panel-title">Your Roles</h3>
           </div>
-          <div className="metadata-item">
-            <div className="metadata-label">ID Token (Truncated)</div>
-            <div className="metadata-value">
-              {user?.id_token ? `${user.id_token.substring(0, 32)}...` : "None"}
-            </div>
-          </div>
-          <div className="metadata-item">
-            <div className="metadata-label">Expires At</div>
-            <div className="metadata-value">
-              {user?.expires_at
-                ? new Date(user.expires_at * 1000).toLocaleString()
-                : "None"}
-            </div>
+          <div style={{ display: "flex", gap: "8px", padding: "4px" }}>
+            {roles.map((r) => (
+              <span
+                key={r}
+                className="badge badge-primary"
+                style={{ fontSize: "12px", padding: "5px 12px" }}
+              >
+                {r}
+              </span>
+            ))}
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+function StatCard({
+  label,
+  value,
+  icon,
+  gradient,
+  onClick,
+}: {
+  label: string;
+  value: string;
+  icon: string;
+  gradient: string;
+  onClick: () => void;
+}): React.ReactElement {
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        borderRadius: "14px",
+        background: gradient,
+        padding: "20px",
+        cursor: "pointer",
+        transition: "transform .15s, box-shadow .15s",
+        boxShadow: "0 4px 15px rgba(0,0,0,.15)",
+      }}
+      onMouseEnter={(e) => {
+        (e.currentTarget as HTMLDivElement).style.transform =
+          "translateY(-2px)";
+        (e.currentTarget as HTMLDivElement).style.boxShadow =
+          "0 8px 25px rgba(0,0,0,.2)";
+      }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLDivElement).style.transform = "translateY(0)";
+        (e.currentTarget as HTMLDivElement).style.boxShadow =
+          "0 4px 15px rgba(0,0,0,.15)";
+      }}
+    >
+      <div style={{ fontSize: "28px", marginBottom: "8px" }}>{icon}</div>
+      <div
+        style={{
+          fontSize: "28px",
+          fontWeight: 800,
+          color: "#fff",
+          lineHeight: 1,
+        }}
+      >
+        {value}
+      </div>
+      <div
+        style={{
+          fontSize: "13px",
+          color: "rgba(255,255,255,.8)",
+          marginTop: "4px",
+          fontWeight: 500,
+        }}
+      >
+        {label}
       </div>
     </div>
   );

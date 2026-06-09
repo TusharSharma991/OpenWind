@@ -1,9 +1,7 @@
 import React, { useState } from "react";
-import { useOne, useList } from "@refinedev/core";
+import { useOne } from "@refinedev/core";
 import { useParams, Link } from "react-router-dom";
 import { fetchWithAuth, API_URL } from "../../lib/api.js";
-
-type EntityType = { id: string; name: string };
 
 type WorkflowState = {
   id: string;
@@ -144,8 +142,6 @@ export function WorkflowDetail(): React.ReactElement {
     resource: "workflows",
     id: id ?? "missing",
   });
-  const { data: etData } = useList<EntityType>({ resource: "entity-types" });
-  const entityTypes = etData?.data ?? [];
 
   const [showAddState, setShowAddState] = useState(false);
   const [stateForm, setStateForm] = useState<AddStateForm>(EMPTY_STATE);
@@ -250,7 +246,6 @@ export function WorkflowDetail(): React.ReactElement {
   }
 
   const workflow = data?.data;
-  const etMap = new Map(entityTypes.map((e) => [e.id, e.name]));
 
   if (isLoading) {
     return (
@@ -315,10 +310,13 @@ export function WorkflowDetail(): React.ReactElement {
               flexWrap: "wrap",
             }}
           >
-            <span className="badge badge-primary">
-              {etMap.get(workflow.entityTypeId) ??
-                workflow.entityTypeId.slice(0, 8) + "…"}
-            </span>
+            <Link
+              to={`/entity-types/${workflow.entityTypeId}`}
+              className="badge badge-primary"
+              style={{ textDecoration: "none" }}
+            >
+              Manage Fields ↗
+            </Link>
             <span style={{ color: "var(--text-muted)", fontSize: "13px" }}>
               {workflow.states.length} states · {workflow.transitions.length}{" "}
               transitions

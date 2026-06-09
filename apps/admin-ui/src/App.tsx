@@ -16,13 +16,13 @@ import { Login } from "./pages/login.js";
 import { AuthCallback } from "./pages/callback.js";
 import { Dashboard } from "./pages/dashboard.js";
 import { Modules } from "./pages/modules.js";
-import { EntityTypes } from "./pages/entity-types/index.js";
 import { EntityTypeDetail } from "./pages/entity-types/detail.js";
 import { EntityInstances } from "./pages/entity-types/instances.js";
 import { EntityInstanceDetail } from "./pages/entity-types/instance-detail.js";
 import { Workflows } from "./pages/workflows/index.js";
 import { WorkflowDetail } from "./pages/workflows/detail.js";
 import { CreateWorkflow } from "./pages/workflows/create.js";
+import { AdminRecords } from "./pages/records/index.js";
 import { Settings } from "./pages/settings.js";
 import { CustomerDashboard } from "./pages/customer/dashboard.js";
 import { CustomerRecordList } from "./pages/customer/record-list.js";
@@ -41,10 +41,9 @@ export function App(): React.ReactElement {
           { name: "dashboard", list: "/", meta: { label: "Dashboard" } },
           { name: "modules", list: "/modules", meta: { label: "Templates" } },
           {
-            name: "entity-types",
-            list: "/entity-types",
-            show: "/entity-types/:id",
-            meta: { label: "Entity Types" },
+            name: "records",
+            list: "/records",
+            meta: { label: "Records" },
           },
           {
             name: "workflows",
@@ -59,7 +58,7 @@ export function App(): React.ReactElement {
           <Route path="/login" element={<Login />} />
           <Route path="/auth/callback" element={<AuthCallback />} />
 
-          {/* Protected routes — all wrapped in EntityTypeProvider for customer sidebar + pages */}
+          {/* Protected routes */}
           <Route
             element={
               <Authenticated
@@ -77,7 +76,11 @@ export function App(): React.ReactElement {
             {/* Admin / Agent routes */}
             <Route index element={<Dashboard />} />
             <Route path="/modules" element={<Modules />} />
-            <Route path="/entity-types" element={<EntityTypes />} />
+
+            {/* Records — workflow cards; card click goes to /entity-types/:id/records */}
+            <Route path="/records" element={<AdminRecords />} />
+
+            {/* Entity types — still accessible from workflow detail "Manage Fields" link */}
             <Route path="/entity-types/:id" element={<EntityTypeDetail />} />
             <Route
               path="/entity-types/:id/records"
@@ -87,12 +90,15 @@ export function App(): React.ReactElement {
               path="/entity-types/:id/records/:instanceId"
               element={<EntityInstanceDetail />}
             />
+
+            {/* Workflows */}
             <Route path="/workflows" element={<Workflows />} />
             <Route path="/workflows/new" element={<CreateWorkflow />} />
             <Route path="/workflows/:id" element={<WorkflowDetail />} />
+
             <Route path="/settings" element={<Settings />} />
 
-            {/* Customer routes — prefixed with /records/ to avoid slug conflicts */}
+            {/* Customer routes */}
             <Route path="/home" element={<CustomerDashboard />} />
             <Route path="/records/:typeSlug" element={<CustomerRecordList />} />
             <Route

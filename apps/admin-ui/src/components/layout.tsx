@@ -46,8 +46,8 @@ const ADMIN_NAV = [
     ),
   },
   {
-    route: "/entity-types",
-    label: "Entity Types",
+    route: "/records",
+    label: "Records",
     icon: (
       <svg
         xmlns="http://www.w3.org/2000/svg"
@@ -59,7 +59,7 @@ const ADMIN_NAV = [
         <path
           strokeLinecap="round"
           strokeLinejoin="round"
-          d="M6.429 9.75L2.25 12l4.179 2.25m0-4.5l5.571 3 5.571-3m-11.142 0L2.25 7.5 12 2.25l9.75 5.25-4.179 2.25m0 0L21.75 12l-4.179 2.25m0 0l4.179 2.25L12 21.75 2.25 16.5l4.179-2.25m11.142 0l-5.571 3-5.571-3"
+          d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 00-1.883 2.542l.857 6a2.25 2.25 0 002.227 1.932H19.05a2.25 2.25 0 002.227-1.932l.857-6a2.25 2.25 0 00-1.883-2.542m-16.5 0V6A2.25 2.25 0 016 3.75h3.879a1.5 1.5 0 011.06.44l2.122 2.12a1.5 1.5 0 001.06.44H18A2.25 2.25 0 0120.25 9v.776"
         />
       </svg>
     ),
@@ -176,13 +176,6 @@ export function Layout({
 
   const name = identity?.name ?? (isCustomer ? "User" : "Admin");
   const email = identity?.email ?? "";
-  const _initials =
-    name
-      .split(" ")
-      .slice(0, 2)
-      .map((w: string) => w[0])
-      .join("")
-      .toUpperCase() || "U";
 
   function handleLogout(): void {
     if (isCustomer) {

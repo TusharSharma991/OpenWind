@@ -31,16 +31,8 @@ export class ModuleService {
       {
         slug: "helpdesk",
         name: "Helpdesk",
-        description: "Support ticket and customer knowledge base management",
-        version: "0.0.1",
-        isSystem: false,
-        minPlan: "standard",
-      },
-      {
-        slug: "reimbursements",
-        name: "Reimbursements",
         description:
-          "Expense claim and receipt submission and approval workflows",
+          "Support ticket management with priority, SLA, and category tracking",
         version: "0.0.1",
         isSystem: false,
         minPlan: "standard",
@@ -48,7 +40,50 @@ export class ModuleService {
       {
         slug: "crm",
         name: "CRM",
-        description: "Sales pipeline, contacts, deals, and activity tracking",
+        description: "Sales pipeline and deal tracking from lead to close",
+        version: "0.0.1",
+        isSystem: false,
+        minPlan: "standard",
+      },
+      {
+        slug: "hrms",
+        name: "HRMS",
+        description: "Leave request and employee workflow management",
+        version: "0.0.1",
+        isSystem: false,
+        minPlan: "standard",
+      },
+      {
+        slug: "reimbursements",
+        name: "Reimbursements",
+        description: "Expense claim submission, approval, and payment tracking",
+        version: "0.0.1",
+        isSystem: false,
+        minPlan: "standard",
+      },
+      {
+        slug: "projects",
+        name: "Projects",
+        description:
+          "Task and project tracking with backlog, sprint, and review stages",
+        version: "0.0.1",
+        isSystem: false,
+        minPlan: "standard",
+      },
+      {
+        slug: "invoicing",
+        name: "Invoicing",
+        description:
+          "Invoice lifecycle from draft through sent, viewed, to paid",
+        version: "0.0.1",
+        isSystem: false,
+        minPlan: "standard",
+      },
+      {
+        slug: "procurement",
+        name: "Procurement",
+        description:
+          "Purchase order requests, approvals, and delivery tracking",
         version: "0.0.1",
         isSystem: false,
         minPlan: "standard",

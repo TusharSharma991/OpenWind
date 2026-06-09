@@ -1,6 +1,6 @@
 # Platform Roadmap Tracker
 
-**Last updated:** 2026-05-22
+**Last updated:** 2026-06-09
 **Team model:** AI-first (Claude Code as primary engineering partner)
 **Tracking:** Update `% done` and `Status` each session. Log milestones in [week-log.md](week-log.md).
 
@@ -51,12 +51,12 @@
 **Target:** Week 9–16 from project start (~2026-06-02 to 2026-06-27)
 **Exit test:** Penetration test (tenant isolation) passes before any pilot is onboarded.
 
-| ID  | Feature / Track                            | GH Issue(s)            | Owner | Status         | %   | Notes                                                                                                            |
-| --- | ------------------------------------------ | ---------------------- | ----- | -------------- | --- | ---------------------------------------------------------------------------------------------------------------- |
-| 2A  | Platform Services — Novu, files, audit log | [#12](../../issues/12) | —     | 🔴 Not started | 0   | Notifications, file upload/download, audit log table + read API, view_configs, OpenAPI spec                      |
-| 2B  | Module system + standard module configs    | [#13](../../issues/13) | —     | 🔴 Not started | 0   | Module registry, seed runner, 7 module seed files (helpdesk, CRM, reimb, projects, HRMS, invoicing, procurement) |
-| 2C  | Customer portal + agent UI                 | [#14](../../issues/14) | —     | 🔴 Not started | 0   | Config-driven generic views, Refine, entity list/detail/form from view_configs                                   |
-| 2D  | No-code builders + reporting               | [#15](../../issues/15) | —     | 🔴 Not started | 0   | Automation builder UI, workflow editor UI, Metabase embed                                                        |
+| ID  | Feature / Track                            | GH Issue(s)            | Owner       | Status         | %   | Notes                                                                                                                                                                                                                                                 |
+| --- | ------------------------------------------ | ---------------------- | ----------- | -------------- | --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2A  | Platform Services — Novu, files, audit log | [#12](../../issues/12) | PrabhuVijit | 🟡 In progress | 65  | Phase 1 (packages): notifications, files, audit packages complete. Phase 2 (API+worker): file routes, av-scan worker, file-cleanup worker, audit route, view-config routes, prefs routes, openapi spec. Phase 3 (T19–T23): integration tests pending. |
+| 2B  | Module system + standard module configs    | [#13](../../issues/13) | —           | 🔴 Not started | 0   | Module registry, seed runner, 7 module seed files (helpdesk, CRM, reimb, projects, HRMS, invoicing, procurement)                                                                                                                                      |
+| 2C  | Customer portal + agent UI                 | [#14](../../issues/14) | —           | 🔴 Not started | 0   | Config-driven generic views, Refine, entity list/detail/form from view_configs                                                                                                                                                                        |
+| 2D  | No-code builders + reporting               | [#15](../../issues/15) | —           | 🔴 Not started | 0   | Automation builder UI, workflow editor UI, Metabase embed                                                                                                                                                                                             |
 
 ### Phase 2 sub-items (2B module seeds)
 

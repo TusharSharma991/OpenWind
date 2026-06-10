@@ -3,11 +3,21 @@ import { eq } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import type { Context, Next, MiddlewareHandler } from "hono";
 import type { DbOrTx } from "@platform/db";
-import { apiKeys, tenantUsers, withTenantContext } from "@platform/db";
+import {
+  db,
+  apiKeys,
+  tenants,
+  tenantUsers,
+  withTenantContext,
+} from "@platform/db";
 import { logger } from "@platform/logger";
 import { verifyJwt, extractAuthContext } from "./jwks.js";
 import { introspectToken } from "./introspection.js";
 import type { AuthContext } from "./types.js";
+import {
+  getCachedTenantStatus,
+  setCachedTenantStatus,
+} from "./tenant-status-cache.js";
 
 type AuthVariables = { Variables: { auth: AuthContext } };
 
@@ -63,6 +73,26 @@ export const requireAuth = (db?: DbOrTx): MiddlewareHandler =>
             401,
           );
         }
+        const apiKeyTenantStatus = await resolveTenantStatus(auth.tenantId, db);
+        if (apiKeyTenantStatus === "suspended") {
+          return c.json(
+            {
+              error: "TENANT_SUSPENDED",
+              message:
+                "This account has been suspended. Please contact support.",
+            },
+            403,
+          );
+        }
+        if (
+          apiKeyTenantStatus === "deleted" ||
+          apiKeyTenantStatus === "purged"
+        ) {
+          return c.json(
+            { error: "TENANT_NOT_FOUND", message: "Not found" },
+            404,
+          );
+        }
         c.set("auth", auth);
         await next();
         return;
@@ -83,6 +113,22 @@ export const requireAuth = (db?: DbOrTx): MiddlewareHandler =>
       }
 
       c.set("auth", auth);
+
+      // Check that the tenant is active before proceeding.
+      const tenantStatus = await resolveTenantStatus(auth.tenantId, db);
+      if (tenantStatus === "suspended") {
+        return c.json(
+          {
+            error: "TENANT_SUSPENDED",
+            message: "This account has been suspended. Please contact support.",
+          },
+          403,
+        );
+      }
+      if (tenantStatus === "deleted" || tenantStatus === "purged") {
+        return c.json({ error: "TENANT_NOT_FOUND", message: "Not found" }, 404);
+      }
+
       // Upsert the verified user into tenant_users BEFORE calling next().
       // This must complete before the route handler runs so that
       // validateUserRefs() can find the user on their very first request
@@ -167,6 +213,30 @@ export const requireIntrospection = (): MiddlewareHandler =>
   );
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
+
+/**
+ * Return the tenant's current status, using a 30 s in-process cache.
+ * The tenants table has no RLS, so we query with the plain db instance.
+ * Returns "deleted" if the tenant row does not exist.
+ */
+async function resolveTenantStatus(
+  tenantId: string,
+  dbHandle?: DbOrTx,
+): Promise<string> {
+  const cached = getCachedTenantStatus(tenantId);
+  if (cached !== undefined) return cached;
+
+  const activeDb = dbHandle ?? db;
+  const [row] = await activeDb
+    .select({ status: tenants.status })
+    .from(tenants)
+    .where(eq(tenants.id, tenantId))
+    .limit(1);
+
+  const status = row?.status ?? "deleted";
+  setCachedTenantStatus(tenantId, status);
+  return status;
+}
 
 async function resolveApiKey(
   db: DbOrTx,

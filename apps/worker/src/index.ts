@@ -5,6 +5,7 @@ import { startSlaScheduler, stopSlaScheduler } from "./sla-scheduler.js";
 import { slaBreacher } from "./sla-breacher.js";
 import { stopAvScanWorker } from "./av-scan.js";
 import { scheduleFileCleanup, stopFileCleanupWorker } from "./file-cleanup.js";
+import { stopTenantPurgeWorker } from "./tenant-purge.js";
 
 logger.info("Worker process starting");
 
@@ -27,6 +28,7 @@ async function shutdown(): Promise<void> {
     slaBreacher.close(),
     stopAvScanWorker(),
     stopFileCleanupWorker(),
+    stopTenantPurgeWorker(),
   ]);
   process.exit(0);
 }

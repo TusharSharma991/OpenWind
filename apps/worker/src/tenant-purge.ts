@@ -7,7 +7,7 @@
  * FK-safe deletion order (children before parents):
  *   files (DB rows) → workflowTransitions → workflowStates → workflowEvents
  *   → workflows → entityRelations → entityInstances → entityFields → entityTypes
- *   → automationExecutions → automationRules → outboxEvents
+ *   → automationExecutions → automationRules → deadLetterEvents → outboxEvents
  *   → connectorCredentials → apiKeys → tenantUsers → viewConfigs
  *   [audit log retained for compliance]
  *   → tenant.status = 'purged'
@@ -49,6 +49,7 @@ import {
   automationRules,
   automationExecutions,
   outboxEvents,
+  deadLetterEvents,
 } from "@platform/db";
 
 const QUEUE_NAME = "tenant-purge";
@@ -149,7 +150,10 @@ export const tenantPurgeWorker = new Worker<PurgeJobData>(
         .where(eq(automationRules.tenantId, tenantId));
       logger.info({ tenantId }, "tenant-purge: automation data deleted");
 
-      // Outbox
+      // Outbox + dead-letter queue
+      await tx
+        .delete(deadLetterEvents)
+        .where(eq(deadLetterEvents.tenantId, tenantId));
       await tx.delete(outboxEvents).where(eq(outboxEvents.tenantId, tenantId));
 
       // Credentials + API keys

@@ -30,7 +30,7 @@ vi.mock("./introspection.js", () => ({
   introspectToken: (...args: unknown[]) => mockIntrospectToken(...args),
 }));
 
-// Module-level db used by resolveTenantStatus — return active status by default.
+// Module-level db fallback for resolveTenantStatus (JWT path passes no db handle).
 const mockModuleDbSelect = vi.fn(() => ({
   from: vi.fn(() => ({
     where: vi.fn(() => ({
@@ -150,14 +150,26 @@ describe("requireAuth", () => {
       tenantId: "tenant-abc",
       scopes: ["read"],
     };
-    const mockDb = {
-      select: vi.fn(() => ({
+    const mockDbSelect = vi
+      .fn()
+      // First call: resolveApiKey lookup
+      .mockReturnValueOnce({
         from: vi.fn(() => ({
           where: vi.fn(() => ({
             limit: vi.fn().mockResolvedValue([fakeRow]),
           })),
         })),
-      })),
+      })
+      // Second call: resolveTenantStatus lookup
+      .mockReturnValueOnce({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            limit: vi.fn().mockResolvedValue([{ status: "active" }]),
+          })),
+        })),
+      });
+    const mockDb = {
+      select: mockDbSelect,
       update: vi.fn(() => ({
         set: vi.fn(() => ({
           where: vi.fn().mockResolvedValue([]),

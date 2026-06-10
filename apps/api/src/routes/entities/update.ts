@@ -17,11 +17,15 @@ export const updateEntityHandler = factory.createHandlers(
   zValidator("json", UpdateEntitySchema),
   async (c) => {
     const id = c.req.param("id") ?? "";
-    const { tenantId } = c.get("auth");
+    const { tenantId, userId } = c.get("auth");
     const input = c.req.valid("json");
 
     try {
-      const instance = await updateEntity(db, tenantId, id, input);
+      const instance = await updateEntity(db, tenantId, id, {
+        ...input,
+        actorId: userId,
+        actorType: "user",
+      });
       return c.json({ data: instance });
     } catch (err) {
       return handleEntityError(c, err);

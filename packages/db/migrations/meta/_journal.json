@@ -85,6 +85,27 @@
       "when": 1778749338310,
       "tag": "0009_analytics_user_grants",
       "breakpoints": false
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1778749338311,
+      "tag": "0010_files",
+      "breakpoints": false
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1778749338312,
+      "tag": "0011_admin_audit_log",
+      "breakpoints": false
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1778749338313,
+      "tag": "0012_view_configs",
+      "breakpoints": false
     }
   ]
 }

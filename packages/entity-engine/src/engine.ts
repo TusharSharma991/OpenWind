@@ -34,6 +34,8 @@ import {
   resolveLookupFields,
   resolveLookupFieldsBatch,
 } from "./lookup-resolver.js";
+import { fireEntityAuditHook } from "./audit-hook.js";
+import type { AuditFieldSensitivity } from "./audit-hook.js";
 
 type EntityValidator = (
   fields: Record<string, unknown>,
@@ -127,6 +129,22 @@ export async function createEntity(
     },
     "Entity created",
   );
+
+  await fireEntityAuditHook({
+    db,
+    tenantId,
+    actorId: input.createdBy ?? "system",
+    actorType: input.createdBy !== undefined ? "user" : "system",
+    resourceType: entityType.name,
+    resourceId: row.id,
+    action: "created",
+    beforeSnapshot: null,
+    afterSnapshot: row.fields as Record<string, unknown>,
+    entityFields: allFields.map((f) => ({
+      name: f.name,
+      sensitivity: f.sensitivity,
+    })),
+  });
 
   return rowToInstance(row);
 }
@@ -288,6 +306,24 @@ export async function updateEntity(
     if (!row) throw new EntityError("ENTITY_NOT_FOUND", { instanceId });
 
     logger.info({ tenantId, instanceId }, "Entity updated");
+
+    await fireEntityAuditHook({
+      db,
+      tenantId,
+      actorId: input.actorId ?? "system",
+      actorType:
+        input.actorType ?? (input.actorId !== undefined ? "user" : "system"),
+      resourceType: entityType.name,
+      resourceId: instanceId,
+      action: "updated",
+      beforeSnapshot: existing.fields as Record<string, unknown>,
+      afterSnapshot: row.fields as Record<string, unknown>,
+      entityFields: allFields.map((f) => ({
+        name: f.name,
+        sensitivity: f.sensitivity,
+      })),
+    });
+
     return rowToInstance(row);
   }
 
@@ -315,9 +351,11 @@ export async function deleteEntity(
   db: DbOrTx,
   tenantId: string,
   instanceId: string,
+  actorId?: string,
 ): Promise<void> {
+  // Load the full row so we can capture the before-snapshot for the audit log.
   const [row] = await db
-    .select({ id: entityInstances.id })
+    .select()
     .from(entityInstances)
     .where(
       and(
@@ -341,6 +379,27 @@ export async function deleteEntity(
     );
 
   logger.info({ tenantId, instanceId }, "Entity soft-deleted");
+
+  const [entityType, allFields] = await Promise.all([
+    loadEntityType(db, row.entityTypeId),
+    loadEntityFields(db, row.entityTypeId, tenantId),
+  ]);
+
+  await fireEntityAuditHook({
+    db,
+    tenantId,
+    actorId: actorId ?? "system",
+    actorType: actorId !== undefined ? "user" : "system",
+    resourceType: entityType.name,
+    resourceId: instanceId,
+    action: "deleted",
+    beforeSnapshot: row.fields as Record<string, unknown>,
+    afterSnapshot: null,
+    entityFields: allFields.map((f) => ({
+      name: f.name,
+      sensitivity: f.sensitivity,
+    })),
+  });
 }
 
 export async function listEntities(
@@ -550,6 +609,12 @@ export async function bulkCreateEntities(
 ): Promise<BulkCreateResult> {
   const errors: BulkCreateResult["errors"] = [];
   const toInsert: Array<typeof entityInstances.$inferInsert> = [];
+  // Parallel array to toInsert — captures audit context for each valid item
+  const auditMeta: Array<{
+    entityTypeName: string;
+    createdBy: string | null;
+    entityFields: Array<{ name: string; sensitivity: AuditFieldSensitivity }>;
+  }> = [];
 
   for (const [i, input] of inputs.entries()) {
     const schema = await getValidationSchema(
@@ -591,6 +656,16 @@ export async function bulkCreateEntities(
       createdBy: input.createdBy ?? null,
       assignedTo: input.assignedTo ?? null,
     });
+
+    // Save audit context for this item (parallel to toInsert)
+    auditMeta.push({
+      entityTypeName: entityType.name,
+      createdBy: input.createdBy ?? null,
+      entityFields: allFields.map((f) => ({
+        name: f.name,
+        sensitivity: f.sensitivity,
+      })),
+    });
   }
 
   if (toInsert.length === 0) {
@@ -600,6 +675,24 @@ export async function bulkCreateEntities(
   const rows = await db.insert(entityInstances).values(toInsert).returning();
 
   const created = rows.map(rowToInstance);
+
+  // Fire audit hooks for each created entity
+  for (const [idx, row] of rows.entries()) {
+    const meta = auditMeta[idx];
+    if (!meta) continue;
+    await fireEntityAuditHook({
+      db,
+      tenantId,
+      actorId: meta.createdBy ?? "system",
+      actorType: meta.createdBy !== null ? "user" : "system",
+      resourceType: meta.entityTypeName,
+      resourceId: row.id,
+      action: "created",
+      beforeSnapshot: null,
+      afterSnapshot: row.fields as Record<string, unknown>,
+      entityFields: meta.entityFields,
+    });
+  }
 
   logger.info(
     { tenantId, count: created.length, errorCount: errors.length },
@@ -720,7 +813,26 @@ export async function bulkUpdateEntities(
           )
           .returning();
 
-        if (row) updated.push(rowToInstance(row));
+        if (row) {
+          updated.push(rowToInstance(row));
+          await fireEntityAuditHook({
+            db,
+            tenantId,
+            actorId: input.actorId ?? "system",
+            actorType:
+              input.actorType ??
+              (input.actorId !== undefined ? "user" : "system"),
+            resourceType: entityType.name,
+            resourceId: id,
+            action: "updated",
+            beforeSnapshot: existing.fields as Record<string, unknown>,
+            afterSnapshot: row.fields as Record<string, unknown>,
+            entityFields: allFields.map((f) => ({
+              name: f.name,
+              sensitivity: f.sensitivity,
+            })),
+          });
+        }
       } else if (input.assignedTo !== undefined) {
         const [row] = await db
           .update(entityInstances)
@@ -733,7 +845,32 @@ export async function bulkUpdateEntities(
           )
           .returning();
 
-        if (row) updated.push(rowToInstance(row));
+        if (row) {
+          updated.push(rowToInstance(row));
+          // Load entity type for audit — not needed for the fields update path
+          // above (entityType is already available there) but needed here.
+          const [bulkEntityType, bulkAllFields] = await Promise.all([
+            loadEntityType(db, existing.entityTypeId),
+            loadEntityFields(db, existing.entityTypeId, tenantId),
+          ]);
+          await fireEntityAuditHook({
+            db,
+            tenantId,
+            actorId: input.actorId ?? "system",
+            actorType:
+              input.actorType ??
+              (input.actorId !== undefined ? "user" : "system"),
+            resourceType: bulkEntityType.name,
+            resourceId: id,
+            action: "updated",
+            beforeSnapshot: existing.fields as Record<string, unknown>,
+            afterSnapshot: row.fields as Record<string, unknown>,
+            entityFields: bulkAllFields.map((f) => ({
+              name: f.name,
+              sensitivity: f.sensitivity,
+            })),
+          });
+        }
       } else {
         updated.push(rowToInstance(existing));
       }
@@ -757,9 +894,14 @@ export async function bulkSetState(
 
   const ids = items.map((item) => item.id);
 
-  // Load all matching instances in one query to verify tenant ownership
+  // Load all matching instances in one query to verify tenant ownership.
+  // Also fetch entityTypeId and currentState for audit hooks.
   const existing = await db
-    .select({ id: entityInstances.id })
+    .select({
+      id: entityInstances.id,
+      entityTypeId: entityInstances.entityTypeId,
+      currentState: entityInstances.currentState,
+    })
     .from(entityInstances)
     .where(
       and(
@@ -769,6 +911,7 @@ export async function bulkSetState(
       ),
     );
 
+  const foundMap = new Map(existing.map((r) => [r.id, r]));
   const foundIds = new Set(existing.map((r) => r.id));
 
   const errors: BulkSetStateResult["errors"] = [];
@@ -809,6 +952,48 @@ export async function bulkSetState(
     updatedIds.push(...rows.map((r) => r.id));
   }
 
+  // Fire audit hooks for each successfully transitioned entity.
+  // Cache entity type metadata by entityTypeId to avoid N+1 queries.
+  const typeCache = new Map<
+    string,
+    {
+      name: string;
+      fields: Array<{ name: string; sensitivity: AuditFieldSensitivity }>;
+    }
+  >();
+
+  for (const item of validItems) {
+    const prior = foundMap.get(item.id);
+    if (!prior) continue;
+
+    if (!typeCache.has(prior.entityTypeId)) {
+      const [et, ef] = await Promise.all([
+        loadEntityType(db, prior.entityTypeId),
+        loadEntityFields(db, prior.entityTypeId, tenantId),
+      ]);
+      typeCache.set(prior.entityTypeId, {
+        name: et.name,
+        fields: ef.map((f) => ({ name: f.name, sensitivity: f.sensitivity })),
+      });
+    }
+
+    const cached = typeCache.get(prior.entityTypeId);
+    if (!cached) continue;
+
+    await fireEntityAuditHook({
+      db,
+      tenantId,
+      actorId: "system",
+      actorType: "system",
+      resourceType: cached.name,
+      resourceId: item.id,
+      action: "transitioned",
+      beforeSnapshot: { currentState: prior.currentState },
+      afterSnapshot: { currentState: item.state },
+      entityFields: cached.fields,
+    });
+  }
+
   logger.info(
     { tenantId, count: updatedIds.length, errorCount: errors.length },
     "Bulk state-set completed",
@@ -824,7 +1009,11 @@ export async function setEntityState(
   state: string,
 ): Promise<EntityInstance> {
   const [existing] = await db
-    .select({ id: entityInstances.id })
+    .select({
+      id: entityInstances.id,
+      entityTypeId: entityInstances.entityTypeId,
+      currentState: entityInstances.currentState,
+    })
     .from(entityInstances)
     .where(
       and(
@@ -851,5 +1040,27 @@ export async function setEntityState(
   if (!row) throw new EntityError("ENTITY_NOT_FOUND", { instanceId });
 
   logger.info({ tenantId, instanceId, state }, "Entity state set");
+
+  const [entityType, allFields] = await Promise.all([
+    loadEntityType(db, existing.entityTypeId),
+    loadEntityFields(db, existing.entityTypeId, tenantId),
+  ]);
+
+  await fireEntityAuditHook({
+    db,
+    tenantId,
+    actorId: "system",
+    actorType: "system",
+    resourceType: entityType.name,
+    resourceId: instanceId,
+    action: "transitioned",
+    beforeSnapshot: { currentState: existing.currentState },
+    afterSnapshot: { currentState: state },
+    entityFields: allFields.map((f) => ({
+      name: f.name,
+      sensitivity: f.sensitivity,
+    })),
+  });
+
   return rowToInstance(row);
 }

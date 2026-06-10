@@ -66,6 +66,9 @@ export type CreateEntityInput = {
 export type UpdateEntityInput = {
   fields?: Record<string, unknown> | undefined;
   assignedTo?: string | null | undefined;
+  /** Actor performing the update — used by the audit hook. */
+  actorId?: string | undefined;
+  actorType?: "user" | "api_key" | "system" | undefined;
 };
 
 export type ListEntitiesInput = {

@@ -6,6 +6,8 @@ export {
   getWorkflowEventLog,
 } from "./engine.js";
 export { evaluateConditionTree } from "./condition-evaluator.js";
+export { redactMetadata, buildSensitivityMap } from "./redact.js";
+export type { FieldSensitivity } from "@platform/entity-engine";
 export {
   createWorkflow,
   getWorkflow,

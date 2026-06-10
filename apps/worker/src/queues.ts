@@ -22,3 +22,18 @@ export const slaQueue = new Queue("sla", {
     backoff: { type: "exponential", delay: 1_000 },
   },
 });
+
+// AV scan queue — processes file upload scans (pending → clean|quarantined|scan_failed)
+// attempts: 5 with exponential backoff (1s, 2s, 4s, 8s, 16s)
+export const avScanQueue = new Queue("av-scan", {
+  connection,
+  defaultJobOptions: {
+    attempts: 5,
+    backoff: { type: "exponential", delay: 1_000 },
+    removeOnComplete: { age: 3_600 }, // 1h
+    removeOnFail: { age: 604_800 }, // 7d
+  },
+});
+
+// File cleanup queue — purges stale pending uploads (runs every 1h via repeatable job)
+export const fileCleanupQueue = new Queue("file-cleanup", { connection });

@@ -13,40 +13,14 @@
  * Requires a live Postgres instance (run with docker compose up -d).
  */
 
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { eq, and } from "drizzle-orm";
 import { db, withTenantContext } from "@platform/db";
 import { files } from "@platform/db";
-
-// ── Mock Redis (isolation tests focus on DB layer — Redis not relevant) ───────
-
-vi.mock("ioredis", () => ({
-  default: vi.fn().mockImplementation(function () {
-    return {
-      on: vi.fn(),
-      disconnect: vi.fn(),
-      lrem: vi.fn().mockResolvedValue(1),
-      lrange: vi.fn().mockResolvedValue([]),
-    };
-  }),
-}));
-
-// ── Mock S3 (no real S3 needed for isolation tests) ───────────────────────────
-
-vi.mock("@aws-sdk/s3-request-presigner", () => ({
-  getSignedUrl: vi.fn().mockResolvedValue("https://s3.example.com/mock"),
-}));
-
-vi.mock("@aws-sdk/client-s3", () => ({
-  S3Client: vi.fn().mockImplementation(function () {
-    return { send: vi.fn().mockResolvedValue(undefined) };
-  }),
-  PutObjectCommand: vi.fn(),
-  GetObjectCommand: vi.fn(),
-  DeleteObjectCommand: vi.fn(),
-}));
-
 import { FileError, deleteFile } from "@platform/files";
+
+// No mocks needed: deleteFile throws FILE_NOT_FOUND before reaching S3/Redis
+// in all cross-tenant paths tested here (wrong tenant_id → DB returns no row).
 
 // ── Test tenant IDs ───────────────────────────────────────────────────────────
 

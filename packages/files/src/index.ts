@@ -264,7 +264,7 @@ export async function confirmUpload(
       "scan",
       { fileId, tenantId, storageKey: file.storageKey },
       {
-        jobId: `av-scan:${fileId}`, // deduplication key — prevents double-enqueue
+        jobId: `av-scan-${fileId}`, // deduplication key — prevents double-enqueue; no colon (BullMQ disallows it)
         attempts: 5,
         backoff: { type: "exponential", delay: 1000 },
         removeOnComplete: { age: 3600 },

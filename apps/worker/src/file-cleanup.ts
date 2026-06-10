@@ -15,7 +15,7 @@
 
 import { Worker, Queue } from "bullmq";
 import { S3Client, DeleteObjectCommand } from "@aws-sdk/client-s3";
-import { lt, eq, and } from "drizzle-orm";
+import { lt, eq, and, or } from "drizzle-orm";
 import { db, files } from "@platform/db";
 import { env } from "@platform/config";
 import { logger } from "@platform/logger";
@@ -23,6 +23,8 @@ import { connection } from "./queues.js";
 
 const STALE_AFTER_HOURS = 24;
 const QUEUE_NAME = "file-cleanup";
+/** Max rows per cleanup run — prevents unbounded memory usage. */
+const BATCH_LIMIT = 500;
 
 // ── S3 client (lazily initialised — avoids top-level instantiation in tests) ──
 
@@ -45,15 +47,27 @@ function getS3(): S3Client {
 async function runCleanup(): Promise<void> {
   const cutoff = new Date(Date.now() - STALE_AFTER_HOURS * 60 * 60 * 1000);
 
+  // Two categories of files to clean up in one query:
+  //  1. scan_status = 'pending' AND created_at < cutoff
+  //     → abandoned uploads (client never called confirmUpload)
+  //  2. scan_status = 'deleted'
+  //     → soft-deleted files whose S3 object deletion failed at delete-time;
+  //        the fire-and-forget in deleteFile() deferred them here.
   const staleFiles = await db
     .select({
       id: files.id,
       tenantId: files.tenantId,
       storageKey: files.storageKey,
-      sizeBytes: files.sizeBytes,
+      scanStatus: files.scanStatus,
     })
     .from(files)
-    .where(and(eq(files.scanStatus, "pending"), lt(files.createdAt, cutoff)));
+    .where(
+      or(
+        and(eq(files.scanStatus, "pending"), lt(files.createdAt, cutoff)),
+        eq(files.scanStatus, "deleted"),
+      ),
+    )
+    .limit(BATCH_LIMIT);
 
   if (staleFiles.length === 0) {
     logger.info("file-cleanup: no stale files found");
@@ -62,7 +76,7 @@ async function runCleanup(): Promise<void> {
 
   logger.info(
     { count: staleFiles.length },
-    "file-cleanup: purging stale pending files",
+    "file-cleanup: processing stale files",
   );
 
   let purged = 0;
@@ -81,17 +95,22 @@ async function runCleanup(): Promise<void> {
       } catch (s3Err) {
         logger.warn(
           { tenantId: file.tenantId, fileId: file.id, err: String(s3Err) },
-          "file-cleanup: S3 deletion failed — continuing with row cleanup",
+          "file-cleanup: S3 deletion failed — will retry next run",
         );
       }
 
-      // Delete the row — quota is implicit (aggregate of active file rows)
+      // Hard-delete the row.  For 'deleted' rows this completes the soft-delete
+      // lifecycle; for 'pending' rows it releases the quota reservation.
       await db.delete(files).where(eq(files.id, file.id));
 
       purged++;
       logger.info(
-        { tenantId: file.tenantId, fileId: file.id },
-        "file-cleanup: stale file purged",
+        {
+          tenantId: file.tenantId,
+          fileId: file.id,
+          scanStatus: file.scanStatus,
+        },
+        "file-cleanup: file purged",
       );
     } catch (err) {
       errors++;

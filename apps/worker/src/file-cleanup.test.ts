@@ -84,10 +84,13 @@ function mockSelect(rows: unknown[]) {
     select: vi.fn(),
     from: vi.fn(),
     where: vi.fn(),
+    // The cleanup query now chains .limit(BATCH_LIMIT) after .where(...)
+    limit: vi.fn(),
   };
   chain.select.mockReturnValue(chain);
   chain.from.mockReturnValue(chain);
-  chain.where.mockResolvedValue(rows);
+  chain.where.mockReturnValue(chain);
+  chain.limit.mockResolvedValue(rows);
   mockDbSelect.mockReturnValue(chain);
   return chain;
 }

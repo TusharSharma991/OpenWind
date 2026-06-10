@@ -75,6 +75,17 @@ import {
 } from "@platform/files";
 import { filesRouter } from "./index.js";
 
+// ── UUID constants ─────────────────────────────────────────────────────────────
+
+/** A valid UUID used as a stand-in for an existing file in URL params. */
+const EXISTING_FILE_ID = "aaaaaaaa-bbbb-4000-8000-111111111111";
+/** A valid UUID used as a stand-in for a non-existent file in URL params. */
+const MISSING_FILE_ID = "cccccccc-dddd-4000-8000-222222222222";
+/** A valid UUID for a file whose scan status is pending. */
+const PENDING_FILE_ID = "eeeeeeee-ffff-4000-8000-333333333333";
+/** A valid UUID for a quarantined file. */
+const QUARANTINED_FILE_ID = "11111111-2222-4000-8000-444444444444";
+
 // ── Test app ───────────────────────────────────────────────────────────────────
 
 function buildApp() {
@@ -144,9 +155,25 @@ describe("POST /files", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        originalName: "huge.bin",
-        mimeType: "application/octet-stream",
-        sizeBytes: 200 * 1024 * 1024, // 200 MB
+        originalName: "huge.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 200 * 1024 * 1024, // 200 MB — exceeds 100 MB limit
+        moduleSlug: "docs",
+      }),
+    });
+
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 for disallowed MIME types (allowlist validation)", async () => {
+    const app = buildApp();
+    const res = await app.request("/files", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        originalName: "script.exe",
+        mimeType: "application/x-msdownload",
+        sizeBytes: 1024,
         moduleSlug: "docs",
       }),
     });
@@ -173,7 +200,7 @@ describe("POST /files/:id/complete", () => {
     vi.mocked(confirmUpload).mockResolvedValue(undefined);
 
     const app = buildApp();
-    const res = await app.request("/files/file-uuid-1/complete", {
+    const res = await app.request(`/files/${EXISTING_FILE_ID}/complete`, {
       method: "POST",
     });
 
@@ -188,7 +215,7 @@ describe("POST /files/:id/complete", () => {
     );
 
     const app = buildApp();
-    const res = await app.request("/files/missing/complete", {
+    const res = await app.request(`/files/${MISSING_FILE_ID}/complete`, {
       method: "POST",
     });
 
@@ -206,7 +233,7 @@ describe("GET /files/:id", () => {
     });
 
     const app = buildApp();
-    const res = await app.request("/files/file-uuid-1");
+    const res = await app.request(`/files/${EXISTING_FILE_ID}`);
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data.downloadUrl).toBe("https://s3.example.com/get");
@@ -218,7 +245,7 @@ describe("GET /files/:id", () => {
     );
 
     const app = buildApp();
-    const res = await app.request("/files/missing");
+    const res = await app.request(`/files/${MISSING_FILE_ID}`);
     expect(res.status).toBe(404);
   });
 
@@ -228,7 +255,7 @@ describe("GET /files/:id", () => {
     );
 
     const app = buildApp();
-    const res = await app.request("/files/pending-file");
+    const res = await app.request(`/files/${PENDING_FILE_ID}`);
     expect(res.status).toBe(422);
   });
 
@@ -238,7 +265,7 @@ describe("GET /files/:id", () => {
     );
 
     const app = buildApp();
-    const res = await app.request("/files/quarantined-file");
+    const res = await app.request(`/files/${QUARANTINED_FILE_ID}`);
     expect(res.status).toBe(422);
   });
 });
@@ -250,7 +277,9 @@ describe("DELETE /files/:id", () => {
     vi.mocked(deleteFile).mockResolvedValue(undefined);
 
     const app = buildApp();
-    const res = await app.request("/files/file-uuid-1", { method: "DELETE" });
+    const res = await app.request(`/files/${EXISTING_FILE_ID}`, {
+      method: "DELETE",
+    });
     expect(res.status).toBe(204);
   });
 
@@ -258,7 +287,9 @@ describe("DELETE /files/:id", () => {
     vi.mocked(deleteFile).mockRejectedValue(new FileError("FILE_NOT_FOUND"));
 
     const app = buildApp();
-    const res = await app.request("/files/missing", { method: "DELETE" });
+    const res = await app.request(`/files/${MISSING_FILE_ID}`, {
+      method: "DELETE",
+    });
     expect(res.status).toBe(404);
   });
 });

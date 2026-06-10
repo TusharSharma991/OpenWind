@@ -119,16 +119,18 @@ describe("file upload flow integration", () => {
       .where(eq(files.id, createdFileId));
   });
 
-  it("T22-5: deleteFile removes the file row and subsequent download throws FILE_NOT_FOUND", async () => {
+  it("T22-5: deleteFile soft-deletes the file row and subsequent download throws FILE_NOT_FOUND", async () => {
     await deleteFile(db, TENANT_ID, createdFileId);
 
-    const rows = await db
-      .select({ id: files.id })
+    // deleteFile is a soft delete — row stays with scan_status = 'deleted'
+    const [row] = await db
+      .select({ scanStatus: files.scanStatus })
       .from(files)
       .where(eq(files.id, createdFileId));
 
-    expect(rows).toHaveLength(0);
+    expect(row?.scanStatus).toBe("deleted");
 
+    // getDownloadUrl treats 'deleted' as FILE_NOT_FOUND
     await expect(
       getDownloadUrl(db, TENANT_ID, createdFileId),
     ).rejects.toBeInstanceOf(FileError);

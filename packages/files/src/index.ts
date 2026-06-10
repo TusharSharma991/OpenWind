@@ -23,6 +23,7 @@ import { randomUUID } from "node:crypto";
 import {
   S3Client,
   DeleteObjectCommand,
+  DeleteObjectsCommand,
   GetObjectCommand,
   PutObjectCommand,
 } from "@aws-sdk/client-s3";
@@ -353,4 +354,40 @@ export async function deleteFile(
     });
 
   logger.info({ tenantId, fileId }, "files: file soft-deleted");
+}
+
+/**
+ * Batch-delete S3 objects by storage key.
+ * Used by the tenant-purge worker for GDPR hard-deletion.
+ * Processes in chunks of 1000 (S3 DeleteObjects limit).
+ * Errors per-chunk are caught and logged but do not propagate —
+ * the caller should treat S3 failures as a storage-leak warning, not fatal.
+ */
+export async function deleteTenantFiles(storageKeys: string[]): Promise<void> {
+  if (storageKeys.length === 0) return;
+  const s3 = getS3();
+  const CHUNK = 1000;
+  for (let i = 0; i < storageKeys.length; i += CHUNK) {
+    const chunk = storageKeys.slice(i, i + CHUNK);
+    await s3
+      .send(
+        new DeleteObjectsCommand({
+          Bucket: env.S3_BUCKET,
+          Delete: {
+            Objects: chunk.map((Key) => ({ Key })),
+            Quiet: true,
+          },
+        }),
+      )
+      .catch((err: unknown) => {
+        logger.warn(
+          { count: chunk.length, err: String(err) },
+          "files: batch S3 deletion failed — storage may leak",
+        );
+      });
+  }
+  logger.info(
+    { count: storageKeys.length },
+    "files: tenant S3 objects deleted",
+  );
 }

@@ -14,10 +14,16 @@ export const tenants = pgTable("tenants", {
   name: text("name").notNull(),
   slug: text("slug").notNull().unique(),
   plan: text("plan").default("standard").notNull(),
-  // Lifecycle: provisioning → active → suspended → deleted
+  // Lifecycle: provisioning → active → suspended → deleted → purged
   // text + CHECK (see migration 0001) so new states don't require ALTER TYPE
   status: text("status").default("active").notNull(),
   config: jsonb("config").default({}).notNull(),
+  /** Set when status → suspended; cleared on reactivation. */
+  suspendedAt: timestamp("suspended_at", { withTimezone: true }),
+  /** When the GDPR purge job runs (default 30 days after deletion request). */
+  deletionScheduledAt: timestamp("deletion_scheduled_at", {
+    withTimezone: true,
+  }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),

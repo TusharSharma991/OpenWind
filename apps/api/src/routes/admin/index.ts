@@ -5,11 +5,27 @@ import {
   getViewConfigHandler,
   updateViewConfigHandler,
 } from "./view-configs.js";
+import {
+  listTenantsHandlers,
+  createTenantHandlers,
+  getTenantHandlers,
+  suspendTenantHandlers,
+  reactivateTenantHandlers,
+  deleteTenantHandlers,
+} from "./tenants.js";
 
 const router = new Hono<{ Variables: { auth: AuthContext } }>();
 
 router.get("/audit", ...getAuditLogHandler);
 router.get("/view-configs/:entityType", ...getViewConfigHandler);
 router.patch("/view-configs/:entityType", ...updateViewConfigHandler);
+
+// Tenant lifecycle
+router.get("/tenants", ...listTenantsHandlers);
+router.post("/tenants", ...createTenantHandlers);
+router.get("/tenants/:id", ...getTenantHandlers);
+router.patch("/tenants/:id/suspend", ...suspendTenantHandlers);
+router.patch("/tenants/:id/reactivate", ...reactivateTenantHandlers);
+router.delete("/tenants/:id", ...deleteTenantHandlers);
 
 export { router as adminRouter };

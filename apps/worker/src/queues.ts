@@ -37,3 +37,8 @@ export const avScanQueue = new Queue("av-scan", {
 
 // File cleanup queue — purges stale pending uploads (runs every 1h via repeatable job)
 export const fileCleanupQueue = new Queue("file-cleanup", { connection });
+
+// Tenant purge queue — hard-deletes all tenant data after the GDPR delay expires.
+// Jobs are added by the API's tenant lifecycle service with a configurable delay
+// (default 30 days). concurrency=1 in the worker prevents DB contention.
+export const tenantPurgeQueue = new Queue("tenant-purge", { connection });

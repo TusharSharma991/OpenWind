@@ -73,7 +73,7 @@ export const requireAuth = (db?: DbOrTx): MiddlewareHandler =>
             401,
           );
         }
-        const apiKeyTenantStatus = await resolveTenantStatus(auth.tenantId);
+        const apiKeyTenantStatus = await resolveTenantStatus(auth.tenantId, db);
         if (apiKeyTenantStatus === "suspended") {
           return c.json(
             {
@@ -115,7 +115,7 @@ export const requireAuth = (db?: DbOrTx): MiddlewareHandler =>
       c.set("auth", auth);
 
       // Check that the tenant is active before proceeding.
-      const tenantStatus = await resolveTenantStatus(auth.tenantId);
+      const tenantStatus = await resolveTenantStatus(auth.tenantId, db);
       if (tenantStatus === "suspended") {
         return c.json(
           {
@@ -219,16 +219,19 @@ export const requireIntrospection = (): MiddlewareHandler =>
  * The tenants table has no RLS, so we query with the plain db instance.
  * Returns "deleted" if the tenant row does not exist.
  */
-async function resolveTenantStatus(tenantId: string): Promise<string> {
+async function resolveTenantStatus(
+  tenantId: string,
+  dbHandle?: DbOrTx,
+): Promise<string> {
   const cached = getCachedTenantStatus(tenantId);
   if (cached !== undefined) return cached;
 
-  const [row] = await db
+  const activeDb = dbHandle ?? db;
+  const [row] = await activeDb
     .select({ status: tenants.status })
     .from(tenants)
     .where(eq(tenants.id, tenantId))
-    .limit(1)
-    .catch(() => [] as Array<{ status: string }>);
+    .limit(1);
 
   const status = row?.status ?? "deleted";
   setCachedTenantStatus(tenantId, status);

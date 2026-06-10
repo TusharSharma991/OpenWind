@@ -1,71 +1,23 @@
 /**
  * Upload flow integration test — T22.
  *
- * Tests the full file lifecycle against a real database:
+ * Tests the full file lifecycle against a real database and real external
+ * services (MinIO for S3, Redis for BullMQ).  No mocks — this is a true
+ * integration test.
+ *
  *   1. initiateUpload  — creates a file row in "pending" state + presigned upload URL
- *   2. confirmUpload   — marks the row as completed (scan_status remains pending until AV)
+ *   2. confirmUpload   — enqueues an AV-scan job (scan_status stays "pending")
  *   3. getDownloadUrl  — returns a presigned download URL for a clean file
- *   4. deleteFile      — removes the row; subsequent calls throw FILE_NOT_FOUND
+ *   4. deleteFile      — soft-deletes the row; subsequent calls throw FILE_NOT_FOUND
  *
- * S3 and Redis are mocked. BullMQ queue is mocked.
- * DB operations use the real test database.
- *
- * Requires a live Postgres instance (run with docker compose up -d).
+ * Requires docker compose services: Postgres, MinIO (S3), Redis.
  */
 
-import { describe, it, expect, afterAll, vi } from "vitest";
+import { describe, it, expect, afterAll } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "@platform/db";
 import { files } from "@platform/db";
-
-// ── Mock S3 (presigned URL generation) ───────────────────────────────────────
-
-const MOCK_UPLOAD_URL = "https://s3.example.com/presigned-upload";
-const MOCK_DOWNLOAD_URL = "https://s3.example.com/presigned-download";
-
-vi.mock("@aws-sdk/s3-request-presigner", () => ({
-  getSignedUrl: vi
-    .fn()
-    .mockResolvedValueOnce(MOCK_UPLOAD_URL)
-    .mockResolvedValue(MOCK_DOWNLOAD_URL),
-}));
-
-vi.mock("@aws-sdk/client-s3", () => ({
-  S3Client: vi.fn().mockImplementation(function () {
-    return { send: vi.fn().mockResolvedValue(undefined) };
-  }),
-  PutObjectCommand: vi.fn(),
-  GetObjectCommand: vi.fn(),
-  DeleteObjectCommand: vi.fn(),
-}));
-
-// ── Mock Redis (used by confirmUpload to dequeue the scan job) ────────────────
-
-const mockRedis = {
-  lrem: vi.fn().mockResolvedValue(1),
-  lrange: vi.fn().mockResolvedValue([]),
-};
-
-vi.mock("ioredis", () => ({
-  default: vi.fn().mockImplementation(function () {
-    return { ...mockRedis, on: vi.fn(), disconnect: vi.fn() };
-  }),
-}));
-
-// ── Mock BullMQ (prevent Redis connection) ────────────────────────────────────
-
-vi.mock("bullmq", () => ({
-  Queue: vi.fn().mockImplementation(function () {
-    return {
-      add: vi.fn().mockResolvedValue({ id: "job-1" }),
-      close: vi.fn().mockResolvedValue(undefined),
-    };
-  }),
-  Worker: vi.fn().mockImplementation(function () {
-    return { on: vi.fn(), close: vi.fn().mockResolvedValue(undefined) };
-  }),
-}));
-
+import Redis from "ioredis";
 import {
   initiateUpload,
   confirmUpload,
@@ -80,11 +32,13 @@ const TENANT_ID = "cccccccc-1111-4000-c000-000000000001";
 const USER_ID = "cccccccc-1111-4000-c000-000000000010";
 
 let createdFileId: string;
+let redis: InstanceType<typeof Redis>;
 
 // ── Teardown ──────────────────────────────────────────────────────────────────
 
 afterAll(async () => {
   await db.delete(files).where(eq(files.tenantId, TENANT_ID));
+  await redis?.quit();
 });
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -103,7 +57,9 @@ describe("file upload flow integration", () => {
     );
 
     expect(result.fileId).toBeTruthy();
-    expect(result.uploadUrl).toBe(MOCK_UPLOAD_URL);
+    // Real MinIO returns a presigned URL — just verify it's a URL string
+    expect(result.uploadUrl).toMatch(/^https?:\/\//);
+    expect(result.uploadUrlExpiresAt).toBeInstanceOf(Date);
 
     createdFileId = result.fileId;
 
@@ -116,10 +72,10 @@ describe("file upload flow integration", () => {
     expect(row?.tenantId).toBe(TENANT_ID);
   });
 
-  it("T22-2: confirmUpload marks the file as still pending (awaiting AV scan)", async () => {
-    // confirmUpload requires a Redis client for queue coordination
-    const Redis = (await import("ioredis")).default;
-    const redis = new Redis();
+  it("T22-2: confirmUpload enqueues an AV-scan job (scan_status stays pending until worker runs)", async () => {
+    // Connect to real Redis (running in CI docker compose)
+    redis = new Redis({ lazyConnect: true });
+    await redis.connect();
 
     await confirmUpload(db, redis, TENANT_ID, createdFileId);
 
@@ -133,7 +89,7 @@ describe("file upload flow integration", () => {
   });
 
   it("T22-3: getDownloadUrl returns a presigned URL for a clean file", async () => {
-    // Manually mark as clean (AV worker would normally do this)
+    // Manually mark as clean (the AV worker would normally do this)
     await db
       .update(files)
       .set({ scanStatus: "clean" })
@@ -141,7 +97,8 @@ describe("file upload flow integration", () => {
 
     const result = await getDownloadUrl(db, TENANT_ID, createdFileId);
 
-    expect(result.downloadUrl).toBe(MOCK_DOWNLOAD_URL);
+    // Real MinIO returns a presigned URL — verify it's a URL string
+    expect(result.downloadUrl).toMatch(/^https?:\/\//);
     expect(result.downloadUrlExpiresAt).toBeInstanceOf(Date);
   });
 

@@ -5,6 +5,31 @@
 
 ---
 
+## 2026-06-10 — Tenant lifecycle (issue #5 items 1+2); PR #86 open
+
+**Session type:** Implementation
+**Branch state:** `feat/PLAT-5-tenant-lifecycle`, PR #86 open
+
+### Completed this session
+
+**Issue #5 — Tenant lifecycle, items 1+2 (item 3 outbox retention deferred)**
+
+- **Migration 0013**: `suspended_at` and `deletion_scheduled_at` columns on `tenants`; partial index `tenants_deletion_due_idx` for purge worker
+- **`packages/auth` — tenant status cache**: 30 s TTL Map-based cache (`tenant-status-cache.ts`); `invalidateTenantStatusCache` exported; auth middleware enforces 403 (suspended) / 404 (deleted / purged) on every authenticated request
+- **`apps/api` — tenant-lifecycle service**: `provisionTenant`, `suspendTenant`, `reactivateTenant`, `scheduleTenantDeletion`; typed `TenantLifecycleError`; cache invalidated on every transition; 30-day BullMQ purge job enqueued by `scheduleTenantDeletion`
+- **Admin routes** `/admin/tenants` (POST / GET / PATCH suspend+reactivate / DELETE): all gated by `requireRole("superadmin") + requireIntrospection()`
+- **`apps/worker` — tenant-purge BullMQ worker**: concurrency=1; FK-safe deletion order; audit log retained; marks tenant `purged` on completion; idempotent
+- **Tests**: 9 unit tests (lifecycle service); auth middleware mock updated for `db`/`tenants` imports; 38/38 typecheck clean; 21/21 auth tests pass
+
+### Phase snapshot
+
+| Track                                 | Status                                |
+| ------------------------------------- | ------------------------------------- |
+| Issue #2 (SSRF + PII)                 | ✅ Done — PR #85 merged               |
+| Issue #5 (tenant lifecycle items 1+2) | 🟡 PR #86 open — awaiting CI + review |
+
+---
+
 ## 2026-06-09 — 2A Phase 3 complete (T18–T23); PR #85 updated
 
 **Session type:** Implementation

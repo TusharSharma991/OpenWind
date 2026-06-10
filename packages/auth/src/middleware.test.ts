@@ -30,9 +30,28 @@ vi.mock("./introspection.js", () => ({
   introspectToken: (...args: unknown[]) => mockIntrospectToken(...args),
 }));
 
+// Module-level db used by resolveTenantStatus — return active status by default.
+const mockModuleDbSelect = vi.fn(() => ({
+  from: vi.fn(() => ({
+    where: vi.fn(() => ({
+      limit: vi.fn().mockResolvedValue([{ status: "active" }]),
+    })),
+  })),
+}));
+
 vi.mock("@platform/db", () => ({
-  apiKeys: "api_keys_mock",
-  tenantUsers: "tenant_users_mock",
+  apiKeys: {
+    id: "api_keys.id",
+    tenantId: "api_keys.tenant_id",
+    keyHash: "api_keys.key_hash",
+    scopes: "api_keys.scopes",
+  },
+  tenants: { id: "tenants.id", status: "tenants.status" },
+  tenantUsers: {
+    tenantId: "tenant_users.tenant_id",
+    userId: "tenant_users.user_id",
+  },
+  db: { select: mockModuleDbSelect },
   // withTenantContext is called fire-and-forget after JWT auth; mock it as a
   // no-op so tests don't need a real db connection and don't throw 500s.
   withTenantContext: vi.fn().mockResolvedValue(undefined),

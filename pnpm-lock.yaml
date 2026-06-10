@@ -134,6 +134,9 @@ importers:
       "@platform/workflow-engine":
         specifier: workspace:*
         version: link:../../packages/workflow-engine
+      bullmq:
+        specifier: ^5.0.0
+        version: 5.76.8
       hono:
         specifier: ^4.5.0
         version: 4.12.18

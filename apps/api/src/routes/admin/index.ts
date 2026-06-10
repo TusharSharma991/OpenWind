@@ -6,6 +6,7 @@ import {
   updateViewConfigHandler,
 } from "./view-configs.js";
 import {
+  listTenantsHandlers,
   createTenantHandlers,
   getTenantHandlers,
   suspendTenantHandlers,
@@ -20,6 +21,7 @@ router.get("/view-configs/:entityType", ...getViewConfigHandler);
 router.patch("/view-configs/:entityType", ...updateViewConfigHandler);
 
 // Tenant lifecycle
+router.get("/tenants", ...listTenantsHandlers);
 router.post("/tenants", ...createTenantHandlers);
 router.get("/tenants/:id", ...getTenantHandlers);
 router.patch("/tenants/:id/suspend", ...suspendTenantHandlers);

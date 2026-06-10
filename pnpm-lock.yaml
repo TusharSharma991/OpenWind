@@ -205,6 +205,9 @@ importers:
       "@aws-sdk/client-s3":
         specifier: ^3.0.0
         version: 3.1061.0
+      "@platform/audit":
+        specifier: workspace:*
+        version: link:../../packages/audit
       "@platform/automation-engine":
         specifier: workspace:*
         version: link:../../packages/automation-engine

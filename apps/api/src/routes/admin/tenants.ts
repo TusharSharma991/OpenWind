@@ -1,15 +1,15 @@
 /**
  * Admin tenant lifecycle routes — superadmin only.
  *
- * All routes require:
- *  - JWT auth
- *  - 'superadmin' role
- *  - Live token introspection (prevents stolen-JWT attacks on destructive ops)
+ * Mutating routes (POST, PATCH, DELETE) require live token introspection to
+ * prevent stolen-JWT attacks on destructive operations.
+ * Read-only routes (GET) are guarded by requireRole only — no Zitadel
+ * round-trip needed for reads.
  */
 
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { requireAuth, requireRole, requireIntrospection } from "@platform/auth";
 import { db, tenants } from "@platform/db";
 import {
@@ -23,6 +23,75 @@ import {
 import { factory } from "./factory.js";
 
 const TenantIdParamSchema = z.object({ id: z.string().uuid() });
+
+const TENANT_COLUMNS = {
+  id: tenants.id,
+  name: tenants.name,
+  slug: tenants.slug,
+  plan: tenants.plan,
+  status: tenants.status,
+  suspendedAt: tenants.suspendedAt,
+  deletionScheduledAt: tenants.deletionScheduledAt,
+  createdAt: tenants.createdAt,
+  updatedAt: tenants.updatedAt,
+} as const;
+
+// ── GET /admin/tenants ────────────────────────────────────────────────────────
+
+const TenantStatusEnum = z.enum([
+  "provisioning",
+  "active",
+  "suspended",
+  "deleted",
+  "purged",
+]);
+
+const ListTenantsQuerySchema = z.object({
+  status: TenantStatusEnum.optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
+export const listTenantsHandlers = factory.createHandlers(
+  requireAuth(db),
+  requireRole("superadmin"),
+  zValidator("query", ListTenantsQuerySchema),
+  async (c) => {
+    const { status, limit, offset } = c.req.valid("query");
+
+    const rows = await db
+      .select(TENANT_COLUMNS)
+      .from(tenants)
+      .where(status !== undefined ? eq(tenants.status, status) : undefined)
+      .orderBy(asc(tenants.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    return c.json({ data: rows });
+  },
+);
+
+// ── GET /admin/tenants/:id ────────────────────────────────────────────────────
+
+export const getTenantHandlers = factory.createHandlers(
+  requireAuth(db),
+  requireRole("superadmin"),
+  zValidator("param", TenantIdParamSchema),
+  async (c) => {
+    const { id } = c.req.valid("param");
+
+    const [row] = await db
+      .select(TENANT_COLUMNS)
+      .from(tenants)
+      .where(eq(tenants.id, id))
+      .limit(1);
+
+    if (!row) {
+      return c.json({ error: "NOT_FOUND", message: "Tenant not found" }, 404);
+    }
+    return c.json({ data: row });
+  },
+);
 
 // ── POST /admin/tenants ───────────────────────────────────────────────────────
 
@@ -50,39 +119,6 @@ export const createTenantHandlers = factory.createHandlers(
       }
       throw err;
     }
-  },
-);
-
-// ── GET /admin/tenants/:id ────────────────────────────────────────────────────
-
-export const getTenantHandlers = factory.createHandlers(
-  requireAuth(db),
-  requireRole("superadmin"),
-  requireIntrospection(),
-  zValidator("param", TenantIdParamSchema),
-  async (c) => {
-    const { id } = c.req.valid("param");
-
-    const [row] = await db
-      .select({
-        id: tenants.id,
-        name: tenants.name,
-        slug: tenants.slug,
-        plan: tenants.plan,
-        status: tenants.status,
-        suspendedAt: tenants.suspendedAt,
-        deletionScheduledAt: tenants.deletionScheduledAt,
-        createdAt: tenants.createdAt,
-        updatedAt: tenants.updatedAt,
-      })
-      .from(tenants)
-      .where(eq(tenants.id, id))
-      .limit(1);
-
-    if (!row) {
-      return c.json({ error: "NOT_FOUND", message: "Tenant not found" }, 404);
-    }
-    return c.json({ data: row });
   },
 );
 
@@ -163,7 +199,8 @@ export const reactivateTenantHandlers = factory.createHandlers(
 // ── DELETE /admin/tenants/:id ─────────────────────────────────────────────────
 
 const ScheduleDeletionSchema = z.object({
-  delayDays: z.number().int().min(0).max(365).default(30),
+  // G3: min(1) — zero-day grace period would immediately and irreversibly destroy data.
+  delayDays: z.number().int().min(1).max(365).default(30),
 });
 
 export const deleteTenantHandlers = factory.createHandlers(

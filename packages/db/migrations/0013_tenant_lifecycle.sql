@@ -18,4 +18,9 @@ CREATE INDEX tenants_deletion_due_idx
   ON tenants (deletion_scheduled_at)
   WHERE deletion_scheduled_at IS NOT NULL AND status = 'deleted';
 
+-- M2: extend CHECK constraint to allow 'purged' (set by the purge worker)
+ALTER TABLE tenants DROP CONSTRAINT IF EXISTS tenants_status_check;
+ALTER TABLE tenants ADD CONSTRAINT tenants_status_check
+  CHECK (status IN ('provisioning', 'active', 'suspended', 'deleted', 'purged'));
+
 COMMIT;

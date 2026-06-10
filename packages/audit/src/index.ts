@@ -37,7 +37,9 @@ export type AuditAction =
   | "updated"
   | "deleted"
   | "transitioned"
-  | "restored";
+  | "restored"
+  | "purge.completed"
+  | "purge.failed";
 
 export type AuditEntryInput = {
   tenantId: string;

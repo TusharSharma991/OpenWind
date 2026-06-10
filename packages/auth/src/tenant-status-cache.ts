@@ -1,10 +1,12 @@
 /**
- * In-process cache for tenant status lookups.
+ * In-process tenant status cache — SINGLE-PROCESS SCOPE ONLY.
  *
- * Avoids a DB round-trip on every authenticated request.  30 s TTL means a
- * suspension propagates to all in-flight requests within half a minute.
- * Call `invalidateTenantStatusCache` immediately after a lifecycle transition
- * (in the same process) to push the change through without waiting for TTL.
+ * Avoids a DB round-trip on every authenticated request. 30 s TTL caps the
+ * staleness window. `invalidateTenantStatusCache` takes effect immediately
+ * for the current process only — other API instances retain their cached value
+ * for up to TTL_MS after a lifecycle transition (suspend / delete). In a
+ * horizontally-scaled deployment, a Redis pub/sub invalidation channel is
+ * required for immediate cross-instance propagation.
  */
 
 const TTL_MS = 30_000;

@@ -8,7 +8,7 @@
  */
 
 import { Queue } from "bullmq";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db, tenants } from "@platform/db";
 import { writeAuditEntry } from "@platform/audit";
@@ -53,6 +53,10 @@ export class TenantLifecycleError extends Error {
 
 const DEFAULT_DELETION_DELAY_DAYS = 30;
 
+/**
+ * Load a tenant by ID for multi-state transitions (e.g. active | suspended).
+ * Single-state transitions use atomic conditional UPDATE directly.
+ */
 async function loadTenant(
   tenantId: string,
 ): Promise<typeof tenants.$inferSelect> {
@@ -79,28 +83,38 @@ function assertTransition(
   }
 }
 
+/**
+ * Called when a conditional UPDATE returned 0 rows: SELECT to distinguish
+ * TENANT_NOT_FOUND from INVALID_TRANSITION (concurrent modification).
+ */
+async function diagnoseNoUpdate(tenantId: string): Promise<never> {
+  const [row] = await db
+    .select({ status: tenants.status })
+    .from(tenants)
+    .where(eq(tenants.id, tenantId))
+    .limit(1);
+  if (!row) throw new TenantLifecycleError("TENANT_NOT_FOUND", { tenantId });
+  throw new TenantLifecycleError("INVALID_TRANSITION", {
+    tenantId,
+    currentStatus: row.status,
+  });
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
  * Create a new tenant and immediately activate it.
- * Writes a 'created' audit entry against the new tenant's own ID.
+ * Uses INSERT ON CONFLICT DO NOTHING to handle slug races atomically.
  */
 export async function provisionTenant(
   input: ProvisionTenantInput,
   actorId: string,
 ): Promise<{ id: string; slug: string }> {
   const parsed = ProvisionTenantSchema.parse(input);
-
-  const [existing] = await db
-    .select({ id: tenants.id })
-    .from(tenants)
-    .where(eq(tenants.slug, parsed.slug))
-    .limit(1);
-  if (existing) {
-    throw new TenantLifecycleError("SLUG_TAKEN", { slug: parsed.slug });
-  }
-
   const now = new Date();
+
+  // M4: single INSERT with ON CONFLICT DO NOTHING — catches the slug uniqueness
+  // race that a SELECT-then-INSERT misses under concurrent provisioning.
   const [row] = await db
     .insert(tenants)
     .values({
@@ -112,9 +126,12 @@ export async function provisionTenant(
       createdAt: now,
       updatedAt: now,
     })
+    .onConflictDoNothing()
     .returning({ id: tenants.id, slug: tenants.slug });
 
-  if (!row) throw new Error("tenant insert returned no row");
+  if (!row) {
+    throw new TenantLifecycleError("SLUG_TAKEN", { slug: parsed.slug });
+  }
 
   await writeAuditEntry(db, {
     tenantId: row.id,
@@ -138,19 +155,21 @@ export async function provisionTenant(
  * invalidated), preserves all data.
  *
  * Allowed from: active
+ * G2: uses atomic conditional UPDATE to prevent duplicate audit entries on
+ * concurrent calls.
  */
 export async function suspendTenant(
   tenantId: string,
   actorId: string,
 ): Promise<void> {
-  const tenant = await loadTenant(tenantId);
-  assertTransition(tenant.status, ["active"], tenantId);
-
   const now = new Date();
-  await db
+  const [updated] = await db
     .update(tenants)
     .set({ status: "suspended", suspendedAt: now, updatedAt: now })
-    .where(eq(tenants.id, tenantId));
+    .where(and(eq(tenants.id, tenantId), eq(tenants.status, "active")))
+    .returning({ id: tenants.id });
+
+  if (!updated) return diagnoseNoUpdate(tenantId);
 
   invalidateTenantStatusCache(tenantId);
 
@@ -161,7 +180,7 @@ export async function suspendTenant(
     resourceType: "tenant",
     resourceId: tenantId,
     action: "transitioned",
-    beforeSnapshot: { status: tenant.status },
+    beforeSnapshot: { status: "active" },
     afterSnapshot: { status: "suspended" },
   });
 
@@ -172,19 +191,20 @@ export async function suspendTenant(
  * Reactivate a suspended tenant.
  *
  * Allowed from: suspended
+ * G2: uses atomic conditional UPDATE.
  */
 export async function reactivateTenant(
   tenantId: string,
   actorId: string,
 ): Promise<void> {
-  const tenant = await loadTenant(tenantId);
-  assertTransition(tenant.status, ["suspended"], tenantId);
-
   const now = new Date();
-  await db
+  const [updated] = await db
     .update(tenants)
     .set({ status: "active", suspendedAt: null, updatedAt: now })
-    .where(eq(tenants.id, tenantId));
+    .where(and(eq(tenants.id, tenantId), eq(tenants.status, "suspended")))
+    .returning({ id: tenants.id });
+
+  if (!updated) return diagnoseNoUpdate(tenantId);
 
   invalidateTenantStatusCache(tenantId);
 
@@ -195,7 +215,7 @@ export async function reactivateTenant(
     resourceType: "tenant",
     resourceId: tenantId,
     action: "transitioned",
-    beforeSnapshot: { status: tenant.status },
+    beforeSnapshot: { status: "suspended" },
     afterSnapshot: { status: "active" },
   });
 
@@ -206,9 +226,12 @@ export async function reactivateTenant(
  * Schedule a tenant for GDPR deletion.
  *
  * Sets status → 'deleted' immediately (blocks API access) and enqueues a
- * BullMQ purge job to hard-delete all data after `delayDays` (default 30).
+ * BullMQ purge job to hard-delete all data after `delayDays` (default 30,
+ * minimum 1 — enforced at the route layer).
  *
  * Allowed from: active | suspended
+ * G2: loadTenant captures prevStatus for the audit log; the conditional UPDATE
+ * prevents concurrent calls from both writing audit entries.
  */
 export async function scheduleTenantDeletion(
   tenantId: string,
@@ -222,14 +245,24 @@ export async function scheduleTenantDeletion(
   const deletionScheduledAt = new Date(Date.now() + delayMs);
   const now = new Date();
 
-  await db
+  const [updated] = await db
     .update(tenants)
-    .set({
-      status: "deleted",
-      deletionScheduledAt,
-      updatedAt: now,
-    })
-    .where(eq(tenants.id, tenantId));
+    .set({ status: "deleted", deletionScheduledAt, updatedAt: now })
+    .where(
+      and(
+        eq(tenants.id, tenantId),
+        inArray(tenants.status, ["active", "suspended"]),
+      ),
+    )
+    .returning({ id: tenants.id });
+
+  if (!updated) {
+    // Concurrent modification — status changed between loadTenant and this UPDATE
+    throw new TenantLifecycleError("INVALID_TRANSITION", {
+      tenantId,
+      currentStatus: tenant.status,
+    });
+  }
 
   invalidateTenantStatusCache(tenantId);
 

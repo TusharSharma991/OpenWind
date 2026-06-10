@@ -40,11 +40,10 @@ vi.mock("@platform/db", () => ({
     slug: "tenants.slug",
     status: "tenants.status",
     name: "tenants.name",
-    slug_col: "tenants.slug",
   },
 }));
 
-vi.mock("drizzle-orm", () => ({ eq: vi.fn() }));
+vi.mock("drizzle-orm", () => ({ eq: vi.fn(), and: vi.fn(), inArray: vi.fn() }));
 
 vi.mock("./redis.js", () => ({
   connection: {},
@@ -66,6 +65,39 @@ const { invalidateTenantStatusCache } = await import("@platform/auth");
 const TENANT_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
 const ACTOR_ID = "user-superadmin-1";
 
+/** Returns an insert mock chain that resolves via onConflictDoNothing().returning() */
+function makeInsertChain(rows: unknown[]) {
+  return {
+    values: vi.fn().mockReturnValue({
+      onConflictDoNothing: vi.fn().mockReturnValue({
+        returning: vi.fn().mockResolvedValue(rows),
+      }),
+    }),
+  };
+}
+
+/** Returns an update mock chain that resolves via set().where().returning() */
+function makeUpdateChain(rows: unknown[]) {
+  return {
+    set: vi.fn().mockReturnValue({
+      where: vi.fn().mockReturnValue({
+        returning: vi.fn().mockResolvedValue(rows),
+      }),
+    }),
+  };
+}
+
+/** Returns a select mock chain that resolves via from().where().limit() */
+function makeSelectChain(rows: unknown[]) {
+  return {
+    from: vi.fn().mockReturnValue({
+      where: vi.fn().mockReturnValue({
+        limit: vi.fn().mockResolvedValue(rows),
+      }),
+    }),
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -74,20 +106,10 @@ beforeEach(() => {
 
 describe("provisionTenant", () => {
   it("inserts a new active tenant and writes a created audit entry", async () => {
-    // No existing slug
-    mockDbSelect.mockReturnValueOnce({
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue([]),
-        }),
-      }),
-    });
-    // Insert returning
-    mockDbInsert.mockReturnValueOnce({
-      values: vi.fn().mockReturnValue({
-        returning: vi.fn().mockResolvedValue([{ id: TENANT_ID, slug: "acme" }]),
-      }),
-    });
+    // M4: single INSERT with onConflictDoNothing — no pre-check SELECT
+    mockDbInsert.mockReturnValueOnce(
+      makeInsertChain([{ id: TENANT_ID, slug: "acme" }]),
+    );
 
     const result = await provisionTenant(
       { name: "Acme Corp", slug: "acme", plan: "standard" },
@@ -101,14 +123,9 @@ describe("provisionTenant", () => {
     );
   });
 
-  it("throws SLUG_TAKEN when the slug is already in use", async () => {
-    mockDbSelect.mockReturnValueOnce({
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue([{ id: "existing-id" }]),
-        }),
-      }),
-    });
+  it("throws SLUG_TAKEN when the slug conflicts (onConflictDoNothing returns empty)", async () => {
+    // M4: conflict detected via empty RETURNING — no pre-check SELECT
+    mockDbInsert.mockReturnValueOnce(makeInsertChain([]));
 
     await expect(
       provisionTenant(
@@ -123,19 +140,8 @@ describe("provisionTenant", () => {
 
 describe("suspendTenant", () => {
   it("transitions active tenant to suspended and invalidates cache", async () => {
-    // loadTenant
-    mockDbSelect.mockReturnValueOnce({
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue([{ status: "active" }]),
-        }),
-      }),
-    });
-    mockDbUpdate.mockReturnValueOnce({
-      set: vi.fn().mockReturnValue({
-        where: vi.fn().mockResolvedValue(undefined),
-      }),
-    });
+    // G2: atomic conditional UPDATE — returns the updated row
+    mockDbUpdate.mockReturnValueOnce(makeUpdateChain([{ id: TENANT_ID }]));
 
     await suspendTenant(TENANT_ID, ACTOR_ID);
 
@@ -151,13 +157,11 @@ describe("suspendTenant", () => {
   });
 
   it("throws INVALID_TRANSITION when tenant is already suspended", async () => {
-    mockDbSelect.mockReturnValueOnce({
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue([{ status: "suspended" }]),
-        }),
-      }),
-    });
+    // G2: UPDATE returns empty (wrong state) → SELECT reveals current status
+    mockDbUpdate.mockReturnValueOnce(makeUpdateChain([]));
+    mockDbSelect.mockReturnValueOnce(
+      makeSelectChain([{ status: "suspended" }]),
+    );
 
     await expect(suspendTenant(TENANT_ID, ACTOR_ID)).rejects.toMatchObject({
       code: "INVALID_TRANSITION",
@@ -165,13 +169,9 @@ describe("suspendTenant", () => {
   });
 
   it("throws TENANT_NOT_FOUND for unknown tenantId", async () => {
-    mockDbSelect.mockReturnValueOnce({
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue([]),
-        }),
-      }),
-    });
+    // G2: UPDATE returns empty → SELECT also empty (tenant doesn't exist)
+    mockDbUpdate.mockReturnValueOnce(makeUpdateChain([]));
+    mockDbSelect.mockReturnValueOnce(makeSelectChain([]));
 
     await expect(suspendTenant(TENANT_ID, ACTOR_ID)).rejects.toMatchObject({
       code: "TENANT_NOT_FOUND",
@@ -183,18 +183,7 @@ describe("suspendTenant", () => {
 
 describe("reactivateTenant", () => {
   it("transitions suspended tenant to active and invalidates cache", async () => {
-    mockDbSelect.mockReturnValueOnce({
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue([{ status: "suspended" }]),
-        }),
-      }),
-    });
-    mockDbUpdate.mockReturnValueOnce({
-      set: vi.fn().mockReturnValue({
-        where: vi.fn().mockResolvedValue(undefined),
-      }),
-    });
+    mockDbUpdate.mockReturnValueOnce(makeUpdateChain([{ id: TENANT_ID }]));
 
     await reactivateTenant(TENANT_ID, ACTOR_ID);
 
@@ -203,19 +192,15 @@ describe("reactivateTenant", () => {
       expect.anything(),
       expect.objectContaining({
         action: "transitioned",
+        beforeSnapshot: { status: "suspended" },
         afterSnapshot: { status: "active" },
       }),
     );
   });
 
   it("throws INVALID_TRANSITION when tenant is active", async () => {
-    mockDbSelect.mockReturnValueOnce({
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue([{ status: "active" }]),
-        }),
-      }),
-    });
+    mockDbUpdate.mockReturnValueOnce(makeUpdateChain([]));
+    mockDbSelect.mockReturnValueOnce(makeSelectChain([{ status: "active" }]));
 
     await expect(reactivateTenant(TENANT_ID, ACTOR_ID)).rejects.toMatchObject({
       code: "INVALID_TRANSITION",
@@ -227,18 +212,10 @@ describe("reactivateTenant", () => {
 
 describe("scheduleTenantDeletion", () => {
   it("sets status to deleted, enqueues purge job, and writes deleted audit entry", async () => {
-    mockDbSelect.mockReturnValueOnce({
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue([{ status: "active" }]),
-        }),
-      }),
-    });
-    mockDbUpdate.mockReturnValueOnce({
-      set: vi.fn().mockReturnValue({
-        where: vi.fn().mockResolvedValue(undefined),
-      }),
-    });
+    // loadTenant SELECT
+    mockDbSelect.mockReturnValueOnce(makeSelectChain([{ status: "active" }]));
+    // conditional UPDATE succeeds
+    mockDbUpdate.mockReturnValueOnce(makeUpdateChain([{ id: TENANT_ID }]));
 
     const result = await scheduleTenantDeletion(TENANT_ID, ACTOR_ID, 30);
 
@@ -251,16 +228,19 @@ describe("scheduleTenantDeletion", () => {
   });
 
   it("throws INVALID_TRANSITION when tenant is already deleted", async () => {
-    mockDbSelect.mockReturnValueOnce({
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue([{ status: "deleted" }]),
-        }),
-      }),
-    });
+    // assertTransition throws before the UPDATE
+    mockDbSelect.mockReturnValueOnce(makeSelectChain([{ status: "deleted" }]));
 
     await expect(
       scheduleTenantDeletion(TENANT_ID, ACTOR_ID),
     ).rejects.toMatchObject({ code: "INVALID_TRANSITION" });
+  });
+
+  it("throws TENANT_NOT_FOUND when tenant does not exist", async () => {
+    mockDbSelect.mockReturnValueOnce(makeSelectChain([]));
+
+    await expect(
+      scheduleTenantDeletion(TENANT_ID, ACTOR_ID),
+    ).rejects.toMatchObject({ code: "TENANT_NOT_FOUND" });
   });
 });

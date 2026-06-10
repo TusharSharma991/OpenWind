@@ -51,6 +51,7 @@ vi.mock("drizzle-orm", () => ({
   eq: vi.fn(),
   and: vi.fn(),
   sql: vi.fn(),
+  ne: vi.fn(),
 }));
 
 vi.mock("@platform/db", () => ({
@@ -59,6 +60,7 @@ vi.mock("@platform/db", () => ({
     tenantId: "files.tenant_id",
     scanStatus: "files.scan_status",
     storageKey: "files.storage_key",
+    originalName: "files.original_name",
     updatedAt: "files.updated_at",
   },
   tenants: {
@@ -84,34 +86,58 @@ type MockDb = {
   select: ReturnType<typeof vi.fn>;
   insert: ReturnType<typeof vi.fn>;
   update: ReturnType<typeof vi.fn>;
+  transaction: ReturnType<typeof vi.fn>;
 };
 
+/**
+ * Build a mock DbOrTx.
+ *
+ * The `transaction` method passes the same mock object to the callback so that
+ * selects/inserts inside the transaction use the same mock chains.  The
+ * `select` chain includes both `.for("update").limit()` (used by the
+ * SELECT FOR UPDATE inside initiateUpload's transaction) and plain `.limit()`.
+ */
 function makeDb(overrides: Partial<MockDb> = {}): MockDb {
-  const insertRow = { id: FILE_ID };
-  return {
+  // Build the base mock without `transaction` first so we can close over it.
+  const mockDb: MockDb = {
     select: vi.fn().mockReturnValue({
       from: vi.fn().mockReturnValue({
         where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue([
-            {
-              config: { storage_quota_mb: 100 },
-            },
-          ]),
+          // Support .for("update").limit() as well as plain .limit()
+          for: vi.fn().mockReturnValue({
+            limit: vi
+              .fn()
+              .mockResolvedValue([{ config: { storage_quota_mb: 100 } }]),
+          }),
+          limit: vi
+            .fn()
+            .mockResolvedValue([{ config: { storage_quota_mb: 100 } }]),
         }),
       }),
     }),
     insert: vi.fn().mockReturnValue({
-      values: vi.fn().mockReturnValue({
-        returning: vi.fn().mockResolvedValue([insertRow]),
-      }),
+      // initiateUpload no longer calls .returning() — fileId is pre-generated
+      values: vi.fn().mockResolvedValue(undefined),
     }),
     update: vi.fn().mockReturnValue({
       set: vi.fn().mockReturnValue({
         where: vi.fn().mockResolvedValue(undefined),
       }),
     }),
+    // Placeholder — replaced below once mockDb is in scope
+    transaction: vi.fn(),
     ...overrides,
   };
+
+  // Wire transaction after construction: pass the same mock as `tx` so selects
+  // inside the transaction use the same (possibly overridden) mock chains.
+  mockDb.transaction = vi
+    .fn()
+    .mockImplementation(async (fn: (tx: MockDb) => Promise<unknown>) =>
+      fn(mockDb),
+    );
+
+  return mockDb;
 }
 
 beforeEach(() => {
@@ -129,24 +155,28 @@ beforeEach(() => {
 
 describe("initiateUpload", () => {
   it("returns fileId + presigned upload URL for a valid request", async () => {
-    // DB returns quota=100MB used=0 for quota checks, then file row for insert
+    // The first select (FOR UPDATE on tenants) and second select (used bytes)
+    // share a call counter so each resolves with the appropriate data.
     let selectCallCount = 0;
+    const limitFn = vi.fn().mockImplementation(() => {
+      selectCallCount++;
+      if (selectCallCount === 1) {
+        // SELECT FOR UPDATE on tenants → quota config
+        return Promise.resolve([{ config: { storage_quota_mb: 100 } }]);
+      }
+      // getTenantUsedBytes → used = 0
+      return Promise.resolve([{ total: "0" }]);
+    });
+
     const db = makeDb({
-      select: vi.fn().mockImplementation(() => ({
+      select: vi.fn().mockReturnValue({
         from: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockImplementation(() => {
-              selectCallCount++;
-              if (selectCallCount === 1) {
-                // getTenantQuotaBytes
-                return Promise.resolve([{ config: { storage_quota_mb: 100 } }]);
-              }
-              // getTenantUsedBytes
-              return Promise.resolve([{ total: "0" }]);
-            }),
+            for: vi.fn().mockReturnValue({ limit: limitFn }),
+            limit: limitFn,
           }),
         }),
-      })),
+      }),
     });
 
     const result = await initiateUpload(
@@ -160,7 +190,10 @@ describe("initiateUpload", () => {
       1024,
     );
 
-    expect(result.fileId).toBe(FILE_ID);
+    // fileId is now a pre-generated randomUUID() — just verify it's a UUID string
+    expect(result.fileId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    );
     expect(result.uploadUrl).toBe("https://s3.example.com/signed-url");
     expect(result.uploadUrlExpiresAt).toBeInstanceOf(Date);
   });
@@ -184,17 +217,18 @@ describe("initiateUpload", () => {
   });
 
   it("throws QUOTA_EXCEEDED when upload would exceed tenant quota", async () => {
-    // getTenantQuotaBytes and getTenantUsedBytes run via Promise.all.
-    // Use separate mock chains so each select call returns the right value.
+    // First select: SELECT FOR UPDATE on tenants → quota = 1 MB
+    // Second select: getTenantUsedBytes → used = 1 MB exactly
     const limitMock = vi
       .fn()
-      .mockResolvedValueOnce([{ config: { storage_quota_mb: 1 } }]) // quota = 1 MB
-      .mockResolvedValueOnce([{ total: String(1024 * 1024) }]); // used = 1 MB exactly
+      .mockResolvedValueOnce([{ config: { storage_quota_mb: 1 } }])
+      .mockResolvedValueOnce([{ total: String(1024 * 1024) }]);
 
     const db = makeDb({
       select: vi.fn().mockReturnValue({
         from: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnValue({
+            for: vi.fn().mockReturnValue({ limit: limitMock }),
             limit: limitMock,
           }),
         }),
@@ -295,6 +329,7 @@ describe("getDownloadUrl", () => {
                 id: FILE_ID,
                 scanStatus,
                 storageKey: "key",
+                originalName: "test-file.pdf",
                 tenantId: TENANT_ID,
               },
             ]),

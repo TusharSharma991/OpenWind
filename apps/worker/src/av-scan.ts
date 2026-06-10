@@ -119,9 +119,14 @@ export const avScanWorker = new Worker<AvScanJob>(
 
     logger.info({ tenantId, fileId, jobId: job.id }, "av-scan: job started");
 
-    // Idempotency: skip if no longer pending
+    // Idempotency: skip if no longer pending.
+    // Also fetch uploadedBy so we can notify the uploader on quarantine.
     const [file] = await db
-      .select({ id: files.id, scanStatus: files.scanStatus })
+      .select({
+        id: files.id,
+        scanStatus: files.scanStatus,
+        uploadedBy: files.uploadedBy,
+      })
       .from(files)
       .where(and(eq(files.id, fileId), eq(files.tenantId, tenantId)))
       .limit(1);
@@ -182,12 +187,15 @@ export const avScanWorker = new Worker<AvScanJob>(
       "av-scan: file quarantined — virus detected",
     );
 
-    // Notify tenant admin
+    // Notify the file's uploader — they need to know their file was quarantined.
+    // Using "system" was wrong: sendNotification requires a real userId to route
+    // the notification via Novu.  The uploader (uploadedBy) is the most relevant
+    // recipient and is available from the file row already fetched above.
     try {
       await sendNotification(
         connection,
         tenantId,
-        "system",
+        file.uploadedBy,
         "file.quarantined",
         {
           fileId,

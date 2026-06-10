@@ -9,7 +9,7 @@ import { z } from "zod";
 import { requireAuth, requireRole } from "@platform/auth";
 import { db } from "@platform/db";
 import { viewConfigs } from "@platform/db";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { factory } from "./factory.js";
 
 const ListColumnSchema = z.object({
@@ -77,39 +77,10 @@ export const updateViewConfigHandler = factory.createHandlers(
     const input = c.req.valid("json");
     const now = new Date();
 
-    const [existing] = await db
-      .select({ id: viewConfigs.id })
-      .from(viewConfigs)
-      .where(
-        and(
-          eq(viewConfigs.tenantId, tenantId),
-          eq(viewConfigs.entityTypeSlug, entityType),
-        ),
-      )
-      .limit(1);
-
-    if (existing) {
-      const [updated] = await db
-        .update(viewConfigs)
-        .set({
-          ...(input.listColumns !== undefined && {
-            listColumns: input.listColumns,
-          }),
-          ...(input.detailLayout !== undefined && {
-            detailLayout: input.detailLayout,
-          }),
-          ...(input.formFieldOrder !== undefined && {
-            formFieldOrder: input.formFieldOrder,
-          }),
-          updatedAt: now,
-        })
-        .where(eq(viewConfigs.id, existing.id))
-        .returning();
-
-      return c.json({ data: updated });
-    }
-
-    const [created] = await db
+    // Atomic upsert — avoids the TOCTOU race of SELECT then INSERT-or-UPDATE.
+    // The unique constraint on (tenant_id, entity_type_slug) makes conflicts
+    // deterministic; we only update the fields the caller actually provided.
+    const [row] = await db
       .insert(viewConfigs)
       .values({
         tenantId,
@@ -120,8 +91,26 @@ export const updateViewConfigHandler = factory.createHandlers(
         createdAt: now,
         updatedAt: now,
       })
+      .onConflictDoUpdate({
+        target: [viewConfigs.tenantId, viewConfigs.entityTypeSlug],
+        set: {
+          // Only update fields the caller provided; leave others untouched
+          ...(input.listColumns !== undefined && {
+            listColumns: input.listColumns,
+          }),
+          ...(input.detailLayout !== undefined && {
+            detailLayout: input.detailLayout,
+          }),
+          ...(input.formFieldOrder !== undefined && {
+            formFieldOrder: input.formFieldOrder,
+          }),
+          updatedAt: now,
+          // Preserve the original createdAt on conflict
+          createdAt: sql`${viewConfigs.createdAt}`,
+        },
+      })
       .returning();
 
-    return c.json({ data: created }, 201);
+    return c.json({ data: row });
   },
 );

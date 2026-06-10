@@ -21,8 +21,18 @@ vi.mock("@platform/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
+// sql is used by updateUserPreferences for the jsonb_set expression;
+// return a plain tagged-template function so the call succeeds in tests.
+const sqlTag = vi.fn(
+  (strings: TemplateStringsArray, ...values: unknown[]) =>
+    ({ sql: strings.join("?"), bindings: values }) as unknown,
+);
+// Allow sql.raw to be called without throwing
+(sqlTag as unknown as Record<string, unknown>).raw = vi.fn((s: string) => s);
+
 vi.mock("drizzle-orm", () => ({
   eq: vi.fn((a: unknown, b: unknown) => ({ col: a, val: b })),
+  sql: sqlTag,
 }));
 
 vi.mock("@platform/db", () => ({

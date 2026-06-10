@@ -14,7 +14,7 @@
 
 import { Queue } from "bullmq";
 import type { Redis } from "ioredis";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { DbOrTx } from "@platform/db";
 import { tenants } from "@platform/db";
 import { logger } from "@platform/logger";
@@ -160,6 +160,10 @@ export async function getUserPreferences(
 /**
  * Persist a user's notification preference changes.
  * Merges the updates onto the existing preferences — partial updates are safe.
+ *
+ * Uses `jsonb_set` to atomically update only the per-user sub-key inside the
+ * `tenants.config` JSONB blob, avoiding the read-modify-write race condition
+ * that a full column overwrite would introduce under concurrent preference saves.
  */
 export async function updateUserPreferences(
   db: DbOrTx,
@@ -170,33 +174,21 @@ export async function updateUserPreferences(
   const existing = await getUserPreferences(db, tenantId, userId);
   const merged = mergePreferences(existing, updates);
 
-  // Read current config, update the notif_prefs sub-key, write back
-  const [tenant] = await db
-    .select({ config: tenants.config })
-    .from(tenants)
-    .where(eq(tenants.id, tenantId))
-    .limit(1);
-
-  if (!tenant) return merged;
-
-  // Drizzle types jsonb as unknown; config is declared NOT NULL with default {}
-  const config = tenant.config as Record<string, unknown>;
-  const notifPrefs =
-    (config["notif_prefs"] as
-      | Record<string, NotificationPreferences>
-      | undefined) ?? {};
-
-  const updatedConfig = {
-    ...config,
-    notif_prefs: {
-      ...notifPrefs,
-      [userId]: merged,
-    },
-  };
-
+  // jsonb_set(target, path, new_value, create_missing):
+  //   - ARRAY['notif_prefs', userId] is the path — both components are bound
+  //     parameters so user-supplied userId cannot escape into SQL syntax.
+  //   - The merged prefs value is cast to jsonb via Drizzle parameterisation.
+  //   - create_missing=true creates the notif_prefs key if absent.
   await db
     .update(tenants)
-    .set({ config: updatedConfig })
+    .set({
+      config: sql`jsonb_set(
+        COALESCE(config, '{}'::jsonb),
+        ARRAY['notif_prefs', ${userId}],
+        ${JSON.stringify(merged)}::jsonb,
+        true
+      )`,
+    })
     .where(eq(tenants.id, tenantId));
 
   logger.info({ tenantId, userId }, "notifications: preferences updated");

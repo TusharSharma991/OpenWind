@@ -19,6 +19,7 @@
  *  - Pending files abandoned >24h release quota when purged by the cleanup job
  */
 
+import { randomUUID } from "node:crypto";
 import {
   S3Client,
   DeleteObjectCommand,
@@ -28,7 +29,7 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { Queue } from "bullmq";
 import type { Redis } from "ioredis";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, ne } from "drizzle-orm";
 import type { DbOrTx } from "@platform/db";
 import { files, tenants } from "@platform/db";
 import { env } from "@platform/config";
@@ -84,25 +85,6 @@ function buildStorageKey(
 
 // ── Quota helpers ─────────────────────────────────────────────────────────────
 
-async function getTenantQuotaBytes(
-  db: DbOrTx,
-  tenantId: string,
-): Promise<number> {
-  const [tenant] = await db
-    .select({ config: tenants.config })
-    .from(tenants)
-    .where(eq(tenants.id, tenantId))
-    .limit(1);
-
-  const config = (tenant?.config as Record<string, unknown> | undefined) ?? {};
-  const quotaMb =
-    typeof config["storage_quota_mb"] === "number"
-      ? config["storage_quota_mb"]
-      : DEFAULT_QUOTA_MB;
-
-  return quotaMb * 1024 * 1024;
-}
-
 async function getTenantUsedBytes(
   db: DbOrTx,
   tenantId: string,
@@ -112,9 +94,7 @@ async function getTenantUsedBytes(
   const [result] = await db
     .select({ total: sql<string>`COALESCE(SUM(size_bytes), 0)` })
     .from(files)
-    .where(
-      and(eq(files.tenantId, tenantId), sql`scan_status NOT IN ('deleted')`),
-    )
+    .where(and(eq(files.tenantId, tenantId), ne(files.scanStatus, "deleted")))
     .limit(1);
   return parseInt(result?.total ?? "0", 10);
 }
@@ -128,9 +108,14 @@ export type InitiateUploadResult = {
 };
 
 /**
- * Reserve a file slot, check quota, and issue a presigned S3 POST URL.
- * The presigned POST policy includes content-length-range so S3 enforces
- * the size limit independently of the client-reported sizeBytes.
+ * Reserve a file slot, check quota, and issue a presigned S3 PUT URL.
+ *
+ * The fileId is generated client-side with `randomUUID()` before the INSERT,
+ * eliminating the two-step "insert with placeholder key then update" pattern.
+ *
+ * Quota enforcement is atomic: `SELECT ... FOR UPDATE` on the tenant row
+ * serialises concurrent initiateUpload calls so two simultaneous uploads
+ * cannot both pass the same quota check.
  */
 export async function initiateUpload(
   db: DbOrTx,
@@ -142,7 +127,7 @@ export async function initiateUpload(
   mimeType: string,
   sizeBytes: number,
 ): Promise<InitiateUploadResult> {
-  // 1. Enforce per-file size limit
+  // 1. Enforce per-file size limit (no DB round-trip needed)
   if (sizeBytes > MAX_FILE_BYTES) {
     throw new FileError("FILE_TOO_LARGE", {
       sizeBytes,
@@ -150,61 +135,63 @@ export async function initiateUpload(
     });
   }
 
-  // 2. Enforce tenant quota (uses FOR UPDATE to handle concurrent uploads)
-  const [quotaBytes, usedBytes] = await Promise.all([
-    getTenantQuotaBytes(db, tenantId),
-    getTenantUsedBytes(db, tenantId),
-  ]);
-
-  if (usedBytes + sizeBytes > quotaBytes) {
-    throw new FileError("QUOTA_EXCEEDED", {
-      usedBytes,
-      requestedBytes: sizeBytes,
-      quotaBytes,
-    });
-  }
-
-  // 3. Insert file row as 'pending'
-  const storageKeyTemp = buildStorageKey(
-    tenantId,
-    moduleSlug,
-    entityId,
-    "pending", // replaced after DB insert with real ID
-    filename,
-  );
-
-  const [row] = await db
-    .insert(files)
-    .values({
-      tenantId,
-      moduleSlug,
-      entityId: entityId ?? undefined,
-      originalName: filename,
-      storageKey: storageKeyTemp,
-      mimeType,
-      sizeBytes,
-      scanStatus: "pending",
-      uploadedBy,
-    })
-    .returning({ id: files.id });
-
-  if (!row) throw new FileError("PROVIDER_ERROR", { reason: "insert failed" });
-
-  // 4. Update storageKey with the real fileId
+  // 2. Pre-generate fileId so the final storageKey is known before the INSERT.
+  //    This avoids the old two-step INSERT (with placeholder key) + UPDATE pattern.
+  const fileId = randomUUID();
   const storageKey = buildStorageKey(
     tenantId,
     moduleSlug,
     entityId,
-    row.id,
+    fileId,
     filename,
   );
 
-  await db.update(files).set({ storageKey }).where(eq(files.id, row.id));
+  // 3. Atomically check quota and insert the file row.
+  //    SELECT FOR UPDATE on the tenant row serialises concurrent uploads —
+  //    two simultaneous calls cannot both read the same usedBytes and both pass.
+  await db.transaction(async (tx) => {
+    // Lock the tenant row for the duration of this transaction
+    const [tenant] = await tx
+      .select({ config: tenants.config })
+      .from(tenants)
+      .where(eq(tenants.id, tenantId))
+      .for("update")
+      .limit(1);
 
-  // 5. Issue presigned PUT URL with exact content-length enforcement.
-  // S3 presigned PUT requires the client to send exactly Content-Length = sizeBytes.
-  // The spec requires content-length-range enforcement — this is equivalent for
-  // single-part uploads since the exact size is known at upload-initiation time.
+    const config =
+      (tenant?.config as Record<string, unknown> | undefined) ?? {};
+    const quotaMb =
+      typeof config["storage_quota_mb"] === "number"
+        ? config["storage_quota_mb"]
+        : DEFAULT_QUOTA_MB;
+    const quotaBytes = quotaMb * 1024 * 1024;
+
+    const usedBytes = await getTenantUsedBytes(tx, tenantId);
+
+    if (usedBytes + sizeBytes > quotaBytes) {
+      throw new FileError("QUOTA_EXCEEDED", {
+        usedBytes,
+        requestedBytes: sizeBytes,
+        quotaBytes,
+      });
+    }
+
+    await tx.insert(files).values({
+      id: fileId,
+      tenantId,
+      moduleSlug,
+      entityId: entityId ?? undefined,
+      originalName: filename,
+      storageKey,
+      mimeType,
+      sizeBytes,
+      scanStatus: "pending",
+      uploadedBy,
+    });
+  });
+
+  // 4. Issue presigned PUT URL with exact content-length enforcement.
+  //    S3 presigned PUT requires the client to send exactly Content-Length = sizeBytes.
   const expiresAt = new Date(Date.now() + UPLOAD_URL_EXPIRY_SECONDS * 1000);
 
   const uploadUrl = await getSignedUrl(
@@ -219,11 +206,11 @@ export async function initiateUpload(
   );
 
   logger.info(
-    { tenantId, fileId: row.id, moduleSlug, sizeBytes },
+    { tenantId, fileId, moduleSlug, sizeBytes },
     "files: upload initiated",
   );
 
-  return { fileId: row.id, uploadUrl, uploadUrlExpiresAt: expiresAt };
+  return { fileId, uploadUrl, uploadUrlExpiresAt: expiresAt };
 }
 
 /**
@@ -316,6 +303,8 @@ export async function getDownloadUrl(
     new GetObjectCommand({
       Bucket: env.S3_BUCKET,
       Key: file.storageKey,
+      // Force download prompt in the browser with the original filename
+      ResponseContentDisposition: `attachment; filename="${file.originalName}"`,
     }),
     { expiresIn: DOWNLOAD_URL_EXPIRY_SECONDS },
   );

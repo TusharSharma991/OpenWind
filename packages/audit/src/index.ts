@@ -21,7 +21,7 @@
  * Call this inside the same transaction as the entity mutation.
  */
 
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and, gte, lte, lt } from "drizzle-orm";
 import type { DbOrTx } from "@platform/db";
 import { adminAuditLog } from "@platform/db";
 import { logger } from "@platform/logger";
@@ -132,7 +132,17 @@ export type QueryAuditLogInput = {
   resourceType?: string | undefined;
   resourceId?: string | undefined;
   actorId?: string | undefined;
+  actorType?: AuditActorType | undefined;
+  /** Filter entries created at or after this timestamp */
+  from?: Date | undefined;
+  /** Filter entries created at or before this timestamp */
+  to?: Date | undefined;
   limit?: number | undefined;
+  /**
+   * Cursor-based pagination — pass the `id` of the last entry returned by the
+   * previous page.  Results strictly after (createdAt less than) the cursor
+   * entry are returned.
+   */
   cursor?: string | undefined;
 };
 
@@ -145,6 +155,9 @@ export type QueryAuditLogResult = {
  * Query the audit log for a tenant. Always scoped to tenantId via explicit
  * WHERE clause (layer-1 isolation). Caller must also ensure the db/tx is
  * operating under the correct tenant context.
+ *
+ * Supports filtering by actorId, actorType, resourceType, resourceId,
+ * date range (from/to), and cursor-based pagination (cursor = last row id).
  */
 export async function queryAuditLog(
   db: DbOrTx,
@@ -152,10 +165,42 @@ export async function queryAuditLog(
 ): Promise<QueryAuditLogResult> {
   const limit = input.limit ?? 50;
 
+  // Build WHERE conditions
+  type Condition = ReturnType<typeof eq>;
+  const conditions: Condition[] = [eq(adminAuditLog.tenantId, input.tenantId)];
+
+  if (input.actorId !== undefined)
+    conditions.push(eq(adminAuditLog.actorId, input.actorId));
+  if (input.actorType !== undefined)
+    conditions.push(eq(adminAuditLog.actorType, input.actorType));
+  if (input.resourceType !== undefined)
+    conditions.push(eq(adminAuditLog.resourceType, input.resourceType));
+  if (input.resourceId !== undefined)
+    conditions.push(eq(adminAuditLog.resourceId, input.resourceId));
+  if (input.from !== undefined)
+    conditions.push(gte(adminAuditLog.createdAt, input.from));
+  if (input.to !== undefined)
+    conditions.push(lte(adminAuditLog.createdAt, input.to));
+
+  // Cursor pagination: resolve the cursor id to a createdAt timestamp,
+  // then return entries with createdAt strictly before that point
+  // (consistent with DESC order).
+  if (input.cursor !== undefined) {
+    const [cursorRow] = await db
+      .select({ createdAt: adminAuditLog.createdAt })
+      .from(adminAuditLog)
+      .where(eq(adminAuditLog.id, input.cursor))
+      .limit(1);
+
+    if (cursorRow !== undefined) {
+      conditions.push(lt(adminAuditLog.createdAt, cursorRow.createdAt));
+    }
+  }
+
   const rows = await db
     .select()
     .from(adminAuditLog)
-    .where(eq(adminAuditLog.tenantId, input.tenantId))
+    .where(and(...(conditions as [Condition, ...Condition[]])))
     .orderBy(desc(adminAuditLog.createdAt))
     .limit(limit + 1);
 

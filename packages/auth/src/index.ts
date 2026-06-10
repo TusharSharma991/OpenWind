@@ -4,6 +4,7 @@ export {
   requireIntrospection,
   hashApiKey,
 } from "./middleware.js";
+export { invalidateTenantStatusCache } from "./tenant-status-cache.js";
 export type {
   AuthContext,
   ZitadelClaims,

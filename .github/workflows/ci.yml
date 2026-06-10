@@ -23,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # needed for commitlint
+          fetch-depth: 0 # needed for commitlint
 
       - uses: pnpm/action-setup@v4
 
@@ -234,6 +234,8 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker # uses runner's local daemon — no Docker Hub pull needed
 
       - name: Build ${{ matrix.app }}
         uses: docker/build-push-action@v5
@@ -241,8 +243,6 @@ jobs:
           context: .
           file: apps/${{ matrix.app }}/Dockerfile
           push: false
-          cache-from: type=gha,scope=${{ matrix.app }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.app }}
           build-args: |
             NODE_VERSION=${{ env.NODE_VERSION }}
 

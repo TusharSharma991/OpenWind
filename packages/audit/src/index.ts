@@ -21,6 +21,7 @@
  * Call this inside the same transaction as the entity mutation.
  */
 
+import { eq, desc } from "drizzle-orm";
 import type { DbOrTx } from "@platform/db";
 import { adminAuditLog } from "@platform/db";
 import { logger } from "@platform/logger";
@@ -108,4 +109,75 @@ export async function writeAuditEntry(
     },
     "audit: entry written",
   );
+}
+
+// ── Query ─────────────────────────────────────────────────────────────────────
+
+export type AuditLogEntry = {
+  id: string;
+  tenantId: string;
+  actorId: string;
+  actorType: AuditActorType;
+  resourceType: string;
+  resourceId: string;
+  action: AuditAction;
+  beforeSnapshot: Record<string, unknown> | null;
+  afterSnapshot: Record<string, unknown> | null;
+  metadata: Record<string, unknown> | null;
+  createdAt: Date;
+};
+
+export type QueryAuditLogInput = {
+  tenantId: string;
+  resourceType?: string | undefined;
+  resourceId?: string | undefined;
+  actorId?: string | undefined;
+  limit?: number | undefined;
+  cursor?: string | undefined;
+};
+
+export type QueryAuditLogResult = {
+  entries: AuditLogEntry[];
+  nextCursor: string | null;
+};
+
+/**
+ * Query the audit log for a tenant. Always scoped to tenantId via explicit
+ * WHERE clause (layer-1 isolation). Caller must also ensure the db/tx is
+ * operating under the correct tenant context.
+ */
+export async function queryAuditLog(
+  db: DbOrTx,
+  input: QueryAuditLogInput,
+): Promise<QueryAuditLogResult> {
+  const limit = input.limit ?? 50;
+
+  const rows = await db
+    .select()
+    .from(adminAuditLog)
+    .where(eq(adminAuditLog.tenantId, input.tenantId))
+    .orderBy(desc(adminAuditLog.createdAt))
+    .limit(limit + 1);
+
+  const hasMore = rows.length > limit;
+  const entries = (hasMore ? rows.slice(0, limit) : rows).map((r) => ({
+    id: r.id,
+    tenantId: r.tenantId,
+    actorId: r.actorId,
+    actorType: r.actorType as AuditActorType,
+    resourceType: r.resourceType,
+    resourceId: r.resourceId,
+    action: r.action as AuditAction,
+    beforeSnapshot: r.beforeSnapshot as Record<string, unknown> | null,
+    afterSnapshot: r.afterSnapshot as Record<string, unknown> | null,
+    metadata: r.metadata as Record<string, unknown> | null,
+    createdAt: r.createdAt,
+  }));
+
+  const nextCursor =
+    hasMore && entries.length > 0
+      ? (entries[entries.length - 1]?.id ?? null)
+      : null;
+
+  return { entries, nextCursor };
 }

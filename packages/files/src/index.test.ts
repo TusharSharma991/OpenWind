@@ -242,7 +242,7 @@ describe("confirmUpload", () => {
     expect(mockQueueAdd).toHaveBeenCalledWith(
       "scan",
       expect.objectContaining({ fileId: FILE_ID, tenantId: TENANT_ID }),
-      expect.objectContaining({ jobId: `av-scan:${FILE_ID}` }),
+      expect.objectContaining({ jobId: `av-scan-${FILE_ID}` }),
     );
   });
 

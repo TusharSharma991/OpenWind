@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useOne } from "@refinedev/core";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import { fetchWithAuth, API_URL } from "../../lib/api.js";
+import { useEntityTypes, toTypeSlug } from "../../entity-type-context.js";
 
 type WorkflowState = {
   id: string;
@@ -28,6 +29,7 @@ type WorkflowFull = {
   name: string;
   entityTypeId: string;
   initialState: string;
+  isActive: boolean;
   createdAt: string;
   states: WorkflowState[];
   transitions: WorkflowTransition[];
@@ -103,6 +105,87 @@ const EMPTY_TRANSITION: AddTransitionForm = {
   requiresComment: false,
 };
 
+function ConfirmDeleteModal({
+  message,
+  onConfirm,
+  onCancel,
+  busy,
+}: {
+  message: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+  busy: boolean;
+}): React.ReactElement {
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,.55)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 1100,
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !busy) onCancel();
+      }}
+    >
+      <div
+        style={{
+          background: "var(--bg-primary)",
+          border: "1px solid var(--border-color)",
+          borderRadius: "14px",
+          padding: "24px 28px",
+          width: "100%",
+          maxWidth: "400px",
+          boxShadow: "var(--shadow-lg)",
+        }}
+      >
+        <div style={{ fontSize: "24px", marginBottom: "10px" }}>🗑</div>
+        <p
+          style={{
+            margin: "0 0 6px",
+            fontSize: "14px",
+            color: "var(--text-primary)",
+            fontWeight: 500,
+          }}
+        >
+          {message}
+        </p>
+        <p
+          style={{
+            margin: "0 0 20px",
+            fontSize: "12px",
+            color: "var(--danger)",
+          }}
+        >
+          This action cannot be undone.
+        </p>
+        <div
+          style={{ display: "flex", gap: "10px", justifyContent: "flex-end" }}
+        >
+          <button
+            className="btn btn-secondary"
+            onClick={onCancel}
+            disabled={busy}
+          >
+            Cancel
+          </button>
+          <button
+            className="btn btn-danger-sm"
+            onClick={onConfirm}
+            disabled={busy}
+            style={{ minWidth: "90px" }}
+          >
+            {busy ? "Deleting…" : "Delete"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function StateDot({ color }: { color: string | null }): React.ReactElement {
   return (
     <span
@@ -174,6 +257,8 @@ function StateFlowDiagram({
 
 export function WorkflowDetail(): React.ReactElement {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const { entityTypes } = useEntityTypes();
   const { data, isLoading, refetch } = useOne<WorkflowFull>({
     resource: "workflows",
     id: id ?? "missing",
@@ -199,6 +284,42 @@ export function WorkflowDetail(): React.ReactElement {
   const [savingTrans, setSavingTrans] = useState(false);
   const [transError, setTransError] = useState<string | null>(null);
   const [deletingTransId, setDeletingTransId] = useState<string | null>(null);
+
+  const [editingField, setEditingField] = useState<EntityField | null>(null);
+  const [editingState, setEditingState] = useState<WorkflowState | null>(null);
+  const [editingTransition, setEditingTransition] =
+    useState<WorkflowTransition | null>(null);
+
+  const [showDeleteWorkflow, setShowDeleteWorkflow] = useState(false);
+  const [deletingWorkflow, setDeletingWorkflow] = useState(false);
+  const [deleteWorkflowError, setDeleteWorkflowError] = useState<string | null>(
+    null,
+  );
+
+  const [togglingActive, setTogglingActive] = useState(false);
+
+  async function handleToggleActive(): Promise<void> {
+    if (!id || !workflow) return;
+    setTogglingActive(true);
+    try {
+      await fetchWithAuth(`${API_URL}/workflows/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ isActive: !workflow.isActive }),
+      });
+      void refetch();
+    } catch {
+      // ignore — refetch will keep current state
+    } finally {
+      setTogglingActive(false);
+    }
+  }
+
+  // Shared inline confirm modal for field/state/transition deletes
+  const [confirmDelete, setConfirmDelete] = useState<{
+    message: string;
+    onConfirm: () => void;
+  } | null>(null);
+  const [inlineError, setInlineError] = useState<string | null>(null);
 
   const fetchFields = useCallback((entityTypeId: string): void => {
     setFieldsLoading(true);
@@ -253,9 +374,39 @@ export function WorkflowDetail(): React.ReactElement {
       );
       fetchFields(workflow.entityTypeId);
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to delete field");
+      setInlineError(
+        err instanceof Error ? err.message : "Failed to delete field",
+      );
     } finally {
       setDeletingFieldId(null);
+    }
+  }
+
+  async function handleEditField(e: React.FormEvent): Promise<void> {
+    e.preventDefault();
+    if (!workflow?.entityTypeId || !editingField) return;
+    setSavingField(true);
+    setFieldError(null);
+    try {
+      await fetchWithAuth(
+        `${API_URL}/entity-types/${workflow.entityTypeId}/fields/${editingField.id}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            label: fieldForm.label.trim(),
+            isRequired: fieldForm.isRequired,
+          }),
+        },
+      );
+      setEditingField(null);
+      setFieldForm(EMPTY_FIELD);
+      fetchFields(workflow.entityTypeId);
+    } catch (err) {
+      setFieldError(
+        err instanceof Error ? err.message : "Failed to edit field",
+      );
+    } finally {
+      setSavingField(false);
     }
   }
 
@@ -295,9 +446,42 @@ export function WorkflowDetail(): React.ReactElement {
       });
       void refetch();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to delete state");
+      setInlineError(
+        err instanceof Error ? err.message : "Failed to delete state",
+      );
     } finally {
       setDeletingStateId(null);
+    }
+  }
+
+  async function handleEditState(e: React.FormEvent): Promise<void> {
+    e.preventDefault();
+    if (!id || !editingState) return;
+    setSavingState(true);
+    setStateError(null);
+    try {
+      await fetchWithAuth(
+        `${API_URL}/workflows/${id}/states/${editingState.id}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            label: stateForm.label.trim(),
+            color: stateForm.color || undefined,
+            isTerminal: stateForm.isTerminal,
+            slaHours: stateForm.slaHours ? parseInt(stateForm.slaHours) : null,
+            sortOrder: parseInt(stateForm.sortOrder) || 0,
+          }),
+        },
+      );
+      setEditingState(null);
+      setStateForm(EMPTY_STATE);
+      void refetch();
+    } catch (err) {
+      setStateError(
+        err instanceof Error ? err.message : "Failed to edit state",
+      );
+    } finally {
+      setSavingState(false);
     }
   }
 
@@ -342,13 +526,70 @@ export function WorkflowDetail(): React.ReactElement {
       });
       void refetch();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to delete transition");
+      setInlineError(
+        err instanceof Error ? err.message : "Failed to delete transition",
+      );
     } finally {
       setDeletingTransId(null);
     }
   }
 
+  async function handleEditTransition(e: React.FormEvent): Promise<void> {
+    e.preventDefault();
+    if (!id || !editingTransition) return;
+    setSavingTrans(true);
+    setTransError(null);
+    try {
+      const allowedRoles = transForm.allowedRoles
+        .split(",")
+        .map((r) => r.trim())
+        .filter(Boolean);
+      await fetchWithAuth(
+        `${API_URL}/workflows/${id}/transitions/${editingTransition.id}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            label: transForm.label.trim() || null,
+            allowedRoles: allowedRoles.length > 0 ? allowedRoles : [],
+            requiresComment: transForm.requiresComment,
+          }),
+        },
+      );
+      setEditingTransition(null);
+      setTransForm(EMPTY_TRANSITION);
+      void refetch();
+    } catch (err) {
+      setTransError(
+        err instanceof Error ? err.message : "Failed to edit transition",
+      );
+    } finally {
+      setSavingTrans(false);
+    }
+  }
+
+  async function handleDeleteWorkflow(): Promise<void> {
+    if (!id) return;
+    setDeletingWorkflow(true);
+    setDeleteWorkflowError(null);
+    try {
+      await fetchWithAuth(`${API_URL}/workflows/${id}`, { method: "DELETE" });
+      navigate("/workflows");
+    } catch (err) {
+      setDeleteWorkflowError(
+        err instanceof Error ? err.message : "Failed to delete workflow",
+      );
+      setDeletingWorkflow(false);
+    }
+  }
+
   const workflow = data?.data;
+
+  const recordsSlug = (() => {
+    if (!workflow) return null;
+    const et = entityTypes.find((e) => e.id === workflow.entityTypeId);
+    if (!et) return null;
+    return toTypeSlug(et.plural || et.name);
+  })();
 
   if (isLoading) {
     return (
@@ -381,55 +622,169 @@ export function WorkflowDetail(): React.ReactElement {
 
   return (
     <div>
-      <Link to="/workflows" className="back-link">
-        ← Workflows
-      </Link>
+      {/* Breadcrumb */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+          marginBottom: "16px",
+        }}
+      >
+        <Link to="/workflows" className="back-link" style={{ margin: 0 }}>
+          ← Workflows
+        </Link>
+        <span style={{ color: "var(--text-muted)", fontSize: "13px" }}>/</span>
+        <span
+          style={{
+            fontSize: "12px",
+            fontWeight: 600,
+            padding: "2px 10px",
+            borderRadius: "20px",
+            background: "hsla(250,84%,60%,.12)",
+            color: "var(--accent-primary)",
+            border: "1px solid hsla(250,84%,60%,.25)",
+            letterSpacing: "0.3px",
+          }}
+        >
+          Workflow Details
+        </span>
+      </div>
 
-      <div className="detail-header">
-        <div className="workflow-icon workflow-icon-lg">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 24 24"
-            strokeWidth="2"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M3 8.689c0-.864.933-1.406 1.683-.977l7.108 4.061a1.125 1.125 0 010 1.954l-7.108 4.061A1.125 1.125 0 013 16.811V8.69zM12.75 8.689c0-.864.933-1.406 1.683-.977l7.108 4.061a1.125 1.125 0 010 1.954l-7.108 4.061a1.125 1.125 0 01-1.683-.977V8.69z"
-            />
-          </svg>
-        </div>
-        <div>
-          <h2 className="page-title" style={{ marginBottom: "6px" }}>
-            {workflow.name}
-          </h2>
-          <div
-            style={{
-              display: "flex",
-              gap: "8px",
-              alignItems: "center",
-              flexWrap: "wrap",
-            }}
-          >
-            <Link
-              to={`/entity-types/${workflow.entityTypeId}`}
-              className="badge badge-primary"
-              style={{ textDecoration: "none" }}
+      {/* Page header card */}
+      <div
+        style={{
+          background: "var(--bg-secondary)",
+          border: "1px solid var(--border-color)",
+          borderRadius: "16px",
+          padding: "24px 28px",
+          marginBottom: "24px",
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          gap: "20px",
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "flex-start", gap: "16px" }}>
+          <div className="workflow-icon workflow-icon-lg">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              strokeWidth="2"
+              stroke="currentColor"
             >
-              Manage Fields ↗
-            </Link>
-            <span style={{ color: "var(--text-muted)", fontSize: "13px" }}>
-              {workflow.states.length} states · {workflow.transitions.length}{" "}
-              transitions
-            </span>
-            <span style={{ color: "var(--text-muted)", fontSize: "12px" }}>
-              Created {new Date(workflow.createdAt).toLocaleDateString()}
-            </span>
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M3 8.689c0-.864.933-1.406 1.683-.977l7.108 4.061a1.125 1.125 0 010 1.954l-7.108 4.061A1.125 1.125 0 013 16.811V8.69zM12.75 8.689c0-.864.933-1.406 1.683-.977l7.108 4.061a1.125 1.125 0 010 1.954l-7.108 4.061a1.125 1.125 0 01-1.683-.977V8.69z"
+              />
+            </svg>
+          </div>
+          <div>
+            <h2 className="page-title" style={{ marginBottom: "6px" }}>
+              {workflow.name}
+            </h2>
+            <div
+              style={{
+                display: "flex",
+                gap: "8px",
+                alignItems: "center",
+                flexWrap: "wrap",
+              }}
+            >
+              <Link
+                to={`/entity-types/${workflow.entityTypeId}`}
+                className="badge badge-primary"
+                style={{ textDecoration: "none" }}
+              >
+                Manage Fields ↗
+              </Link>
+              <span
+                className={
+                  workflow.isActive
+                    ? "badge badge-success"
+                    : "badge badge-muted"
+                }
+              >
+                {workflow.isActive ? "Active" : "Inactive"}
+              </span>
+              <span style={{ color: "var(--text-muted)", fontSize: "13px" }}>
+                {workflow.states.length} states · {workflow.transitions.length}{" "}
+                transitions
+              </span>
+              <span style={{ color: "var(--text-muted)", fontSize: "12px" }}>
+                Created {new Date(workflow.createdAt).toLocaleDateString()}
+              </span>
+            </div>
           </div>
         </div>
+
+        {/* Action buttons */}
+        <div
+          style={{
+            display: "flex",
+            gap: "10px",
+            alignItems: "center",
+            flexShrink: 0,
+          }}
+        >
+          {recordsSlug && (
+            <button
+              className="btn-primary"
+              onClick={() => navigate(`/records/${recordsSlug}`)}
+            >
+              View Records →
+            </button>
+          )}
+          <button
+            className={workflow.isActive ? "btn btn-secondary" : "btn-primary"}
+            onClick={() => void handleToggleActive()}
+            disabled={togglingActive}
+            style={{ minWidth: "110px" }}
+          >
+            {togglingActive
+              ? "Saving…"
+              : workflow.isActive
+                ? "Deactivate"
+                : "Activate"}
+          </button>
+          <button
+            className="btn btn-danger-sm"
+            onClick={() => setShowDeleteWorkflow(true)}
+          >
+            Delete Workflow
+          </button>
+        </div>
       </div>
+
+      {inlineError && (
+        <div
+          className="alert alert-error"
+          style={{
+            marginBottom: "20px",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <span>⚠ {inlineError}</span>
+          <button
+            onClick={() => setInlineError(null)}
+            style={{
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              fontSize: "16px",
+              color: "inherit",
+              padding: "0 4px",
+            }}
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {/* State flow diagram */}
       <div className="data-panel" style={{ marginBottom: "24px" }}>
@@ -479,7 +834,7 @@ export function WorkflowDetail(): React.ReactElement {
                 <th>Label</th>
                 <th>Type</th>
                 <th>Required</th>
-                <th style={{ width: "48px" }}></th>
+                <th style={{ width: "80px" }}></th>
               </tr>
             </thead>
             <tbody>
@@ -501,14 +856,36 @@ export function WorkflowDetail(): React.ReactElement {
                         <span className="text-muted-sm">—</span>
                       )}
                     </td>
-                    <td>
+                    <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                      <button
+                        className="btn-edit-sm"
+                        style={{ marginRight: "6px" }}
+                        onClick={() => {
+                          setEditingField(f);
+                          setFieldForm({
+                            name: f.name,
+                            label: f.label,
+                            fieldType: f.fieldType,
+                            isRequired: f.isRequired,
+                          });
+                          setFieldError(null);
+                        }}
+                        title="Edit field"
+                      >
+                        ✎
+                      </button>
                       <button
                         className="btn-danger-sm"
                         disabled={deletingFieldId === f.id}
-                        onClick={() => {
-                          if (confirm(`Delete field "${f.label}"?`))
-                            void handleDeleteField(f.id);
-                        }}
+                        onClick={() =>
+                          setConfirmDelete({
+                            message: `Delete field "${f.label}"?`,
+                            onConfirm: () => {
+                              setConfirmDelete(null);
+                              void handleDeleteField(f.id);
+                            },
+                          })
+                        }
                         title="Delete field"
                       >
                         {deletingFieldId === f.id ? "…" : "✕"}
@@ -542,7 +919,7 @@ export function WorkflowDetail(): React.ReactElement {
               <th>Label</th>
               <th>Type</th>
               <th>SLA</th>
-              <th style={{ width: "48px" }}></th>
+              <th style={{ width: "80px" }}></th>
             </tr>
           </thead>
           <tbody>
@@ -587,19 +964,46 @@ export function WorkflowDetail(): React.ReactElement {
                     <span className="text-muted-sm">—</span>
                   )}
                 </td>
-                <td>
-                  {state.name !== workflow.initialState && (
+                <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                  <button
+                    className="btn-edit-sm"
+                    style={{ marginRight: "6px" }}
+                    onClick={() => {
+                      setEditingState(state);
+                      setStateForm({
+                        name: state.name,
+                        label: state.label,
+                        color: state.color ?? "#6366f1",
+                        isTerminal: state.isTerminal,
+                        slaHours:
+                          state.slaHours !== null ? String(state.slaHours) : "",
+                        sortOrder: String(state.sortOrder),
+                      });
+                      setStateError(null);
+                    }}
+                    title="Edit state"
+                  >
+                    ✎
+                  </button>
+                  {state.name !== workflow.initialState ? (
                     <button
                       className="btn-danger-sm"
                       disabled={deletingStateId === state.id}
-                      onClick={() => {
-                        if (confirm(`Delete state "${state.label}"?`))
-                          void handleDeleteState(state.id);
-                      }}
+                      onClick={() =>
+                        setConfirmDelete({
+                          message: `Delete state "${state.label}"?`,
+                          onConfirm: () => {
+                            setConfirmDelete(null);
+                            void handleDeleteState(state.id);
+                          },
+                        })
+                      }
                       title="Delete state"
                     >
                       {deletingStateId === state.id ? "…" : "✕"}
                     </button>
+                  ) : (
+                    <span style={{ display: "inline-block", width: "24px" }} />
                   )}
                 </td>
               </tr>
@@ -633,7 +1037,7 @@ export function WorkflowDetail(): React.ReactElement {
               <th>Label</th>
               <th>Allowed Roles</th>
               <th>Requirements</th>
-              <th style={{ width: "48px" }}></th>
+              <th style={{ width: "80px" }}></th>
             </tr>
           </thead>
           <tbody>
@@ -689,18 +1093,37 @@ export function WorkflowDetail(): React.ReactElement {
                     </div>
                   )}
                 </td>
-                <td>
+                <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                  <button
+                    className="btn-edit-sm"
+                    style={{ marginRight: "6px" }}
+                    onClick={() => {
+                      setEditingTransition(t);
+                      setTransForm({
+                        fromState: t.fromState,
+                        toState: t.toState,
+                        label: t.label,
+                        allowedRoles: t.allowedRoles.join(", "),
+                        requiresComment: t.requiresComment,
+                      });
+                      setTransError(null);
+                    }}
+                    title="Edit transition"
+                  >
+                    ✎
+                  </button>
                   <button
                     className="btn-danger-sm"
                     disabled={deletingTransId === t.id}
-                    onClick={() => {
-                      if (
-                        confirm(
-                          `Delete transition "${t.label || `${t.fromState} → ${t.toState}`}"?`,
-                        )
-                      )
-                        void handleDeleteTransition(t.id);
-                    }}
+                    onClick={() =>
+                      setConfirmDelete({
+                        message: `Delete transition "${t.label || `${t.fromState} → ${t.toState}`}"?`,
+                        onConfirm: () => {
+                          setConfirmDelete(null);
+                          void handleDeleteTransition(t.id);
+                        },
+                      })
+                    }
                     title="Delete transition"
                   >
                     {deletingTransId === t.id ? "…" : "✕"}
@@ -1102,6 +1525,457 @@ export function WorkflowDetail(): React.ReactElement {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* Edit Field modal */}
+      {editingField && (
+        <div className="modal-overlay" onClick={() => setEditingField(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">Edit Field — {editingField.label}</h3>
+              <button
+                className="modal-close"
+                onClick={() => setEditingField(null)}
+              >
+                ×
+              </button>
+            </div>
+            <form onSubmit={(e) => void handleEditField(e)}>
+              <div className="modal-body">
+                {fieldError && (
+                  <div
+                    className="alert alert-error"
+                    style={{ marginBottom: "16px" }}
+                  >
+                    {fieldError}
+                  </div>
+                )}
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label">Label *</label>
+                    <input
+                      className="form-input"
+                      placeholder="e.g. Customer Name"
+                      value={fieldForm.label}
+                      onChange={(e) =>
+                        setFieldForm((f) => ({ ...f, label: e.target.value }))
+                      }
+                      required
+                      autoFocus
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Field Name (Immutable)</label>
+                    <input
+                      className="form-input"
+                      value={fieldForm.name}
+                      disabled
+                    />
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Field Type (Immutable)</label>
+                  <input
+                    className="form-input"
+                    value={
+                      FIELD_TYPES.find((ft) => ft.value === fieldForm.fieldType)
+                        ?.label ?? fieldForm.fieldType
+                    }
+                    disabled
+                  />
+                </div>
+                <label className="form-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={fieldForm.isRequired}
+                    onChange={(e) =>
+                      setFieldForm((f) => ({
+                        ...f,
+                        isRequired: e.target.checked,
+                      }))
+                    }
+                  />
+                  <span>Required field</span>
+                </label>
+              </div>
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => setEditingField(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  disabled={savingField}
+                >
+                  {savingField ? "Saving…" : "Save Changes"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit State modal */}
+      {editingState && (
+        <div className="modal-overlay" onClick={() => setEditingState(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">Edit State — {editingState.label}</h3>
+              <button
+                className="modal-close"
+                onClick={() => setEditingState(null)}
+              >
+                ×
+              </button>
+            </div>
+            <form onSubmit={(e) => void handleEditState(e)}>
+              <div className="modal-body">
+                {stateError && (
+                  <div
+                    className="alert alert-error"
+                    style={{ marginBottom: "16px" }}
+                  >
+                    {stateError}
+                  </div>
+                )}
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label">Label *</label>
+                    <input
+                      className="form-input"
+                      placeholder="e.g. In Progress"
+                      value={stateForm.label}
+                      onChange={(e) =>
+                        setStateForm((f) => ({ ...f, label: e.target.value }))
+                      }
+                      required
+                      autoFocus
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">State Name (Immutable)</label>
+                    <input
+                      className="form-input"
+                      value={stateForm.name}
+                      disabled
+                    />
+                  </div>
+                </div>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label">Color</label>
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: "8px",
+                        alignItems: "center",
+                      }}
+                    >
+                      <input
+                        type="color"
+                        value={stateForm.color}
+                        onChange={(e) =>
+                          setStateForm((f) => ({ ...f, color: e.target.value }))
+                        }
+                        style={{
+                          width: "40px",
+                          height: "36px",
+                          border: "none",
+                          borderRadius: "6px",
+                          cursor: "pointer",
+                        }}
+                      />
+                      <input
+                        className="form-input"
+                        value={stateForm.color}
+                        onChange={(e) =>
+                          setStateForm((f) => ({ ...f, color: e.target.value }))
+                        }
+                        placeholder="#6366f1"
+                        style={{ flex: 1 }}
+                      />
+                    </div>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Sort Order</label>
+                    <input
+                      className="form-input"
+                      type="number"
+                      min={0}
+                      value={stateForm.sortOrder}
+                      onChange={(e) =>
+                        setStateForm((f) => ({
+                          ...f,
+                          sortOrder: e.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">SLA Hours (optional)</label>
+                  <input
+                    className="form-input"
+                    type="number"
+                    min={1}
+                    placeholder="e.g. 24"
+                    value={stateForm.slaHours}
+                    onChange={(e) =>
+                      setStateForm((f) => ({ ...f, slaHours: e.target.value }))
+                    }
+                  />
+                </div>
+                <label className="form-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={stateForm.isTerminal}
+                    onChange={(e) =>
+                      setStateForm((f) => ({
+                        ...f,
+                        isTerminal: e.target.checked,
+                      }))
+                    }
+                  />
+                  <span>Terminal state (no outgoing transitions expected)</span>
+                </label>
+              </div>
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => setEditingState(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  disabled={savingState}
+                >
+                  {savingState ? "Saving…" : "Save Changes"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Transition modal */}
+      {editingTransition && (
+        <div
+          className="modal-overlay"
+          onClick={() => setEditingTransition(null)}
+        >
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">Edit Transition</h3>
+              <button
+                className="modal-close"
+                onClick={() => setEditingTransition(null)}
+              >
+                ×
+              </button>
+            </div>
+            <form onSubmit={(e) => void handleEditTransition(e)}>
+              <div className="modal-body">
+                {transError && (
+                  <div
+                    className="alert alert-error"
+                    style={{ marginBottom: "16px" }}
+                  >
+                    {transError}
+                  </div>
+                )}
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label">From State (Immutable)</label>
+                    <input
+                      className="form-input"
+                      value={transForm.fromState}
+                      disabled
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">To State (Immutable)</label>
+                    <input
+                      className="form-input"
+                      value={transForm.toState}
+                      disabled
+                    />
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Label</label>
+                  <input
+                    className="form-input"
+                    placeholder="e.g. Start Work"
+                    value={transForm.label}
+                    onChange={(e) =>
+                      setTransForm((f) => ({ ...f, label: e.target.value }))
+                    }
+                    autoFocus
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">
+                    Allowed Roles (comma-separated, blank = any)
+                  </label>
+                  <input
+                    className="form-input"
+                    placeholder="e.g. admin, agent"
+                    value={transForm.allowedRoles}
+                    onChange={(e) =>
+                      setTransForm((f) => ({
+                        ...f,
+                        allowedRoles: e.target.value,
+                      }))
+                    }
+                  />
+                </div>
+                <label className="form-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={transForm.requiresComment}
+                    onChange={(e) =>
+                      setTransForm((f) => ({
+                        ...f,
+                        requiresComment: e.target.checked,
+                      }))
+                    }
+                  />
+                  <span>Requires comment</span>
+                </label>
+              </div>
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => setEditingTransition(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  disabled={savingTrans}
+                >
+                  {savingTrans ? "Saving…" : "Save Changes"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Shared confirm-delete modal for fields / states / transitions */}
+      {confirmDelete && (
+        <ConfirmDeleteModal
+          message={confirmDelete.message}
+          onConfirm={confirmDelete.onConfirm}
+          onCancel={() => setConfirmDelete(null)}
+          busy={
+            deletingFieldId !== null ||
+            deletingStateId !== null ||
+            deletingTransId !== null
+          }
+        />
+      )}
+
+      {/* Delete workflow confirmation modal */}
+      {showDeleteWorkflow && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,.55)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !deletingWorkflow)
+              setShowDeleteWorkflow(false);
+          }}
+        >
+          <div
+            style={{
+              background: "var(--bg-primary)",
+              border: "1px solid var(--border-color)",
+              borderRadius: "16px",
+              padding: "28px 32px",
+              width: "100%",
+              maxWidth: "440px",
+              boxShadow: "var(--shadow-lg)",
+            }}
+          >
+            <div style={{ fontSize: "28px", marginBottom: "12px" }}>🗑</div>
+            <h3
+              style={{ margin: "0 0 8px", fontSize: "18px", fontWeight: 700 }}
+            >
+              Delete workflow?
+            </h3>
+            <p
+              style={{
+                margin: "0 0 6px",
+                fontSize: "14px",
+                color: "var(--text-secondary)",
+              }}
+            >
+              You are about to permanently delete{" "}
+              <strong>"{workflow.name}"</strong>. This will also remove all its
+              states and transitions.
+            </p>
+            <p
+              style={{
+                margin: "0 0 20px",
+                fontSize: "13px",
+                color: "var(--danger)",
+              }}
+            >
+              This action cannot be undone.
+            </p>
+
+            {deleteWorkflowError && (
+              <p
+                style={{
+                  margin: "0 0 16px",
+                  fontSize: "13px",
+                  color: "var(--danger)",
+                }}
+              >
+                ⚠ {deleteWorkflowError}
+              </p>
+            )}
+
+            <div
+              style={{
+                display: "flex",
+                gap: "10px",
+                justifyContent: "flex-end",
+              }}
+            >
+              <button
+                className="btn btn-secondary"
+                onClick={() => setShowDeleteWorkflow(false)}
+                disabled={deletingWorkflow}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn-danger-sm"
+                onClick={() => void handleDeleteWorkflow()}
+                disabled={deletingWorkflow}
+                style={{ minWidth: "120px" }}
+              >
+                {deletingWorkflow ? "Deleting…" : "Delete Workflow"}
+              </button>
+            </div>
           </div>
         </div>
       )}

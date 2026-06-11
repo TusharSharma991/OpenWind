@@ -3,6 +3,7 @@ import type { AuthContext } from "@platform/auth";
 import { createWorkflowHandler } from "./create.js";
 import { listWorkflowsHandler } from "./list.js";
 import { getWorkflowHandler } from "./get.js";
+import { updateWorkflowHandler } from "./update.js";
 import { deleteWorkflowHandler } from "./delete.js";
 import { createStateHandler } from "./states/create-state.js";
 import { updateStateHandler } from "./states/update-state.js";
@@ -16,6 +17,7 @@ const router = new Hono<{ Variables: { auth: AuthContext } }>();
 router.post("/", ...createWorkflowHandler);
 router.get("/", ...listWorkflowsHandler);
 router.get("/:id", ...getWorkflowHandler);
+router.patch("/:id", ...updateWorkflowHandler);
 router.delete("/:id", ...deleteWorkflowHandler);
 
 router.post("/:id/states", ...createStateHandler);

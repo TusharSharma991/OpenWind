@@ -40,7 +40,7 @@ export function Dashboard(): React.ReactElement {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchWithAuth(`${API_URL}/workflows`)
+    fetchWithAuth(`${API_URL}/workflows?activeOnly=true`)
       .then((res) => {
         setWorkflows((res as { data?: Workflow[] }).data ?? []);
       })

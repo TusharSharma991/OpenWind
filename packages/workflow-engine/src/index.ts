@@ -8,6 +8,7 @@ export {
 export { evaluateConditionTree } from "./condition-evaluator.js";
 export {
   createWorkflow,
+  updateWorkflow,
   getWorkflow,
   listWorkflows,
   deleteWorkflow,

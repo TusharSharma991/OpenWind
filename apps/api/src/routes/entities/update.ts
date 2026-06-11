@@ -9,6 +9,7 @@ import { handleEntityError } from "../../lib/handle-entity-error.js";
 const UpdateEntitySchema = z.object({
   fields: z.record(z.unknown()).optional(),
   assignedTo: z.string().uuid().nullable().optional(),
+  currentState: z.string().optional(),
 });
 
 export const updateEntityHandler = factory.createHandlers(
@@ -16,12 +17,16 @@ export const updateEntityHandler = factory.createHandlers(
   zValidator("json", UpdateEntitySchema),
   async (c) => {
     const id = c.req.param("id") ?? "";
-    const { tenantId } = c.get("auth");
+    const { tenantId, userId } = c.get("auth");
     const input = c.req.valid("json");
 
     try {
       const instance = await withTenantContext(tenantId, (tx) =>
-        updateEntity(tx, tenantId, id, input),
+        updateEntity(tx, tenantId, id, {
+          ...input,
+          actorId: userId,
+          updatedBy: userId,
+        }),
       );
       return c.json({ data: instance });
     } catch (err) {

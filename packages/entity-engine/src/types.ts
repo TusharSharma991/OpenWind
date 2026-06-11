@@ -54,13 +54,18 @@ export type CreateEntityInput = {
   entityTypeId: string;
   fields: Record<string, unknown>;
   createdBy?: string | undefined;
+  actorId?: string | undefined;
   assignedTo?: string | undefined;
   workflowId?: string | undefined;
+  currentState?: string | undefined;
 };
 
 export type UpdateEntityInput = {
   fields?: Record<string, unknown> | undefined;
   assignedTo?: string | null | undefined;
+  currentState?: string | null | undefined;
+  updatedBy?: string | undefined;
+  actorId?: string | undefined;
 };
 
 export type ListEntitiesInput = {

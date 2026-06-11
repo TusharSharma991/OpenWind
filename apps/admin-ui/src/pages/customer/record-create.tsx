@@ -14,7 +14,12 @@ type EntityField = {
     options?: Array<string | { label: string; value: string; color?: string }>;
   };
 };
-type WorkflowDef = { id: string; name: string };
+type WorkflowDef = {
+  id: string;
+  name: string;
+  initialState: string;
+  states?: Array<{ id: string; name: string; label: string }>;
+};
 
 function FieldInput({
   field,
@@ -128,9 +133,32 @@ export function CustomerRecordCreate(): React.ReactElement {
   const [workflows, setWorkflows] = useState<WorkflowDef[]>([]);
   const [fieldValues, setFieldValues] = useState<Record<string, unknown>>({});
   const [workflowId, setWorkflowId] = useState("");
+  const [currentState, setCurrentState] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const selectedWorkflow = workflows.find((w) => w.id === workflowId);
+  const availableStates = selectedWorkflow?.states ?? [];
+
+  useEffect(() => {
+    if (workflowId) {
+      const wf = workflows.find((w) => w.id === workflowId);
+      if (wf) {
+        const isValid = wf.states?.some((s) => s.name === currentState);
+        if (!isValid) {
+          // Only use initialState if it still exists; otherwise pick first state
+          const fallback =
+            wf.states?.find((s) => s.name === wf.initialState)?.name ??
+            wf.states?.[0]?.name ??
+            "";
+          setCurrentState(fallback);
+        }
+      }
+    } else {
+      setCurrentState("");
+    }
+  }, [workflowId, workflows]);
 
   useEffect(() => {
     if (!entityTypeId) return;
@@ -164,6 +192,7 @@ export function CustomerRecordCreate(): React.ReactElement {
         fields: fieldValues,
       };
       if (workflowId) payload["workflowId"] = workflowId;
+      if (currentState) payload["currentState"] = currentState;
       const res = await fetchWithAuth(`${API_URL}/entities`, {
         method: "POST",
         body: JSON.stringify(payload),
@@ -195,7 +224,7 @@ export function CustomerRecordCreate(): React.ReactElement {
         style={{ marginTop: "24px" }}
       >
         {error && <div className="portal-alert-error">{error}</div>}
-        {workflows.length > 1 && (
+        {workflows.length > 0 && (
           <div className="portal-field-group">
             <label className="portal-field-label">Workflow</label>
             <select
@@ -207,6 +236,22 @@ export function CustomerRecordCreate(): React.ReactElement {
               {workflows.map((wf) => (
                 <option key={wf.id} value={wf.id}>
                   {wf.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        {workflowId && availableStates.length > 0 && (
+          <div className="portal-field-group">
+            <label className="portal-field-label">State</label>
+            <select
+              className="portal-input"
+              value={currentState}
+              onChange={(e) => setCurrentState(e.target.value)}
+            >
+              {availableStates.map((st) => (
+                <option key={st.id} value={st.name}>
+                  {st.label}
                 </option>
               ))}
             </select>

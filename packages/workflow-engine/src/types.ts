@@ -4,6 +4,7 @@ export interface WorkflowDefinition {
   entityTypeId: string;
   name: string;
   initialState: string;
+  isActive: boolean;
   createdAt: Date;
 }
 
@@ -86,6 +87,10 @@ export type CreateWorkflowInput = {
   entityTypeId: string;
   name: string;
   initialState: string;
+};
+
+export type UpdateWorkflowInput = {
+  isActive?: boolean | undefined;
 };
 
 export type CreateWorkflowStateInput = {

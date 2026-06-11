@@ -16,6 +16,7 @@ type EntityField = {
 };
 type EntityInstance = {
   id: string;
+  workflowId: string | null;
   currentState: string | null;
   fields: Record<string, unknown>;
   createdAt: string;
@@ -36,6 +37,7 @@ type WorkflowEvent = {
   actorId: string;
   comment: string | null;
   triggeredAt: string;
+  metadata?: Record<string, unknown>;
 };
 
 function FieldValue({
@@ -198,7 +200,6 @@ export function CustomerRecordDetail(): React.ReactElement {
 
   const [fields, setFields] = useState<EntityField[]>([]);
   const [record, setRecord] = useState<EntityInstance | null>(null);
-  const [transitions, setTransitions] = useState<Transition[]>([]);
   const [history, setHistory] = useState<WorkflowEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -210,26 +211,56 @@ export function CustomerRecordDetail(): React.ReactElement {
   const [editValues, setEditValues] = useState<Record<string, unknown>>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [allStates, setAllStates] = useState<
+    Array<{ id: string; name: string; label: string }>
+  >([]);
+  const [currentState, setCurrentState] = useState("");
+  const [users, setUsers] = useState<
+    Array<{ userId: string; email: string; displayName: string | null }>
+  >([]);
+
+  const getFieldLabel = (fieldName: string): string => {
+    if (fieldName === "state" || fieldName === "currentState") return "State";
+    if (fieldName === "assignedTo") return "Assigned To";
+    const found = fields.find((f) => f.name === fieldName);
+    return found ? found.label : fieldName;
+  };
+
+  const getActorName = (actorId: string | null): string => {
+    if (!actorId) return "System";
+    const u = users.find((user) => user.userId === actorId);
+    return u?.displayName ?? u?.email ?? actorId;
+  };
 
   function loadRecord(): Promise<void> {
     if (!entityTypeId || !id) return Promise.resolve();
     return Promise.all([
       fetchWithAuth(`${API_URL}/entity-types/${entityTypeId}/fields`),
       fetchWithAuth(`${API_URL}/entities/${id}`),
-      fetchWithAuth(`${API_URL}/entities/${id}/transitions`),
       fetchWithAuth(`${API_URL}/entities/${id}/transitions/history`).catch(
         () => ({ data: [] }),
       ),
+      fetchWithAuth(`${API_URL}/users`).catch(() => ({ data: [] })),
     ])
-      .then(([fieldsRes, recRes, transRes, histRes]) => {
+      .then(([fieldsRes, recRes, histRes, usersRes]) => {
         setFields(
           (fieldsRes as { data: EntityField[] }).data.filter(
             (f) => !f.isSystem,
           ),
         );
         setRecord((recRes as { data: EntityInstance }).data);
-        setTransitions((transRes as { data?: Transition[] }).data ?? []);
         setHistory((histRes as { data?: WorkflowEvent[] }).data ?? []);
+        setUsers(
+          (
+            usersRes as {
+              data?: Array<{
+                userId: string;
+                email: string;
+                displayName: string | null;
+              }>;
+            }
+          ).data ?? [],
+        );
       })
       .catch((err: unknown) =>
         setError(err instanceof Error ? err.message : "Failed to load"),
@@ -241,6 +272,43 @@ export function CustomerRecordDetail(): React.ReactElement {
     void loadRecord();
   }, [entityTypeId, id]);
 
+  useEffect(() => {
+    if (record?.workflowId) {
+      fetchWithAuth(`${API_URL}/workflows/${record.workflowId}`)
+        .then((res) => {
+          const wf = (
+            res as {
+              data: {
+                states: Array<{ id: string; name: string; label: string }>;
+              };
+            }
+          ).data;
+          setAllStates(wf.states);
+        })
+        .catch(() => undefined);
+    } else if (entityTypeId) {
+      fetchWithAuth(`${API_URL}/workflows?entityTypeId=${entityTypeId}`)
+        .then((res) => {
+          const wfs =
+            (
+              res as {
+                data?: Array<{
+                  states?: Array<{ id: string; name: string; label: string }>;
+                }>;
+              }
+            ).data ?? [];
+          if (wfs[0]?.states) {
+            setAllStates(wfs[0].states);
+          } else {
+            setAllStates([]);
+          }
+        })
+        .catch(() => setAllStates([]));
+    } else {
+      setAllStates([]);
+    }
+  }, [record?.workflowId, entityTypeId]);
+
   async function saveEdit(): Promise<void> {
     if (!id) return;
     setSaving(true);
@@ -248,7 +316,7 @@ export function CustomerRecordDetail(): React.ReactElement {
     try {
       await fetchWithAuth(`${API_URL}/entities/${id}`, {
         method: "PATCH",
-        body: JSON.stringify({ fields: editValues }),
+        body: JSON.stringify({ fields: editValues, currentState }),
       });
       setEditing(false);
       setLoading(true);
@@ -284,14 +352,6 @@ export function CustomerRecordDetail(): React.ReactElement {
     } finally {
       setTransitioning(null);
     }
-  }
-
-  function handleStateSelect(e: React.ChangeEvent<HTMLSelectElement>): void {
-    const transitionId = e.target.value;
-    if (!transitionId) return;
-    const t = transitions.find((tr) => tr.id === transitionId);
-    if (t) setStateModal(t);
-    e.target.value = "";
   }
 
   if (loading)
@@ -348,42 +408,6 @@ export function CustomerRecordDetail(): React.ReactElement {
               {transError}
             </div>
           )}
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <label
-              className="portal-field-label"
-              style={{ margin: 0, whiteSpace: "nowrap" }}
-            >
-              Move to:
-            </label>
-            {transitions.length > 0 ? (
-              <select
-                className="portal-input"
-                style={{ minWidth: "180px" }}
-                defaultValue=""
-                onChange={handleStateSelect}
-                disabled={transitioning !== null}
-              >
-                <option value="" disabled>
-                  Select a state…
-                </option>
-                {transitions.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.label || t.toState}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <span className="portal-text-muted" style={{ fontSize: "13px" }}>
-                No state changes available
-              </span>
-            )}
-            {transitioning && (
-              <div
-                className="spinner"
-                style={{ width: "16px", height: "16px" }}
-              />
-            )}
-          </div>
         </div>
       </div>
 
@@ -395,6 +419,7 @@ export function CustomerRecordDetail(): React.ReactElement {
               className="portal-btn-secondary portal-btn-sm"
               onClick={() => {
                 setEditValues(record.fields);
+                setCurrentState(record.currentState ?? "");
                 setEditing(true);
                 setSaveError(null);
               }}
@@ -418,6 +443,22 @@ export function CustomerRecordDetail(): React.ReactElement {
               </div>
             )}
             <div className="portal-edit-grid">
+              {allStates.length > 0 && (
+                <div className="portal-field-group portal-field-full">
+                  <label className="portal-field-label">State</label>
+                  <select
+                    className="portal-input"
+                    value={currentState}
+                    onChange={(e) => setCurrentState(e.target.value)}
+                  >
+                    {allStates.map((st) => (
+                      <option key={st.id} value={st.name}>
+                        {st.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               {fields.map((f) => (
                 <div
                   key={f.id}
@@ -459,6 +500,30 @@ export function CustomerRecordDetail(): React.ReactElement {
           </div>
         ) : (
           <div className="portal-fields-grid">
+            <div className="portal-field-row">
+              <div className="portal-field-label-sm">State</div>
+              <div className="portal-field-value">
+                {record.currentState ? (
+                  <span className="portal-state-badge">
+                    {record.currentState}
+                  </span>
+                ) : (
+                  <span className="portal-text-muted">—</span>
+                )}
+              </div>
+            </div>
+            <div className="portal-field-row">
+              <div className="portal-field-label-sm">Created At</div>
+              <div className="portal-field-value">
+                {new Date(record.createdAt).toLocaleString()}
+              </div>
+            </div>
+            <div className="portal-field-row">
+              <div className="portal-field-label-sm">Updated At</div>
+              <div className="portal-field-value">
+                {new Date(record.updatedAt).toLocaleString()}
+              </div>
+            </div>
             {fields.map((f) => (
               <div key={f.id} className="portal-field-row">
                 <div className="portal-field-label-sm">{f.label}</div>
@@ -481,36 +546,120 @@ export function CustomerRecordDetail(): React.ReactElement {
             <h3 className="portal-card-title">History</h3>
           </div>
           <div className="portal-history">
-            {history.map((event) => (
-              <div key={event.id} className="portal-history-item">
-                <div className="portal-history-dot" />
-                <div className="portal-history-body">
-                  <div className="portal-history-transition">
-                    {event.fromState && (
-                      <>
+            {history.map((event) => {
+              const meta = event.metadata;
+              const isCreate = meta?.type === "create";
+              const isUpdate = meta?.type === "update";
+
+              return (
+                <div key={event.id} className="portal-history-item">
+                  <div className="portal-history-dot" />
+                  <div className="portal-history-body">
+                    {isCreate ? (
+                      <div style={{ fontWeight: 600, color: "var(--text)" }}>
+                        🆕 Record created{" "}
+                        <span
+                          style={{
+                            fontWeight: 400,
+                            color: "var(--text-3)",
+                            marginLeft: "4px",
+                          }}
+                        >
+                          by {getActorName(event.actorId)}
+                        </span>
+                      </div>
+                    ) : isUpdate ? (
+                      <div>
+                        <div
+                          style={{
+                            fontWeight: 600,
+                            color: "var(--text)",
+                            marginBottom: "4px",
+                          }}
+                        >
+                          ✏️ Record updated{" "}
+                          <span
+                            style={{
+                              fontWeight: 400,
+                              color: "var(--text-3)",
+                              marginLeft: "4px",
+                            }}
+                          >
+                            by {getActorName(event.actorId)}
+                          </span>
+                        </div>
+                        {"changed" in meta &&
+                        typeof meta["changed"] === "object" &&
+                        meta["changed"] !== null &&
+                        Object.keys(meta["changed"] as object).length > 0 ? (
+                          <ul
+                            style={{
+                              margin: "4px 0 0 16px",
+                              padding: 0,
+                              fontSize: "12px",
+                              color: "var(--text-2)",
+                            }}
+                          >
+                            {Object.entries(
+                              meta.changed as Record<
+                                string,
+                                Record<string, unknown>
+                              >,
+                            ).map(([fieldName, change]) => (
+                              <li
+                                key={fieldName}
+                                style={{ listStyleType: "disc" }}
+                              >
+                                <strong>{getFieldLabel(fieldName)}</strong>:
+                                changed from{" "}
+                                <em>{String(change["old"] ?? "—")}</em> to{" "}
+                                <em>{String(change["new"] ?? "—")}</em>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div className="portal-history-transition">
+                        {event.fromState && (
+                          <>
+                            <span className="portal-state-badge portal-state-badge-sm">
+                              {event.fromState}
+                            </span>
+                            <span
+                              style={{
+                                margin: "0 6px",
+                                color: "var(--text-3)",
+                              }}
+                            >
+                              →
+                            </span>
+                          </>
+                        )}
                         <span className="portal-state-badge portal-state-badge-sm">
-                          {event.fromState}
+                          {event.toState}
                         </span>
                         <span
-                          style={{ margin: "0 6px", color: "var(--text-3)" }}
+                          style={{
+                            marginLeft: "8px",
+                            fontSize: "12px",
+                            color: "var(--text-3)",
+                          }}
                         >
-                          →
+                          by {getActorName(event.actorId)}
                         </span>
-                      </>
+                      </div>
                     )}
-                    <span className="portal-state-badge portal-state-badge-sm">
-                      {event.toState}
-                    </span>
+                    {event.comment && !isCreate && !isUpdate && (
+                      <p className="portal-history-comment">{event.comment}</p>
+                    )}
+                    <p className="portal-history-meta">
+                      {new Date(event.triggeredAt).toLocaleString()}
+                    </p>
                   </div>
-                  {event.comment && (
-                    <p className="portal-history-comment">{event.comment}</p>
-                  )}
-                  <p className="portal-history-meta">
-                    {new Date(event.triggeredAt).toLocaleString()}
-                  </p>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

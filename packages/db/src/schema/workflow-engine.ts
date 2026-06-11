@@ -20,6 +20,7 @@ export const workflows = pgTable("workflows", {
     .references(() => entityTypes.id),
   name: text("name").notNull(),
   initialState: text("initial_state").notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),

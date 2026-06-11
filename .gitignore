@@ -21,6 +21,9 @@ packages/*/src/**/*.d.ts.map
 .env.local
 .env.*.local
 
+# Local Docker overrides
+docker-compose.override.yml
+
 # Database
 *.db
 *.sqlite

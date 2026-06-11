@@ -29,7 +29,7 @@ export const createEntityFieldHandler = factory.createHandlers(
   requireRole("admin"),
   zValidator("json", CreateFieldSchema),
   async (c) => {
-    const typeId = c.req.param("typeId") ?? "";
+    const typeId = c.get("typeId");
     const input = c.req.valid("json");
     const { tenantId } = c.get("auth");
 

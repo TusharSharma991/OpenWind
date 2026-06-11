@@ -1,0 +1,17 @@
+ARG NODE_VERSION=22
+FROM node:${NODE_VERSION}-alpine
+RUN corepack enable
+WORKDIR /app
+
+# Copy workspace manifests first for layer caching
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml turbo.json ./
+COPY packages/ packages/
+COPY modules/ modules/
+COPY apps/admin-ui/ apps/admin-ui/
+
+RUN pnpm install --frozen-lockfile
+
+EXPOSE 3001
+
+# Source is mounted as a volume at runtime — Vite watches for changes and HMRs
+CMD ["pnpm", "--filter", "@platform/admin-ui", "dev", "--host"]

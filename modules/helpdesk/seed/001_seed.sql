@@ -15,7 +15,7 @@ WITH
   ),
   wf AS (
     INSERT INTO workflows (id, tenant_id, entity_type_id, name, initial_state)
-    SELECT gen_random_uuid(), '{TENANT_ID}', et.id, 'Support Ticket Lifecycle', 'new' FROM et
+    SELECT gen_random_uuid(), '{TENANT_ID}', et.id, '{WORKFLOW_NAME}', 'new' FROM et
     RETURNING id
   ),
   _states AS (

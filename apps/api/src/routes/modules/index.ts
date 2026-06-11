@@ -29,8 +29,19 @@ router.post("/:slug/install", requireRole("admin"), async (c) => {
   const auth = c.get("auth");
   const slug = c.req.param("slug");
 
+  let workflowName: string | undefined;
   try {
-    await ModuleService.installModule(auth.tenantId, slug);
+    const body = await c.req.json<{ workflowName?: string }>();
+    workflowName =
+      typeof body.workflowName === "string" && body.workflowName.trim()
+        ? body.workflowName.trim()
+        : undefined;
+  } catch {
+    // body is optional — empty or non-JSON body is fine
+  }
+
+  try {
+    await ModuleService.installModule(auth.tenantId, slug, { workflowName });
     return c.json({
       status: "success",
       message: `Module '${slug}' installed successfully`,

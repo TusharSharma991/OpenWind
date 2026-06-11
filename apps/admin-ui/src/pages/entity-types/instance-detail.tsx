@@ -16,6 +16,7 @@ type EntityField = {
 
 type EntityInstance = {
   id: string;
+  workflowId: string | null;
   currentState: string | null;
   fields: Record<string, unknown>;
   createdAt: string;
@@ -30,6 +31,7 @@ type WorkflowEvent = {
   actorId: string;
   comment: string | null;
   triggeredAt: string;
+  metadata?: Record<string, unknown>;
 };
 
 type WorkflowState = {
@@ -160,6 +162,23 @@ export function EntityInstanceDetail(): React.ReactElement {
   const [editValues, setEditValues] = useState<Record<string, unknown>>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [currentState, setCurrentState] = useState("");
+  const [users, setUsers] = useState<
+    Array<{ userId: string; email: string; displayName: string | null }>
+  >([]);
+
+  const getFieldLabel = (fieldName: string): string => {
+    if (fieldName === "state" || fieldName === "currentState") return "State";
+    if (fieldName === "assignedTo") return "Assigned To";
+    const found = fields.find((f) => f.name === fieldName);
+    return found ? found.label : fieldName;
+  };
+
+  const getActorName = (actorId: string | null): string => {
+    if (!actorId) return "System";
+    const u = users.find((user) => user.userId === actorId);
+    return u?.displayName ?? u?.email ?? actorId;
+  };
 
   const [stateModal, setStateModal] = useState(false);
   const [selectedState, setSelectedState] = useState("");
@@ -175,8 +194,9 @@ export function EntityInstanceDetail(): React.ReactElement {
       fetchWithAuth(
         `${API_URL}/entities/${instanceId}/transitions/history`,
       ).catch(() => ({ data: [] })),
+      fetchWithAuth(`${API_URL}/users`).catch(() => ({ data: [] })),
     ])
-      .then(([fieldsRes, recRes, histRes]) => {
+      .then(([fieldsRes, recRes, histRes, usersRes]) => {
         setFields(
           ((fieldsRes as { data?: EntityField[] }).data ?? []).filter(
             (f) => !f.isSystem,
@@ -185,6 +205,17 @@ export function EntityInstanceDetail(): React.ReactElement {
         const rec = (recRes as { data: EntityInstance }).data;
         setRecord(rec);
         setHistory((histRes as { data?: WorkflowEvent[] }).data ?? []);
+        setUsers(
+          (
+            usersRes as {
+              data?: Array<{
+                userId: string;
+                email: string;
+                displayName: string | null;
+              }>;
+            }
+          ).data ?? [],
+        );
       })
       .catch((err: unknown) =>
         setError(err instanceof Error ? err.message : "Failed to load"),
@@ -206,16 +237,19 @@ export function EntityInstanceDetail(): React.ReactElement {
     void loadRecord();
   }, [entityTypeId, instanceId]);
 
-  // Load workflow states once entity type is known
+  // Load workflow states once record is loaded or entity type is known
   useEffect(() => {
-    if (!entityTypeId) return;
-    fetchWithAuth(`${API_URL}/entity-types/${entityTypeId}`)
-      .then((res) => {
-        const et = (res as { data: { workflowId?: string } }).data;
-        if (et.workflowId) void loadStates(et.workflowId);
-      })
-      .catch(() => undefined);
-  }, [entityTypeId]);
+    if (record?.workflowId) {
+      void loadStates(record.workflowId);
+    } else if (entityTypeId) {
+      fetchWithAuth(`${API_URL}/workflows?entityTypeId=${entityTypeId}`)
+        .then((res) => {
+          const wfs = (res as { data?: Array<{ id: string }> }).data ?? [];
+          if (wfs[0]?.id) void loadStates(wfs[0].id);
+        })
+        .catch(() => undefined);
+    }
+  }, [record?.workflowId, entityTypeId]);
 
   async function saveEdit(): Promise<void> {
     if (!instanceId) return;
@@ -224,7 +258,7 @@ export function EntityInstanceDetail(): React.ReactElement {
     try {
       await fetchWithAuth(`${API_URL}/entities/${instanceId}`, {
         method: "PATCH",
-        body: JSON.stringify({ fields: editValues }),
+        body: JSON.stringify({ fields: editValues, currentState }),
       });
       setEditing(false);
       setLoading(true);
@@ -347,6 +381,7 @@ export function EntityInstanceDetail(): React.ReactElement {
               className="btn-primary"
               onClick={() => {
                 setEditValues(record.fields);
+                setCurrentState(record.currentState ?? "");
                 setEditing(true);
                 setSaveError(null);
               }}
@@ -404,6 +439,22 @@ export function EntityInstanceDetail(): React.ReactElement {
                 gap: "16px",
               }}
             >
+              {allStates.length > 0 && (
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <label className="form-label">State</label>
+                  <select
+                    className="form-input"
+                    value={currentState}
+                    onChange={(e) => setCurrentState(e.target.value)}
+                  >
+                    {allStates.map((st) => (
+                      <option key={st.id} value={st.name}>
+                        {st.label || st.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               {fields.map((f) => (
                 <div
                   key={f.id}
@@ -483,66 +534,149 @@ export function EntityInstanceDetail(): React.ReactElement {
             State History
           </div>
           <div style={{ padding: "16px 20px" }}>
-            {history.map((ev) => (
-              <div
-                key={ev.id}
-                style={{
-                  display: "flex",
-                  gap: "12px",
-                  marginBottom: "16px",
-                  alignItems: "flex-start",
-                }}
-              >
+            {history.map((ev) => {
+              const meta = ev.metadata;
+              const isCreate = meta?.["type"] === "create";
+              const isUpdate = meta?.["type"] === "update";
+
+              return (
                 <div
+                  key={ev.id}
                   style={{
-                    width: "8px",
-                    height: "8px",
-                    borderRadius: "50%",
-                    background: "var(--accent)",
-                    marginTop: "5px",
-                    flexShrink: 0,
+                    display: "flex",
+                    gap: "12px",
+                    marginBottom: "16px",
+                    alignItems: "flex-start",
                   }}
-                />
-                <div>
+                >
                   <div
                     style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "8px",
-                      flexWrap: "wrap",
+                      width: "8px",
+                      height: "8px",
+                      borderRadius: "50%",
+                      background: "var(--accent)",
+                      marginTop: "5px",
+                      flexShrink: 0,
                     }}
-                  >
-                    {ev.fromState && (
-                      <>
-                        {stateBadge(ev.fromState)}{" "}
-                        <span style={{ color: "var(--text-muted)" }}>→</span>
-                      </>
+                  />
+                  <div>
+                    {isCreate ? (
+                      <div style={{ fontWeight: 600, color: "var(--text)" }}>
+                        🆕 Record created{" "}
+                        <span
+                          style={{
+                            fontWeight: 400,
+                            color: "var(--text-muted)",
+                            marginLeft: "4px",
+                          }}
+                        >
+                          by {getActorName(ev.actorId)}
+                        </span>
+                      </div>
+                    ) : isUpdate ? (
+                      <div>
+                        <div
+                          style={{
+                            fontWeight: 600,
+                            color: "var(--text)",
+                            marginBottom: "4px",
+                          }}
+                        >
+                          ✏️ Record updated{" "}
+                          <span
+                            style={{
+                              fontWeight: 400,
+                              color: "var(--text-muted)",
+                              marginLeft: "4px",
+                            }}
+                          >
+                            by {getActorName(ev.actorId)}
+                          </span>
+                        </div>
+                        {"changed" in meta &&
+                        typeof meta["changed"] === "object" &&
+                        meta["changed"] !== null &&
+                        Object.keys(meta["changed"] as object).length > 0 ? (
+                          <ul
+                            style={{
+                              margin: "4px 0 0 16px",
+                              padding: 0,
+                              fontSize: "12px",
+                              color: "var(--text-secondary)",
+                            }}
+                          >
+                            {Object.entries(
+                              meta["changed"] as Record<
+                                string,
+                                Record<string, unknown>
+                              >,
+                            ).map(([fieldName, change]) => (
+                              <li
+                                key={fieldName}
+                                style={{ listStyleType: "disc" }}
+                              >
+                                <strong>{getFieldLabel(fieldName)}</strong>:
+                                changed from{" "}
+                                <em>{String(change["old"] ?? "—")}</em> to{" "}
+                                <em>{String(change["new"] ?? "—")}</em>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "8px",
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        {ev.fromState && (
+                          <>
+                            {stateBadge(ev.fromState)}{" "}
+                            <span style={{ color: "var(--text-muted)" }}>
+                              →
+                            </span>
+                          </>
+                        )}
+                        {stateBadge(ev.toState)}
+                        <span
+                          style={{
+                            marginLeft: "4px",
+                            fontSize: "12px",
+                            color: "var(--text-muted)",
+                          }}
+                        >
+                          by {getActorName(ev.actorId)}
+                        </span>
+                      </div>
                     )}
-                    {stateBadge(ev.toState)}
-                  </div>
-                  {ev.comment && (
+                    {ev.comment && !isCreate && !isUpdate && (
+                      <p
+                        style={{
+                          marginTop: "4px",
+                          fontSize: "13px",
+                          color: "var(--text-secondary)",
+                        }}
+                      >
+                        {ev.comment}
+                      </p>
+                    )}
                     <p
                       style={{
                         marginTop: "4px",
-                        fontSize: "13px",
-                        color: "var(--text-secondary)",
+                        fontSize: "12px",
+                        color: "var(--text-muted)",
                       }}
                     >
-                      {ev.comment}
+                      {new Date(ev.triggeredAt).toLocaleString()}
                     </p>
-                  )}
-                  <p
-                    style={{
-                      marginTop: "4px",
-                      fontSize: "12px",
-                      color: "var(--text-muted)",
-                    }}
-                  >
-                    {new Date(ev.triggeredAt).toLocaleString()}
-                  </p>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

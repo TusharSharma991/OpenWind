@@ -17,14 +17,12 @@ import { AuthCallback } from "./pages/callback.js";
 import { Dashboard } from "./pages/dashboard.js";
 import { Modules } from "./pages/modules.js";
 import { EntityTypeDetail } from "./pages/entity-types/detail.js";
-import { EntityInstances } from "./pages/entity-types/instances.js";
 import { EntityInstanceDetail } from "./pages/entity-types/instance-detail.js";
 import { Workflows } from "./pages/workflows/index.js";
 import { WorkflowDetail } from "./pages/workflows/detail.js";
 import { CreateWorkflow } from "./pages/workflows/create.js";
 import { AdminRecords } from "./pages/records/index.js";
 import { Settings } from "./pages/settings.js";
-import { CustomerDashboard } from "./pages/customer/dashboard.js";
 import { CustomerRecordList } from "./pages/customer/record-list.js";
 import { CustomerRecordCreate } from "./pages/customer/record-create.js";
 import { CustomerRecordDetail } from "./pages/customer/record-detail.js";
@@ -77,15 +75,11 @@ export function App(): React.ReactElement {
             <Route index element={<Dashboard />} />
             <Route path="/modules" element={<Modules />} />
 
-            {/* Records — workflow cards; card click goes to /entity-types/:id/records */}
+            {/* Records — workflow cards; card click goes to /records/:typeSlug */}
             <Route path="/records" element={<AdminRecords />} />
 
             {/* Entity types — still accessible from workflow detail "Manage Fields" link */}
             <Route path="/entity-types/:id" element={<EntityTypeDetail />} />
-            <Route
-              path="/entity-types/:id/records"
-              element={<EntityInstances />}
-            />
             <Route
               path="/entity-types/:id/records/:instanceId"
               element={<EntityInstanceDetail />}
@@ -99,7 +93,7 @@ export function App(): React.ReactElement {
             <Route path="/settings" element={<Settings />} />
 
             {/* Customer routes */}
-            <Route path="/home" element={<CustomerDashboard />} />
+            <Route path="/home" element={<Navigate to="/records" replace />} />
             <Route path="/records/:typeSlug" element={<CustomerRecordList />} />
             <Route
               path="/records/:typeSlug/new"

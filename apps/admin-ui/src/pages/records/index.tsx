@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { fetchWithAuth, API_URL } from "../../lib/api.js";
+import { useEntityTypes, toTypeSlug } from "../../entity-type-context.js";
 
 type Workflow = {
   id: string;
   name: string;
   entityTypeId: string;
   initialState: string;
+  recordCount: number;
   states: {
     name: string;
     label: string;
@@ -15,8 +17,6 @@ type Workflow = {
   }[];
   transitions: { id: string }[];
 };
-
-type EntityType = { id: string; name: string; icon: string | null };
 
 const CARD_GRADIENTS = [
   "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
@@ -30,19 +30,15 @@ const CARD_GRADIENTS = [
 
 export function AdminRecords(): React.ReactElement {
   const navigate = useNavigate();
+  const { entityTypes } = useEntityTypes();
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
-  const [entityTypes, setEntityTypes] = useState<EntityType[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([
-      fetchWithAuth(`${API_URL}/workflows`),
-      fetchWithAuth(`${API_URL}/entity-types`),
-    ])
-      .then(([wfRes, etRes]) => {
-        setWorkflows((wfRes as { data?: Workflow[] }).data ?? []);
-        setEntityTypes((etRes as { data?: EntityType[] }).data ?? []);
+    fetchWithAuth(`${API_URL}/workflows`)
+      .then((res) => {
+        setWorkflows((res as { data?: Workflow[] }).data ?? []);
       })
       .catch((err: unknown) =>
         setError(err instanceof Error ? err.message : "Failed to load"),
@@ -51,6 +47,7 @@ export function AdminRecords(): React.ReactElement {
   }, []);
 
   const etMap = new Map(entityTypes.map((e) => [e.id, e]));
+  const withData = workflows.filter((wf) => wf.recordCount > 0);
 
   if (loading) {
     return (
@@ -104,6 +101,12 @@ export function AdminRecords(): React.ReactElement {
             + New Workflow
           </button>
         </div>
+      ) : withData.length === 0 ? (
+        <div className="empty-state">
+          <div className="empty-icon">📋</div>
+          <h4>No records yet</h4>
+          <p>Install a template and create your first record to see it here.</p>
+        </div>
       ) : (
         <div
           style={{
@@ -112,19 +115,17 @@ export function AdminRecords(): React.ReactElement {
             gap: "20px",
           }}
         >
-          {workflows.map((wf, i) => {
+          {withData.map((wf, i) => {
             const et = etMap.get(wf.entityTypeId);
-            const gradient =
-              CARD_GRADIENTS[i % CARD_GRADIENTS.length] ?? CARD_GRADIENTS[0];
+            const slug = toTypeSlug(et?.plural ?? et?.name ?? "");
+            const gradient = CARD_GRADIENTS[i % CARD_GRADIENTS.length];
             const activeStates = wf.states.filter((s) => !s.isTerminal);
             const terminalStates = wf.states.filter((s) => s.isTerminal);
 
             return (
               <div
                 key={wf.id}
-                onClick={() =>
-                  navigate(`/entity-types/${wf.entityTypeId}/records`)
-                }
+                onClick={() => navigate(`/records/${slug}`)}
                 style={{
                   borderRadius: "16px",
                   overflow: "hidden",
@@ -245,7 +246,7 @@ export function AdminRecords(): React.ReactElement {
                     style={{ width: "100%", justifyContent: "center" }}
                     onClick={(e) => {
                       e.stopPropagation();
-                      navigate(`/entity-types/${wf.entityTypeId}/records`);
+                      navigate(`/records/${slug}`);
                     }}
                   >
                     View Records →

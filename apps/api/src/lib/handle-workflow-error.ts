@@ -1,6 +1,10 @@
 import type { Context } from "hono";
-import { WorkflowError } from "@platform/workflow-engine";
+import type { WorkflowError } from "@platform/workflow-engine";
 import { logger } from "@platform/logger";
+
+function isWorkflowError(err: unknown): err is WorkflowError {
+  return err instanceof Error && err.name === "WorkflowError";
+}
 
 function isLockError(err: unknown): boolean {
   if (typeof err !== "object" || err === null) return false;
@@ -25,7 +29,7 @@ export function handleWorkflowError(c: Context, err: unknown): Response {
     ) as Response;
   }
 
-  if (err instanceof WorkflowError) {
+  if (isWorkflowError(err)) {
     switch (err.code) {
       case "WORKFLOW_NOT_FOUND":
       case "WORKFLOW_STATE_NOT_FOUND":

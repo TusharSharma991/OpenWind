@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from "react";
 import { useLogout, useGetIdentity } from "@refinedev/core";
 import { Link, useLocation } from "react-router-dom";
 import { userManager } from "../authProvider.js";
-import { useEntityTypes, toTypeSlug } from "../entity-type-context.js";
 
 // ── Admin nav items ──────────────────────────────────────────────────────────
 
@@ -41,25 +40,6 @@ const ADMIN_NAV = [
           strokeLinecap="round"
           strokeLinejoin="round"
           d="M13.5 16.875h3.375m0 0h3.375m-3.375 0V13.5m0 3.375v3.375M6 10.5h2.25a2.25 2.25 0 002.25-2.25V6a2.25 2.25 0 00-2.25-2.25H6A2.25 2.25 0 003.75 6v2.25A2.25 2.25 0 006 10.5zm0 9.75h2.25A2.25 2.25 0 0010.5 18v-2.25a2.25 2.25 0 00-2.25-2.25H6a2.25 2.25 0 00-2.25 2.25V18A2.25 2.25 0 006 20.25zm9.75-9.75H18a2.25 2.25 0 002.25-2.25V6A2.25 2.25 0 0018 3.75h-2.25A2.25 2.25 0 0013.5 6v2.25a2.25 2.25 0 002.25 2.25z"
-        />
-      </svg>
-    ),
-  },
-  {
-    route: "/records",
-    label: "Records",
-    icon: (
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        fill="none"
-        viewBox="0 0 24 24"
-        strokeWidth="2"
-        stroke="currentColor"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 00-1.883 2.542l.857 6a2.25 2.25 0 002.227 1.932H19.05a2.25 2.25 0 002.227-1.932l.857-6a2.25 2.25 0 00-1.883-2.542m-16.5 0V6A2.25 2.25 0 016 3.75h3.879a1.5 1.5 0 011.06.44l2.122 2.12a1.5 1.5 0 001.06.44H18A2.25 2.25 0 0120.25 9v.776"
         />
       </svg>
     ),
@@ -141,9 +121,6 @@ export function Layout({
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
 
-  // Entity types needed for customer sidebar
-  const { entityTypes, modules } = useEntityTypes();
-
   useEffect(() => {
     void userManager.getUser().then((u) => {
       setRoles(
@@ -194,25 +171,6 @@ export function Layout({
     );
   }
 
-  // ── Installed modules for customer sidebar ──────────────────────────────
-  const installedById = new Map(
-    modules.filter((m) => m.installed).map((m) => [m.id, m]),
-  );
-  const visibleTypes = entityTypes.filter(
-    (et) => !et.moduleId || installedById.has(et.moduleId),
-  );
-  const byModule = visibleTypes.reduce<Record<string, typeof entityTypes>>(
-    (acc, et) => {
-      const key = et.moduleId ?? "__custom__";
-      (acc[key] ??= []).push(et);
-      return acc;
-    },
-    {},
-  );
-  const moduleNames = new Map(
-    modules.filter((m) => m.installed).map((m) => [m.id, m.name]),
-  );
-
   // ── Shared topnav ───────────────────────────────────────────────────────
   const topnav = (
     <header className="main-header">
@@ -252,24 +210,48 @@ export function Layout({
       >
         <button
           style={{
-            background: "none",
-            border: "none",
-            padding: 0,
-            cursor: "pointer",
-            borderRadius: "50%",
             display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            padding: "5px 12px 5px 5px",
+            background: "var(--bg-tertiary)",
+            border: "1px solid var(--border-color)",
+            borderRadius: "20px",
+            cursor: "pointer",
+            transition: "box-shadow .15s",
+            maxWidth: "200px",
           }}
           onClick={() => setProfileOpen((o) => !o)}
           aria-label="Open profile"
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.boxShadow =
+              "var(--shadow-sm)";
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.boxShadow = "none";
+          }}
         >
           <img
             src={
               identity?.avatar ??
-              `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}`
+              `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}&fontSize=38&fontWeight=700&chars=2`
             }
             alt="Avatar"
             className="header-avatar"
+            style={{ flexShrink: 0 }}
           />
+          <span
+            style={{
+              fontSize: "13px",
+              fontWeight: 500,
+              color: "var(--text-primary)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {name}
+          </span>
         </button>
 
         {profileOpen && (
@@ -299,7 +281,7 @@ export function Layout({
               <img
                 src={
                   identity?.avatar ??
-                  `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}`
+                  `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}&fontSize=38&fontWeight=700&chars=2`
                 }
                 alt="Avatar"
                 style={{
@@ -419,9 +401,9 @@ export function Layout({
               }}
             >
               <Link
-                to="/home"
-                className={`menu-item ${!sidebarOpen ? "menu-item-icon-only" : ""} ${location.pathname === "/home" ? "active" : ""}`}
-                title={!sidebarOpen ? "Home" : undefined}
+                to="/records"
+                className={`menu-item ${!sidebarOpen ? "menu-item-icon-only" : ""} ${isActive("/records") ? "active" : ""}`}
+                title={!sidebarOpen ? "Records" : undefined}
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -433,48 +415,11 @@ export function Layout({
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"
+                    d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 00-1.883 2.542l.857 6a2.25 2.25 0 002.227 1.932H19.05a2.25 2.25 0 002.227-1.932l.857-6a2.25 2.25 0 00-1.883-2.542m-16.5 0V6A2.25 2.25 0 016 3.75h3.879a1.5 1.5 0 011.06.44l2.122 2.12a1.5 1.5 0 001.06.44H18A2.25 2.25 0 0120.25 9v.776"
                   />
                 </svg>
-                {sidebarOpen && <span>Home</span>}
+                {sidebarOpen && <span>Records</span>}
               </Link>
-
-              {Object.entries(byModule).map(([mod, types]) => (
-                <div key={mod}>
-                  {sidebarOpen && (
-                    <div className="customer-nav-group-label">
-                      {mod === "__custom__"
-                        ? "Custom"
-                        : (moduleNames.get(mod) ?? mod)}
-                    </div>
-                  )}
-                  {types.map((et) => {
-                    const slug = toTypeSlug(et.plural || et.name);
-                    const active = location.pathname.startsWith(
-                      `/records/${slug}`,
-                    );
-                    return (
-                      <Link
-                        key={et.id}
-                        to={`/records/${slug}`}
-                        className={`menu-item ${!sidebarOpen ? "menu-item-icon-only" : ""} ${active ? "active" : ""}`}
-                        title={!sidebarOpen ? et.plural || et.name : undefined}
-                      >
-                        <span
-                          style={{
-                            fontSize: "16px",
-                            width: "18px",
-                            textAlign: "center",
-                          }}
-                        >
-                          {et.icon ?? et.name.slice(0, 1)}
-                        </span>
-                        {sidebarOpen && <span>{et.plural || et.name}</span>}
-                      </Link>
-                    );
-                  })}
-                </div>
-              ))}
 
               <div className="nav-divider" />
               <Link

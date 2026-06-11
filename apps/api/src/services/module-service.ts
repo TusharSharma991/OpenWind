@@ -157,7 +157,11 @@ export class ModuleService {
   /**
    * installModule - Installs a module for a tenant by running seed SQLs and updating config
    */
-  static async installModule(tenantId: string, slug: string): Promise<void> {
+  static async installModule(
+    tenantId: string,
+    slug: string,
+    options?: { workflowName?: string },
+  ): Promise<void> {
     const [moduleRecord] = await db
       .select()
       .from(modules)
@@ -207,7 +211,11 @@ export class ModuleService {
         // text literals satisfy uuid column type expectations.
         const processedSql = sqlContent
           .replaceAll("'{TENANT_ID}'", `'${tenantId}'::uuid`)
-          .replaceAll("'{MODULE_ID}'", `'${moduleRecord.id}'::uuid`);
+          .replaceAll("'{MODULE_ID}'", `'${moduleRecord.id}'::uuid`)
+          .replaceAll(
+            "{WORKFLOW_NAME}",
+            options?.workflowName?.trim() ?? moduleRecord.name,
+          );
 
         if (processedSql.trim().length > 0) {
           await executeRawInTenantContext(tenantId, processedSql);

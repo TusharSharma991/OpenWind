@@ -125,7 +125,7 @@ export function CustomerRecordList(): React.ReactElement {
                   <th key={f.id}>{f.label}</th>
                 ))}
                 <th>Created</th>
-                <th style={{ width: "40px" }} />
+                <th style={{ width: "80px" }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -157,13 +157,34 @@ export function CustomerRecordList(): React.ReactElement {
                   </td>
                   <td>
                     <button
-                      className="portal-btn-icon"
+                      className="portal-btn-secondary portal-btn-sm"
                       onClick={(e) => {
                         e.stopPropagation();
                         navigate(`/records/${slug}/${rec.id}`);
                       }}
+                      style={{ padding: "4px 8px" }}
+                      title="View details"
                     >
-                      →
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        strokeWidth="2"
+                        stroke="currentColor"
+                        width="15"
+                        height="15"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"
+                        />
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                        />
+                      </svg>
                     </button>
                   </td>
                 </tr>

@@ -28,7 +28,10 @@ vi.mock("@platform/auth", () => ({
   },
 }));
 
-vi.mock("@platform/db", () => ({ db: {} }));
+vi.mock("@platform/db", () => ({
+  db: {},
+  withTenantContext: (tenantId, fn) => fn({}),
+}));
 
 vi.mock("@platform/entity-engine", async (importOriginal) => {
   const real = await importOriginal<typeof EntityEngine>();

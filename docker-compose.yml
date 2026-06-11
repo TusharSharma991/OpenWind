@@ -333,17 +333,19 @@ services:
         condition: service_healthy
 
   # ── Admin UI (React + Refine) ──────────────────────────────────────────────
-  # Static SPA served via `serve`. Zitadel env vars injected at container start
-  # by docker-entrypoint.sh into window.__CONFIG__ — no rebuild needed.
+  # Dev mode: Vite dev server with HMR. Source files are mounted as volumes so
+  # any change on the host is picked up instantly — no rebuild needed.
   admin-ui:
     build:
       context: .
-      dockerfile: apps/admin-ui/Dockerfile
-    env_file:
-      - path: .env.local
-        required: false # skip gracefully if file absent (CI, prod)
+      dockerfile: apps/admin-ui/Dockerfile.dev
     ports:
-      - "3001:3000" # Admin UI → http://localhost:3001
+      - "3001:3001" # Vite dev server → http://localhost:3001
+    volumes:
+      - ./apps/admin-ui/src:/app/apps/admin-ui/src
+      - ./apps/admin-ui/index.html:/app/apps/admin-ui/index.html
+      - ./apps/admin-ui/vite.config.ts:/app/apps/admin-ui/vite.config.ts
+      - ./.env.local:/app/.env.local:ro
     restart: unless-stopped
 
   # ── Portal (end-user React app) ────────────────────────────────────────────

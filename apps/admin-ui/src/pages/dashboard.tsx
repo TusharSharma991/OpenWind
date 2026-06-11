@@ -50,9 +50,15 @@ export function Dashboard(): React.ReactElement {
       const profile = u?.profile as Record<string, unknown> | undefined;
       const rolesMap = (profile?.["urn:zitadel:iam:org:project:roles"] ??
         {}) as Record<string, unknown>;
-      setRoles(Object.keys(rolesMap));
+      const r = Object.keys(rolesMap);
+      setRoles(r);
+      const isCustomer =
+        (r.includes("user") || r.includes("customer")) &&
+        !r.includes("admin") &&
+        !r.includes("agent");
+      if (isCustomer) navigate("/records", { replace: true });
     });
-  }, []);
+  }, [navigate]);
 
   useEffect(() => {
     Promise.all([
@@ -187,8 +193,7 @@ export function Dashboard(): React.ReactElement {
             }}
           >
             {stats.map((s, i) => {
-              const gradient =
-                CARD_GRADIENTS[i % CARD_GRADIENTS.length] ?? CARD_GRADIENTS[0];
+              const gradient = CARD_GRADIENTS[i % CARD_GRADIENTS.length];
               const activeStates = s.workflow.states.filter(
                 (st) => !st.isTerminal,
               );

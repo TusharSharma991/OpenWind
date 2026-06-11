@@ -45,5 +45,11 @@ export async function fetchWithAuth(
     throw new Error(body.message ?? `Request failed: ${response.status}`);
   }
 
+  if (
+    response.status === 204 ||
+    response.headers.get("content-length") === "0"
+  ) {
+    return null;
+  }
   return response.json();
 }

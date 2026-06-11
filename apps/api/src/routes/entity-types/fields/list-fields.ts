@@ -7,7 +7,7 @@ import { handleEntityError } from "../../../lib/handle-entity-error.js";
 export const listEntityFieldsHandler = factory.createHandlers(
   requireAuth(),
   async (c) => {
-    const typeId = c.req.param("typeId") ?? "";
+    const typeId = c.get("typeId");
     const { tenantId } = c.get("auth");
 
     try {

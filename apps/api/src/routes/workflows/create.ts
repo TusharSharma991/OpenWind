@@ -1,7 +1,7 @@
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { requireAuth, requireRole } from "@platform/auth";
-import { db } from "@platform/db";
+import { withTenantContext } from "@platform/db";
 import { createWorkflow } from "@platform/workflow-engine";
 import { factory } from "./factory.js";
 import { handleWorkflowError } from "../../lib/handle-workflow-error.js";
@@ -20,7 +20,9 @@ export const createWorkflowHandler = factory.createHandlers(
     const input = c.req.valid("json");
     const { tenantId } = c.get("auth");
     try {
-      const workflow = await createWorkflow(db, tenantId, input);
+      const workflow = await withTenantContext(tenantId, (tx) =>
+        createWorkflow(tx, tenantId, input),
+      );
       return c.json({ data: workflow }, 201);
     } catch (err) {
       return handleWorkflowError(c, err);

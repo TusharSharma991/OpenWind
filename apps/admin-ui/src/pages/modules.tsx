@@ -23,6 +23,16 @@ const MODULE_EMOJI: Record<string, string> = {
   reimbursements: "💸",
 };
 
+const MODULE_DEFAULT_NAMES: Record<string, string> = {
+  helpdesk: "Support Ticket Lifecycle",
+  crm: "Sales Pipeline",
+  hrms: "Leave Approval",
+  reimbursements: "Expense Approval",
+  projects: "Task Lifecycle",
+  invoicing: "Invoice Lifecycle",
+  procurement: "Purchase Approval",
+};
+
 const PLAN_COLORS: Record<string, string> = {
   free: "var(--success)",
   basic: "var(--accent-primary)",
@@ -32,27 +42,62 @@ const PLAN_COLORS: Record<string, string> = {
 
 export function Modules(): React.ReactElement {
   const { data, isLoading, refetch } = useList<Module>({ resource: "modules" });
-  const [pending, setPending] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  // Fork modal state
+  const [forkTarget, setForkTarget] = useState<Module | null>(null);
+  const [forkName, setForkName] = useState("");
+  const [forking, setForking] = useState(false);
+  const [existingWorkflowNames, setExistingWorkflowNames] = useState<string[]>(
+    [],
+  );
 
   const modules = data?.data ?? [];
   const installedCount = modules.filter((m) => m.installed).length;
 
-  async function handleAction(
-    slug: string,
-    action: "install" | "uninstall",
-  ): Promise<void> {
-    setPending(slug);
+  function openForkModal(mod: Module): void {
+    setForkTarget(mod);
+    setForkName(MODULE_DEFAULT_NAMES[mod.slug] ?? mod.name);
+    setActionError(null);
+    // Load existing workflow names for uniqueness check
+    void fetchWithAuth(`${API_URL}/workflows`).then((res) => {
+      const wfs = (res as { data?: { name: string }[] }).data ?? [];
+      setExistingWorkflowNames(wfs.map((w) => w.name.toLowerCase()));
+    });
+  }
+
+  function closeForkModal(): void {
+    setForkTarget(null);
+    setForkName("");
+    setExistingWorkflowNames([]);
+  }
+
+  async function handleFork(): Promise<void> {
+    if (!forkTarget) return;
+    const name = forkName.trim();
+    if (!name) return;
+
+    if (existingWorkflowNames.includes(name.toLowerCase())) {
+      setActionError(
+        `A workflow named "${name}" already exists. Choose a different name.`,
+      );
+      return;
+    }
+
+    setForking(true);
     setActionError(null);
     try {
-      await fetchWithAuth(`${API_URL}/modules/${slug}/${action}`, {
+      await fetchWithAuth(`${API_URL}/modules/${forkTarget.slug}/install`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workflowName: name }),
       });
       void refetch();
+      closeForkModal();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Action failed");
+      setActionError(err instanceof Error ? err.message : "Install failed");
     } finally {
-      setPending(null);
+      setForking(false);
     }
   }
 
@@ -79,7 +124,7 @@ export function Modules(): React.ReactElement {
         <div>
           <h2 className="page-title">Templates</h2>
           <p className="page-subtitle">
-            Pre-built workflow templates. Install one to get a ready-made record
+            Pre-built workflow templates. Fork one to get a ready-made record
             type, fields, and workflow — customise it from there.
           </p>
         </div>
@@ -172,24 +217,10 @@ export function Modules(): React.ReactElement {
               </div>
               {!mod.isSystem && (
                 <button
-                  className={
-                    mod.installed ? "btn btn-danger-sm" : "btn btn-primary-sm"
-                  }
-                  onClick={() =>
-                    void handleAction(
-                      mod.slug,
-                      mod.installed ? "uninstall" : "install",
-                    )
-                  }
-                  disabled={pending === mod.slug}
+                  className="btn btn-primary-sm"
+                  onClick={() => openForkModal(mod)}
                 >
-                  {pending === mod.slug
-                    ? mod.installed
-                      ? "Uninstalling…"
-                      : "Installing…"
-                    : mod.installed
-                      ? "Uninstall"
-                      : "Install"}
+                  Fork / Copy
                 </button>
               )}
             </div>
@@ -202,6 +233,143 @@ export function Modules(): React.ReactElement {
           <div className="empty-icon">⬡</div>
           <h4>No modules registered</h4>
           <p>Run the platform seed to populate the module registry.</p>
+        </div>
+      )}
+
+      {/* Fork modal */}
+      {forkTarget && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,.55)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) closeForkModal();
+          }}
+        >
+          <div
+            style={{
+              background: "var(--bg-primary)",
+              border: "1px solid var(--border-color)",
+              borderRadius: "16px",
+              padding: "28px 32px",
+              width: "100%",
+              maxWidth: "460px",
+              boxShadow: "var(--shadow-lg)",
+            }}
+          >
+            <div style={{ marginBottom: "20px" }}>
+              <div style={{ fontSize: "28px", marginBottom: "8px" }}>
+                {MODULE_EMOJI[forkTarget.slug] ?? "📋"}
+              </div>
+              <h3 style={{ margin: 0, fontSize: "18px", fontWeight: 700 }}>
+                Fork "{forkTarget.name}"
+              </h3>
+              <p
+                style={{
+                  margin: "6px 0 0",
+                  fontSize: "13px",
+                  color: "var(--text-muted)",
+                }}
+              >
+                Give this copy a name. It will become the workflow name visible
+                in Records.
+              </p>
+            </div>
+
+            <label
+              style={{
+                display: "block",
+                fontSize: "13px",
+                fontWeight: 600,
+                marginBottom: "6px",
+                color: "var(--text-primary)",
+              }}
+            >
+              Workflow name
+            </label>
+            <input
+              type="text"
+              value={forkName}
+              onChange={(e) => setForkName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void handleFork();
+                if (e.key === "Escape") closeForkModal();
+              }}
+              placeholder="e.g. Customer Support Tickets"
+              autoFocus
+              style={{
+                width: "100%",
+                padding: "10px 12px",
+                borderRadius: "8px",
+                border: "1px solid var(--border-color)",
+                background: "var(--bg-secondary)",
+                color: "var(--text-primary)",
+                fontSize: "14px",
+                outline: "none",
+                boxSizing: "border-box",
+              }}
+            />
+
+            {existingWorkflowNames.includes(forkName.trim().toLowerCase()) &&
+              forkName.trim() && (
+                <p
+                  style={{
+                    marginTop: "8px",
+                    fontSize: "12px",
+                    color: "var(--danger)",
+                  }}
+                >
+                  ⚠ A workflow with this name already exists.
+                </p>
+              )}
+
+            {actionError && (
+              <p
+                style={{
+                  marginTop: "10px",
+                  fontSize: "13px",
+                  color: "var(--danger)",
+                }}
+              >
+                ⚠ {actionError}
+              </p>
+            )}
+
+            <div
+              style={{
+                display: "flex",
+                gap: "10px",
+                justifyContent: "flex-end",
+                marginTop: "24px",
+              }}
+            >
+              <button
+                className="btn btn-secondary"
+                onClick={closeForkModal}
+                disabled={forking}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary-sm"
+                onClick={() => void handleFork()}
+                disabled={
+                  forking ||
+                  !forkName.trim() ||
+                  existingWorkflowNames.includes(forkName.trim().toLowerCase())
+                }
+                style={{ minWidth: "110px" }}
+              >
+                {forking ? "Installing…" : "Install Copy"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

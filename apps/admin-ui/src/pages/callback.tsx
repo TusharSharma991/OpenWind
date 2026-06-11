@@ -9,9 +9,17 @@ export function AuthCallback(): React.ReactElement {
   useEffect(() => {
     userManager
       .signinCallback()
-      .then(() => {
-        // Navigate back to the home route upon successful authentication
-        navigate("/");
+      .then(async () => {
+        const user = await userManager.getUser();
+        const profile = user?.profile ?? {};
+        const rolesMap = (profile["urn:zitadel:iam:org:project:roles"] ??
+          {}) as Record<string, unknown>;
+        const roles = Object.keys(rolesMap);
+        const isCustomer =
+          (roles.includes("user") || roles.includes("customer")) &&
+          !roles.includes("admin") &&
+          !roles.includes("agent");
+        navigate(isCustomer ? "/records" : "/");
       })
       .catch((err: Error) => {
         setError(err.message || String(err));

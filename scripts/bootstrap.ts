@@ -339,16 +339,24 @@ async function generateAndSaveKeyJson(token: string): Promise<void> {
   );
 }
 
-// Read the machine key that Zitadel writes on first boot via
-// ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINEKEY_KEYPATH=/machinekey/sa.json
+// Read the machine key that Zitadel prints to stdout during first-boot setup.
+// When MACHINEKEY_KEYPATH is not used (or not supported by the version), Zitadel
+// logs the key JSON directly to its stdout. We scrape it from container logs.
 function readZitadelMachineKey(): ZitadelKeyJson | null {
   try {
-    const raw = execSync(
-      `docker compose exec -T zitadel cat /machinekey/sa.json`,
-      { encoding: "utf8", cwd: ROOT },
-    ).trim();
-    if (!raw || raw.length < 20) return null;
-    return JSON.parse(raw) as ZitadelKeyJson;
+    const logs = execSync(`docker compose logs zitadel`, {
+      encoding: "utf8",
+      cwd: ROOT,
+    });
+    // Find the line containing the machine key JSON (has "serviceaccount" type)
+    for (const line of logs.split("\n")) {
+      const idx = line.indexOf('{"type":"serviceaccount"');
+      if (idx !== -1) {
+        const jsonStr = line.slice(idx).trim();
+        return JSON.parse(jsonStr) as ZitadelKeyJson;
+      }
+    }
+    return null;
   } catch {
     return null;
   }

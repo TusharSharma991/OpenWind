@@ -171,7 +171,8 @@ Zitadel is the OIDC/OAuth2 identity provider. In development it runs without TLS
 **Console:** http://localhost:8080  
 **System admin:** `admin@platform.local` / `Admin1234!`
 
-`pnpm bootstrap` creates the `Platform` project, OIDC app, three demo users,
+`pnpm bootstrap` creates the `Platform` project, OIDC app, three demo users
+(`owAdmin@openwind.local`, `owAgent@openwind.local`, `owUser@openwind.local`),
 and writes `ZITADEL_OIDC_CLIENT_ID` and `ZITADEL_KEY_JSON` to `.env.local`.
 
 After bootstrap runs, the frontend container is restarted automatically so

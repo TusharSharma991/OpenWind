@@ -36,9 +36,9 @@ const ZITADEL_BASE = "http://localhost:8080";
 const TOTAL_STEPS = 10;
 
 // Demo credentials (printed in summary, committed to docs — dev only)
-const DEMO_ADMIN_EMAIL = "admin@openwind.local";
-const DEMO_USER_EMAIL = "user@openwind.local";
-const DEMO_AGENT_EMAIL = "agent@openwind.local";
+const DEMO_ADMIN_EMAIL = "owAdmin@openwind.local";
+const DEMO_USER_EMAIL = "owUser@openwind.local";
+const DEMO_AGENT_EMAIL = "owAgent@openwind.local";
 const DEMO_PASSWORD = "OpenWind1234!";
 
 // ── Formatting ────────────────────────────────────────────────────────────────
@@ -868,9 +868,9 @@ ${BOLD}${GREEN}  ✅  OpenWind is ready!${RESET}
 
   ${BOLD}Demo credentials${RESET}  (all at http://localhost:3001)
   ┌─────────────────────────────────────────────────────────┐
-  │  ${YELLOW}admin@openwind.local${RESET}   /  ${YELLOW}OpenWind1234!${RESET}   → admin view  │
-  │  ${YELLOW}agent@openwind.local${RESET}   /  ${YELLOW}OpenWind1234!${RESET}   → agent view  │
-  │  ${YELLOW}user@openwind.local${RESET}    /  ${YELLOW}OpenWind1234!${RESET}   → user view   │
+  │  ${YELLOW}owAdmin@openwind.local${RESET}  /  ${YELLOW}OpenWind1234!${RESET}   → admin view  │
+  │  ${YELLOW}owAgent@openwind.local${RESET}  /  ${YELLOW}OpenWind1234!${RESET}   → agent view  │
+  │  ${YELLOW}owUser@openwind.local${RESET}   /  ${YELLOW}OpenWind1234!${RESET}   → user view   │
   │                                                         │
   │  Zitadel console (system admin)                         │
   │  ${DIM}admin@platform.local   /  Admin1234!${RESET}                │

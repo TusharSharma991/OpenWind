@@ -1,0 +1,744 @@
+#!/usr/bin/env tsx
+/**
+ * bootstrap.ts — one-command developer setup for OpenWind
+ *
+ * Steps:
+ *   1.  Preflight — node / pnpm / docker version checks
+ *   2.  Environment — copy .env.example → .env.local (if missing)
+ *   3.  Infrastructure — docker compose up -d
+ *   4.  Health — wait for Postgres, Zitadel, and OpenBao
+ *   5.  Dependencies — pnpm install
+ *   6.  Database — migrate + base seed
+ *   7.  Auth — Zitadel project, OIDC app, roles  (one manual PAT step)
+ *   8.  Demo users — admin@openwind.local + user@openwind.local
+ *   9.  Demo data — Helpdesk module, Support Ticket entity, 5 sample tickets
+ *  10.  Summary — all URLs and credentials printed
+ *
+ * Run:
+ *   pnpm bootstrap
+ *   # or directly:
+ *   npx tsx scripts/bootstrap.ts
+ */
+
+import { execSync, spawnSync } from "node:child_process";
+import { existsSync, readFileSync, writeFileSync, copyFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { createInterface } from "node:readline";
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const ENV_FILE = join(ROOT, ".env.local");
+const ENV_EXAMPLE = join(ROOT, ".env.example");
+const ZITADEL_BASE = "http://localhost:8080";
+const TOTAL_STEPS = 10;
+
+// Demo credentials (printed in summary, committed to docs — dev only)
+const DEMO_ADMIN_EMAIL = "admin@openwind.local";
+const DEMO_USER_EMAIL = "user@openwind.local";
+const DEMO_AGENT_EMAIL = "agent@openwind.local";
+const DEMO_PASSWORD = "OpenWind1234!";
+
+// ── Formatting ────────────────────────────────────────────────────────────────
+
+const GREEN = "\x1b[32m";
+const YELLOW = "\x1b[33m";
+const RED = "\x1b[31m";
+const CYAN = "\x1b[36m";
+const BOLD = "\x1b[1m";
+const DIM = "\x1b[2m";
+const RESET = "\x1b[0m";
+
+function step(n: number, msg: string): void {
+  console.log(
+    `\n${BOLD}${CYAN}[${n}/${TOTAL_STEPS}]${RESET} ${BOLD}${msg}${RESET}`,
+  );
+}
+
+function ok(msg: string): void {
+  console.log(`  ${GREEN}✓${RESET}  ${msg}`);
+}
+
+function warn(msg: string): void {
+  console.log(`  ${YELLOW}⚠${RESET}  ${msg}`);
+}
+
+function info(msg: string): void {
+  console.log(`  ${DIM}→${RESET}  ${msg}`);
+}
+
+function fail(msg: string): never {
+  console.error(`\n  ${RED}✗${RESET}  ${BOLD}${msg}${RESET}\n`);
+  process.exit(1);
+}
+
+function banner(): void {
+  console.log(`
+${BOLD}${CYAN}  ___                 _    _ _         _   ${RESET}
+${BOLD}${CYAN} / _ \\ _ __  ___ _ _| |  | | |_ _ __ __| |  ${RESET}
+${BOLD}${CYAN}| (_) | '_ \\/ -_) ' \\ |/\\| | | ' \\/ _\` |  ${RESET}
+${BOLD}${CYAN} \\___/| .__/\\___|_||_\\_/  \\_|_|_||_\\__,_|  ${RESET}
+${BOLD}${CYAN}      |_|                                   ${RESET}
+
+  ${BOLD}Developer Bootstrap${RESET} — one command to a fully running system
+  ${DIM}This will take 2–5 minutes on first run.${RESET}
+`);
+}
+
+// ── Shell helpers ─────────────────────────────────────────────────────────────
+
+function run(
+  cmd: string,
+  opts: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
+): void {
+  const result = spawnSync(cmd, {
+    shell: true,
+    cwd: opts.cwd ?? ROOT,
+    stdio: "inherit",
+    env: { ...process.env, ...opts.env },
+  });
+  if ((result.status ?? 1) !== 0) {
+    fail(`Command failed: ${cmd}`);
+  }
+}
+
+function runCapture(cmd: string): string {
+  try {
+    return execSync(cmd, { encoding: "utf8", cwd: ROOT }).trim();
+  } catch {
+    return "";
+  }
+}
+
+// ── Input helpers ─────────────────────────────────────────────────────────────
+
+async function ask(prompt: string): Promise<string> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise<string>((resolve) => {
+    rl.question(prompt, (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
+}
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// ── Service health polling ────────────────────────────────────────────────────
+
+async function waitForHttp(
+  url: string,
+  label: string,
+  maxAttempts = 60,
+  intervalMs = 3000,
+): Promise<void> {
+  for (let i = 1; i <= maxAttempts; i++) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
+      if (res.status < 500) {
+        ok(`${label} is ready`);
+        return;
+      }
+    } catch {
+      // not ready yet — suppress
+    }
+    if (i % 5 === 0) {
+      info(
+        `Still waiting for ${label}… (${Math.round((i * intervalMs) / 1000)}s)`,
+      );
+    }
+    await sleep(intervalMs);
+  }
+  fail(
+    `${label} did not become healthy after ${Math.round((maxAttempts * intervalMs) / 1000)}s.\nCheck logs: docker compose logs ${label.toLowerCase()}`,
+  );
+}
+
+async function waitForPostgres(
+  maxAttempts = 30,
+  intervalMs = 3000,
+): Promise<void> {
+  for (let i = 1; i <= maxAttempts; i++) {
+    const out = runCapture(
+      `docker compose exec -T postgres pg_isready -U platform -d platform`,
+    );
+    if (out.includes("accepting connections")) {
+      ok("Postgres is ready");
+      return;
+    }
+    if (i % 5 === 0)
+      info(
+        `Still waiting for Postgres… (${Math.round((i * intervalMs) / 1000)}s)`,
+      );
+    await sleep(intervalMs);
+  }
+  fail("Postgres did not become ready. Check: docker compose logs postgres");
+}
+
+// ── .env.local helpers ────────────────────────────────────────────────────────
+
+function readEnvLocal(): Map<string, string> {
+  if (!existsSync(ENV_FILE)) return new Map();
+  return new Map(
+    readFileSync(ENV_FILE, "utf8")
+      .split("\n")
+      .filter((l) => l.includes("=") && !l.trimStart().startsWith("#"))
+      .map((l) => {
+        const idx = l.indexOf("=");
+        return [l.slice(0, idx).trim(), l.slice(idx + 1).trim()] as [
+          string,
+          string,
+        ];
+      }),
+  );
+}
+
+function writeEnvVars(vars: Record<string, string>): void {
+  const existing = readEnvLocal();
+  for (const [k, v] of Object.entries(vars)) {
+    if (!v.startsWith("<existing")) existing.set(k, v);
+  }
+  const header = [
+    "# Generated / managed by scripts/bootstrap.ts",
+    `# Last updated: ${new Date().toISOString()}`,
+    "",
+  ].join("\n");
+  const body = [...existing.entries()].map(([k, v]) => `${k}=${v}`).join("\n");
+  writeFileSync(ENV_FILE, `${header}${body}\n`, "utf8");
+}
+
+// ── Zitadel API helper ────────────────────────────────────────────────────────
+
+async function zCall(
+  path: string,
+  token: string,
+  options: { method?: string; body?: unknown } = {},
+): Promise<unknown> {
+  const res = await fetch(`${ZITADEL_BASE}${path}`, {
+    method: options.method ?? "GET",
+    signal: AbortSignal.timeout(15_000),
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(
+      `${options.method ?? "GET"} ${path} → ${res.status}: ${body}`,
+    );
+  }
+  return res.json() as Promise<unknown>;
+}
+
+// ── Zitadel setup (mirrors setup-dev-auth.ts but returns projectId) ───────────
+
+async function runZitadelSetup(
+  pat: string,
+): Promise<{ projectId: string; oidcClientId: string }> {
+  const PROJECT_NAME = "Platform";
+  const APP_NAME = "platform-api";
+  const SA_NAME = "platform-introspection";
+  const TOKEN_EXPIRY = 15 * 60;
+
+  // 1. Project
+  const searchRes = (await zCall("/management/v1/projects/_search", pat, {
+    method: "POST",
+    body: {
+      queries: [
+        {
+          nameQuery: { name: PROJECT_NAME, method: "TEXT_QUERY_METHOD_EQUALS" },
+        },
+      ],
+    },
+  })) as { result?: Array<{ id: string; name: string }> };
+
+  let projectId =
+    searchRes.result?.find((p) => p.name === PROJECT_NAME)?.id ?? null;
+
+  if (projectId) {
+    ok(`Project "${PROJECT_NAME}" already exists`);
+  } else {
+    const created = (await zCall("/management/v1/projects", pat, {
+      method: "POST",
+      body: { name: PROJECT_NAME },
+    })) as { id: string };
+    projectId = created.id;
+    ok(`Created project "${PROJECT_NAME}"`);
+  }
+
+  // 2. Roles: admin, agent, user
+  for (const role of ["admin", "agent", "user"]) {
+    try {
+      await zCall(`/management/v1/projects/${projectId}/roles`, pat, {
+        method: "POST",
+        body: {
+          roleKey: role,
+          displayName: role.charAt(0).toUpperCase() + role.slice(1),
+          group: "platform",
+        },
+      });
+      ok(`Created role "${role}"`);
+    } catch (e) {
+      const msg = String(e);
+      if (msg.includes("409") || msg.toLowerCase().includes("already exist")) {
+        ok(`Role "${role}" already exists`);
+      } else {
+        warn(`Could not create role "${role}": ${msg}`);
+      }
+    }
+  }
+
+  // 3. OIDC app
+  const appSearch = (await zCall(
+    `/management/v1/projects/${projectId}/apps/_search`,
+    pat,
+    {
+      method: "POST",
+      body: {
+        queries: [
+          { nameQuery: { name: APP_NAME, method: "TEXT_QUERY_METHOD_EQUALS" } },
+        ],
+      },
+    },
+  )) as {
+    result?: Array<{
+      id: string;
+      name: string;
+      oidcConfig?: { clientId: string };
+    }>;
+  };
+
+  const existingApp = appSearch.result?.find((a) => a.name === APP_NAME);
+  let oidcClientId: string;
+  let oidcClientSecret: string;
+
+  const oidcPayload = {
+    redirectUris: [
+      "http://localhost:3001/auth/callback",
+      "http://localhost:3004/auth/callback",
+      "http://localhost:3000/auth/callback",
+    ],
+    responseTypes: ["OIDC_RESPONSE_TYPE_CODE"],
+    grantTypes: [
+      "OIDC_GRANT_TYPE_AUTHORIZATION_CODE",
+      "OIDC_GRANT_TYPE_REFRESH_TOKEN",
+    ],
+    appType: "OIDC_APP_TYPE_WEB",
+    authMethodType: "OIDC_AUTH_METHOD_TYPE_BASIC",
+    postLogoutRedirectUris: [
+      "http://localhost:3001",
+      "http://localhost:3001/login",
+      "http://localhost:3004",
+      "http://localhost:3004/login",
+      "http://localhost:3000",
+    ],
+    accessTokenType: "OIDC_TOKEN_TYPE_JWT",
+    accessTokenRoleAssertion: true,
+    idTokenRoleAssertion: true,
+    idTokenUserinfoAssertion: true,
+    accessTokenLifetime: `${TOKEN_EXPIRY}s`,
+    idTokenLifetime: `${TOKEN_EXPIRY}s`,
+  };
+
+  if (existingApp?.oidcConfig?.clientId) {
+    oidcClientId = existingApp.oidcConfig.clientId;
+    oidcClientSecret = "<existing>";
+    ok(`OIDC app "${APP_NAME}" already exists`);
+    // Update config in case redirect URIs changed
+    try {
+      await zCall(
+        `/management/v1/projects/${projectId}/apps/${existingApp.id}/oidc`,
+        pat,
+        {
+          method: "PUT",
+          body: oidcPayload,
+        },
+      );
+    } catch {
+      /* best effort */
+    }
+  } else {
+    const created = (await zCall(
+      `/management/v1/projects/${projectId}/apps/oidc`,
+      pat,
+      {
+        method: "POST",
+        body: { name: APP_NAME, ...oidcPayload },
+      },
+    )) as { appId: string; clientId: string; clientSecret: string };
+    oidcClientId = created.clientId;
+    oidcClientSecret = created.clientSecret;
+    ok(`Created OIDC app "${APP_NAME}"`);
+  }
+
+  // 4. Introspection service account
+  const saSearch = (await zCall("/management/v1/users/_search", pat, {
+    method: "POST",
+    body: {
+      queries: [
+        {
+          userNameQuery: {
+            userName: SA_NAME,
+            method: "TEXT_QUERY_METHOD_EQUALS",
+          },
+        },
+      ],
+    },
+  })) as { result?: Array<{ id: string }> };
+
+  let saId = saSearch.result?.[0]?.id ?? null;
+  if (!saId) {
+    const sa = (await zCall("/management/v1/users/machine", pat, {
+      method: "POST",
+      body: {
+        userName: SA_NAME,
+        name: "Platform Introspection Service",
+        description: "Service account for token introspection",
+        accessTokenType: "ACCESS_TOKEN_TYPE_JWT",
+      },
+    })) as { userId: string };
+    saId = sa.userId;
+    ok(`Created introspection service account`);
+  } else {
+    ok("Introspection service account already exists");
+  }
+
+  // 5. Machine client credentials
+  let introspectionClientId = saId;
+  let introspectionClientSecret = "";
+  try {
+    const creds = (await zCall(`/management/v1/users/${saId}/secret`, pat, {
+      method: "PUT",
+      body: {},
+    })) as { clientId: string; clientSecret: string };
+    introspectionClientId = creds.clientId;
+    introspectionClientSecret = creds.clientSecret;
+  } catch {
+    warn("Could not generate introspection credentials — using PAT fallback");
+  }
+
+  // 6. Grant admin role to root admin user
+  const adminSearch = (await zCall("/management/v1/users/_search", pat, {
+    method: "POST",
+    body: {
+      queries: [
+        {
+          emailQuery: {
+            emailAddress: "admin@platform.local",
+            method: "TEXT_QUERY_METHOD_EQUALS",
+          },
+        },
+      ],
+    },
+  })) as { result?: Array<{ id: string }> };
+  const rootAdminId = adminSearch.result?.[0]?.id;
+  if (rootAdminId) {
+    try {
+      await zCall(`/management/v1/users/${rootAdminId}/grants`, pat, {
+        method: "POST",
+        body: { projectId, roleKeys: ["admin"] },
+      });
+      ok(`Granted "admin" role to admin@platform.local`);
+    } catch (e) {
+      if (
+        !String(e).includes("409") &&
+        !String(e).toLowerCase().includes("already exist")
+      ) {
+        warn(`Could not grant admin role to root admin: ${String(e)}`);
+      } else {
+        ok(`admin@platform.local already has "admin" role`);
+      }
+    }
+  }
+
+  // 7. Write env vars
+  writeEnvVars({
+    ZITADEL_ISSUER: ZITADEL_BASE,
+    ZITADEL_AUDIENCE: projectId,
+    ZITADEL_INTROSPECTION_URL: `${ZITADEL_BASE}/oauth/v2/introspect`,
+    ZITADEL_INTROSPECTION_CLIENT_ID: introspectionClientId,
+    ZITADEL_INTROSPECTION_CLIENT_SECRET: introspectionClientSecret,
+    ZITADEL_OIDC_CLIENT_ID: oidcClientId,
+    ZITADEL_OIDC_CLIENT_SECRET: oidcClientSecret,
+  });
+
+  return { projectId, oidcClientId };
+}
+
+// ── Zitadel demo user creation ────────────────────────────────────────────────
+
+async function createDemoUser(
+  pat: string,
+  projectId: string,
+  opts: {
+    email: string;
+    firstName: string;
+    lastName: string;
+    userName: string;
+    role: string;
+  },
+): Promise<void> {
+  // Check if user already exists
+  const search = (await zCall("/management/v1/users/_search", pat, {
+    method: "POST",
+    body: {
+      queries: [
+        {
+          emailQuery: {
+            emailAddress: opts.email,
+            method: "TEXT_QUERY_METHOD_EQUALS",
+          },
+        },
+      ],
+    },
+  })) as { result?: Array<{ id: string }> };
+
+  let userId = search.result?.[0]?.id ?? null;
+
+  if (!userId) {
+    // Create the human user
+    const created = (await zCall("/management/v1/users/human", pat, {
+      method: "POST",
+      body: {
+        userName: opts.userName,
+        profile: {
+          firstName: opts.firstName,
+          lastName: opts.lastName,
+          displayName: `${opts.firstName} ${opts.lastName}`,
+          preferredLanguage: "en",
+        },
+        email: {
+          email: opts.email,
+          isEmailVerified: true,
+        },
+        password: {
+          value: DEMO_PASSWORD,
+          changeRequired: false,
+        },
+      },
+    })) as { userId: string };
+    userId = created.userId;
+
+    // Set a known password (some Zitadel versions need this separate call)
+    try {
+      await zCall(`/management/v1/users/${userId}/password`, pat, {
+        method: "POST",
+        body: { password: DEMO_PASSWORD, noChangeRequired: true },
+      });
+    } catch {
+      /* some versions accept password in the create body already */
+    }
+
+    ok(`Created user ${opts.email}`);
+  } else {
+    ok(`User ${opts.email} already exists`);
+  }
+
+  // Grant project role
+  try {
+    await zCall(`/management/v1/users/${userId}/grants`, pat, {
+      method: "POST",
+      body: { projectId, roleKeys: [opts.role] },
+    });
+    ok(`  → granted role "${opts.role}"`);
+  } catch (e) {
+    const msg = String(e);
+    if (msg.includes("409") || msg.toLowerCase().includes("already exist")) {
+      ok(`  → role "${opts.role}" already granted`);
+    } else {
+      warn(`  → could not grant role "${opts.role}": ${msg}`);
+    }
+  }
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────────
+
+async function main(): Promise<void> {
+  banner();
+
+  // ── 1. Preflight ─────────────────────────────────────────────────────────────
+
+  step(1, "Checking prerequisites");
+
+  const nodeMajor = parseInt(process.versions.node.split(".")[0] ?? "0", 10);
+  if (nodeMajor < 22) {
+    fail(
+      `Node.js 22+ required. Current: v${process.versions.node}.\nDownload from https://nodejs.org`,
+    );
+  }
+  ok(`Node.js v${process.versions.node}`);
+
+  const pnpmVer = runCapture("pnpm --version");
+  if (!pnpmVer) fail("pnpm not found. Install: npm install -g pnpm");
+  ok(`pnpm ${pnpmVer}`);
+
+  const dockerRunning = runCapture("docker info --format '{{.ServerVersion}}'");
+  if (!dockerRunning)
+    fail("Docker is not running. Start Docker Desktop and re-run.");
+  ok(`Docker ${dockerRunning}`);
+
+  // ── 2. Environment ────────────────────────────────────────────────────────────
+
+  step(2, "Setting up environment");
+
+  if (!existsSync(ENV_FILE)) {
+    if (!existsSync(ENV_EXAMPLE)) {
+      fail(".env.example not found — are you in the OpenWind repository root?");
+    }
+    copyFileSync(ENV_EXAMPLE, ENV_FILE);
+    ok("Created .env.local from .env.example");
+  } else {
+    ok(".env.local already exists — keeping existing values");
+  }
+
+  // ── 3. Infrastructure ─────────────────────────────────────────────────────────
+
+  step(3, "Starting Docker services");
+
+  run("docker compose up -d");
+  ok("Docker services started");
+  info("Postgres, PgBouncer, Redis, MinIO, Zitadel, OpenBao");
+
+  // ── 4. Health checks ──────────────────────────────────────────────────────────
+
+  step(4, "Waiting for services to be healthy");
+
+  info("This can take up to 60s on first boot while Zitadel initialises...");
+
+  await waitForPostgres();
+  await waitForHttp(`${ZITADEL_BASE}/healthz`, "Zitadel", 80, 3000);
+  await waitForHttp("http://localhost:8200/v1/sys/health", "OpenBao", 30, 2000);
+
+  // Extra buffer for Zitadel internal startup (database migrations, admin user creation)
+  info("Giving Zitadel 10s to complete internal setup...");
+  await sleep(10_000);
+
+  // ── 5. Dependencies ───────────────────────────────────────────────────────────
+
+  step(5, "Installing Node.js dependencies");
+  run("pnpm install --frozen-lockfile");
+  ok("All workspace packages installed");
+
+  // ── 6. Database ───────────────────────────────────────────────────────────────
+
+  step(6, "Running database migrations and base seed");
+
+  run("pnpm db:migrate", { env: { DOTENV_CONFIG_PATH: ".env.local" } });
+  ok("Migrations applied");
+
+  run("pnpm db:seed", { env: { DOTENV_CONFIG_PATH: ".env.local" } });
+  ok("Base data seeded (dev tenant, roles)");
+
+  // ── 7. Auth setup ─────────────────────────────────────────────────────────────
+
+  step(7, "Configuring Zitadel authentication");
+
+  console.log(`
+  ${YELLOW}One manual step is required.${RESET}
+  Zitadel's API needs a Personal Access Token (PAT) for admin operations.
+  This is a one-time 30-second step.
+
+  ${BOLD}1.${RESET} Open:  ${CYAN}http://localhost:8080${RESET}
+  ${BOLD}2.${RESET} Log in: ${DIM}admin@platform.local  /  Admin1234!${RESET}
+  ${BOLD}3.${RESET} Click your avatar (top-right) → "Personal Access Tokens"
+  ${BOLD}4.${RESET} Click "${BOLD}+ New${RESET}" → set no expiry → click "Add" → ${BOLD}copy the token${RESET}
+`);
+
+  const pat = await ask(`  ${BOLD}Paste your PAT here:${RESET} `);
+  if (!pat || pat.length < 20) {
+    fail("PAT is too short. Copy the full token from Zitadel and try again.");
+  }
+
+  console.log("");
+  const { projectId, oidcClientId } = await runZitadelSetup(pat);
+  ok(`Project configured (id=${projectId})`);
+  ok(`OIDC client id: ${oidcClientId}`);
+  ok(".env.local updated with Zitadel credentials");
+
+  // ── 8. Demo users ─────────────────────────────────────────────────────────────
+
+  step(8, "Creating demo users");
+
+  await createDemoUser(pat, projectId, {
+    email: DEMO_ADMIN_EMAIL,
+    firstName: "Admin",
+    lastName: "Demo",
+    userName: "admin_demo",
+    role: "admin",
+  });
+
+  await createDemoUser(pat, projectId, {
+    email: DEMO_AGENT_EMAIL,
+    firstName: "Support",
+    lastName: "Agent",
+    userName: "agent_demo",
+    role: "agent",
+  });
+
+  await createDemoUser(pat, projectId, {
+    email: DEMO_USER_EMAIL,
+    firstName: "Portal",
+    lastName: "User",
+    userName: "user_demo",
+    role: "user",
+  });
+
+  // ── 9. Demo data ──────────────────────────────────────────────────────────────
+
+  step(9, "Seeding Helpdesk demo data");
+
+  run("pnpm seed:demo");
+  ok("Helpdesk module registered");
+  ok("Support Ticket entity type created (6 fields)");
+  ok("Ticket Lifecycle workflow seeded (6 states, 8 transitions)");
+  ok("5 sample tickets across all states");
+
+  // ── 10. Summary ───────────────────────────────────────────────────────────────
+
+  step(10, "Bootstrap complete");
+
+  console.log(`
+${BOLD}${GREEN}  ✅  OpenWind is ready!${RESET}
+
+  ${BOLD}Next step:${RESET}  run ${CYAN}pnpm dev${RESET} in a new terminal
+
+  ${BOLD}URLs${RESET}
+  ┌─────────────────────────────────────────────────────────┐
+  │  Admin panel     ${CYAN}http://localhost:3001${RESET}                   │
+  │  Customer portal ${CYAN}http://localhost:3004${RESET}                   │
+  │  API             ${CYAN}http://localhost:3000${RESET}                   │
+  │  API docs        ${CYAN}http://localhost:3000/docs${RESET}              │
+  │  Zitadel console ${CYAN}http://localhost:8080${RESET}                   │
+  │  MinIO console   ${CYAN}http://localhost:9001${RESET}                   │
+  │  OpenBao UI      ${CYAN}http://localhost:8200${RESET}                   │
+  └─────────────────────────────────────────────────────────┘
+
+  ${BOLD}Demo credentials${RESET}
+  ┌─────────────────────────────────────────────────────────┐
+  │  Admin UI + Portal                                      │
+  │  ${YELLOW}admin@openwind.local${RESET}   /  ${YELLOW}OpenWind1234!${RESET}   (admin)    │
+  │  ${YELLOW}agent@openwind.local${RESET}   /  ${YELLOW}OpenWind1234!${RESET}   (agent)    │
+  │  ${YELLOW}user@openwind.local${RESET}    /  ${YELLOW}OpenWind1234!${RESET}   (portal)   │
+  │                                                         │
+  │  Zitadel console (system admin)                         │
+  │  ${DIM}admin@platform.local   /  Admin1234!${RESET}                │
+  └─────────────────────────────────────────────────────────┘
+
+  ${BOLD}What's seeded${RESET}
+  • Helpdesk module with Support Ticket entity type
+  • Ticket Lifecycle workflow: New → Open → In Progress → Resolved → Closed
+  • 5 demo tickets spread across all workflow states
+
+  ${DIM}To reset everything: docker compose down -v && rm .env.local && pnpm bootstrap${RESET}
+`);
+}
+
+main().catch((err: unknown) => {
+  console.error(err);
+  process.exit(1);
+});

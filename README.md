@@ -152,46 +152,87 @@ Full architecture documentation: [`docs/architecture-brief.md`](docs/architectur
 
 ### Prerequisites
 
-- Node.js 22+
-- pnpm 9+
-- Docker and Docker Compose
+- [Node.js 22+](https://nodejs.org/)
+- [pnpm 9+](https://pnpm.io/installation) (`npm install -g pnpm`)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (running)
 
-### Local setup
+### Quick start — one command
 
 ```bash
-# Clone the repo
 git clone https://github.com/TinyPhi/OpenWind.git
 cd OpenWind
+pnpm install --frozen-lockfile
+pnpm bootstrap
+```
 
-# Copy environment config
-cp .env.example .env.local
+**On Windows (PowerShell):**
 
-# Start infrastructure (Postgres, Redis, MinIO, Zitadel, Novu, MailHog)
-docker compose up -d
+```powershell
+git clone https://github.com/TinyPhi/OpenWind.git
+cd OpenWind
+pnpm install --frozen-lockfile
+.\bootstrap.ps1
+```
 
-# Install dependencies
-pnpm install
+The bootstrap script handles everything automatically:
 
-# Run database migrations
-pnpm db:migrate
+| Step | What it does                                              |
+| ---- | --------------------------------------------------------- |
+| 1    | Checks Node.js, pnpm, and Docker versions                 |
+| 2    | Creates `.env.local` from `.env.example`                  |
+| 3    | Starts all Docker services (`docker compose up -d`)       |
+| 4    | Waits for Postgres, Zitadel, and OpenBao to be healthy    |
+| 5    | Installs all workspace dependencies                       |
+| 6    | Runs database migrations and seeds base data              |
+| 7    | Configures Zitadel (OIDC app, roles, auth credentials)    |
+| 8    | Creates three demo users with different permission levels |
+| 9    | Seeds a complete Helpdesk demo with 5 sample tickets      |
+| 10   | Prints all URLs and credentials                           |
 
-# Seed development data
-pnpm db:seed
+> **One manual step** — Zitadel's API requires a Personal Access Token. The script pauses and walks you through generating one in about 30 seconds (browser login → copy token → paste).
 
-# Start all services (hot reload)
+After bootstrap finishes, start the dev servers:
+
+```bash
 pnpm dev
 ```
 
-The admin UI will be available at `http://localhost:3001`.
-API docs (Scalar) at `http://localhost:3000/docs`.
-Zitadel console at `http://localhost:8080` (admin@platform.local / Admin1234!).
+### What you get
 
-### First steps after setup
+| URL                          | Service           |
+| ---------------------------- | ----------------- |
+| `http://localhost:3001`      | Admin panel       |
+| `http://localhost:3004`      | Customer portal   |
+| `http://localhost:3000`      | API               |
+| `http://localhost:3000/docs` | API docs (Scalar) |
+| `http://localhost:8080`      | Zitadel console   |
+| `http://localhost:8200`      | OpenBao (secrets) |
+| `http://localhost:9001`      | MinIO console     |
 
-1. Log in to the admin UI and create your first tenant
-2. Install the modules your tenant needs (CRM, Helpdesk, etc.)
-3. Open any module and explore the default workflow configurations
-4. Try creating a custom field on an entity type — no restart needed
+### Demo credentials
+
+| User                   | Password        | Role   | Access                        |
+| ---------------------- | --------------- | ------ | ----------------------------- |
+| `admin@openwind.local` | `OpenWind1234!` | Admin  | Full admin panel + portal     |
+| `agent@openwind.local` | `OpenWind1234!` | Agent  | Admin panel — ticket handling |
+| `user@openwind.local`  | `OpenWind1234!` | User   | Customer portal only          |
+| `admin@platform.local` | `Admin1234!`    | System | Zitadel console only          |
+
+### Seeded demo data
+
+The bootstrap seeds a fully configured **Helpdesk** module so you can explore the platform immediately:
+
+- **Support Ticket** entity type with 6 fields (subject, description, priority, category, customer name, email)
+- **Ticket Lifecycle** workflow: New → Open → In Progress → Waiting for Customer → Resolved → Closed
+- **5 sample tickets** across every workflow state (from high-priority bugs to feature requests)
+
+### Resetting everything
+
+```bash
+docker compose down -v   # removes all container data
+rm .env.local            # removes your local env file
+pnpm bootstrap           # run setup again from scratch
+```
 
 Full setup guide: [`docs/local-setup.md`](docs/local-setup.md)
 

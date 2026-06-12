@@ -772,6 +772,9 @@ async function main(): Promise<void> {
 
   step(6, "Running database migrations and base seed");
 
+  // @platform/config must be built before any package that imports it (e.g. db/client.ts)
+  run("pnpm turbo run build --filter=@platform/config");
+
   run("pnpm db:migrate", { env: { DOTENV_CONFIG_PATH: ".env.local" } });
   ok("Migrations applied");
 

@@ -75,22 +75,21 @@ describe("Module System Integration Tests", () => {
       .delete(automationRules)
       .where(eq(automationRules.tenantId, TEST_TENANT_ID));
 
-    // Since workflows/states/transitions reference each other, delete in reverse order
-    const [wf] = await db
+    // Delete all workflows for this tenant in FK-safe order
+    const allWfs = await db
       .select()
       .from(workflows)
-      .where(eq(workflows.tenantId, TEST_TENANT_ID))
-      .limit(1);
+      .where(eq(workflows.tenantId, TEST_TENANT_ID));
 
-    if (wf) {
+    for (const wf of allWfs) {
       await db
         .delete(workflowTransitions)
         .where(eq(workflowTransitions.workflowId, wf.id));
       await db
         .delete(workflowStates)
         .where(eq(workflowStates.workflowId, wf.id));
-      await db.delete(workflows).where(eq(workflows.id, wf.id));
     }
+    await db.delete(workflows).where(eq(workflows.tenantId, TEST_TENANT_ID));
 
     await db
       .delete(entityFields)

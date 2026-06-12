@@ -320,7 +320,6 @@ async function runZitadelSetup(
   const oidcPayload = {
     redirectUris: [
       "http://localhost:3001/auth/callback",
-      "http://localhost:3004/auth/callback",
       "http://localhost:3000/auth/callback",
     ],
     responseTypes: ["OIDC_RESPONSE_TYPE_CODE"],
@@ -333,8 +332,6 @@ async function runZitadelSetup(
     postLogoutRedirectUris: [
       "http://localhost:3001",
       "http://localhost:3001/login",
-      "http://localhost:3004",
-      "http://localhost:3004/login",
       "http://localhost:3000",
     ],
     accessTokenType: "OIDC_TOKEN_TYPE_JWT",
@@ -709,21 +706,19 @@ ${BOLD}${GREEN}  ✅  OpenWind is ready!${RESET}
 
   ${BOLD}URLs${RESET}
   ┌─────────────────────────────────────────────────────────┐
-  │  Admin panel     ${CYAN}http://localhost:3001${RESET}                   │
-  │  Customer portal ${CYAN}http://localhost:3004${RESET}                   │
-  │  API             ${CYAN}http://localhost:3000${RESET}                   │
-  │  API docs        ${CYAN}http://localhost:3000/docs${RESET}              │
-  │  Zitadel console ${CYAN}http://localhost:8080${RESET}                   │
-  │  MinIO console   ${CYAN}http://localhost:9001${RESET}                   │
-  │  OpenBao UI      ${CYAN}http://localhost:8200${RESET}                   │
+  │  App (admin + portal)  ${CYAN}http://localhost:3001${RESET}            │
+  │  API                   ${CYAN}http://localhost:3000${RESET}            │
+  │  API docs              ${CYAN}http://localhost:3000/docs${RESET}       │
+  │  Zitadel console       ${CYAN}http://localhost:8080${RESET}            │
+  │  MinIO console         ${CYAN}http://localhost:9001${RESET}            │
+  │  OpenBao UI            ${CYAN}http://localhost:8200${RESET}            │
   └─────────────────────────────────────────────────────────┘
 
-  ${BOLD}Demo credentials${RESET}
+  ${BOLD}Demo credentials${RESET}  (all at http://localhost:3001)
   ┌─────────────────────────────────────────────────────────┐
-  │  Admin UI + Portal                                      │
-  │  ${YELLOW}admin@openwind.local${RESET}   /  ${YELLOW}OpenWind1234!${RESET}   (admin)    │
-  │  ${YELLOW}agent@openwind.local${RESET}   /  ${YELLOW}OpenWind1234!${RESET}   (agent)    │
-  │  ${YELLOW}user@openwind.local${RESET}    /  ${YELLOW}OpenWind1234!${RESET}   (portal)   │
+  │  ${YELLOW}admin@openwind.local${RESET}   /  ${YELLOW}OpenWind1234!${RESET}   → admin view  │
+  │  ${YELLOW}agent@openwind.local${RESET}   /  ${YELLOW}OpenWind1234!${RESET}   → agent view  │
+  │  ${YELLOW}user@openwind.local${RESET}    /  ${YELLOW}OpenWind1234!${RESET}   → user view   │
   │                                                         │
   │  Zitadel console (system admin)                         │
   │  ${DIM}admin@platform.local   /  Admin1234!${RESET}                │

@@ -3,24 +3,31 @@ name: openwind
 # ─────────────────────────────────────────────────────────────────────────────
 # Local development environment.
 #
-# Services:
+# Core services (always started with docker compose up -d):
 #   postgres   — Primary database (RLS-enabled, multi-tenant)
 #   pgbouncer  — Connection pooler (transaction mode, required for RLS)
 #   openbao    — Secrets manager (OpenBao dev mode, auto-unsealed)
 #   redis      — Queue backend (BullMQ) + application cache
 #   minio      — S3-compatible object storage (local)
 #   zitadel    — Identity provider (OIDC/OAuth2/SAML)
-#   novu       — Notification infrastructure
-#   mailhog    — Local SMTP trap (catches all outbound email)
-#   bullboard  — BullMQ job queue dashboard
+#   api        — Hono API server (port 3000)
 #
-# Start everything:    docker compose up -d
-# Stop everything:     docker compose down
-# Reset all data:      docker compose down -v
-# View logs:           docker compose logs -f [service]
+# Note: admin-ui is disabled here via docker-compose.override.yml (profiles: [prod]).
+# In development, run `pnpm --filter @platform/admin-ui dev` on the host (port 3001).
+# Both admin and portal users log in at http://localhost:3001 — RBAC controls the view.
 #
-# App connects to:     postgres://app_user:...@localhost:6432/platform  (PgBouncer)
-# OpenBao UI/API:      http://localhost:8200  (token: dev-root-token)
+# Optional services (require explicit profile):
+#   --profile notifications  → novu-api, novu-worker, novu-web, novu-mongo
+#   --profile tools          → mailhog, bullboard
+#
+# Commands:
+#   Start infra:     docker compose up -d
+#   Stop:            docker compose down
+#   Wipe all data:   docker compose down -v
+#   Logs:            docker compose logs -f [service]
+#
+# App connects to:   postgres://app_user:...@localhost:6432/platform  (PgBouncer)
+# OpenBao UI/API:    http://localhost:8200  (token: dev-root-token)
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
@@ -347,15 +354,6 @@ services:
       - ./apps/admin-ui/vite.config.ts:/app/apps/admin-ui/vite.config.ts
       - ./.env.local:/app/.env.local:ro
     restart: unless-stopped
-
-  # ── Portal (end-user React app) ────────────────────────────────────────────
-  # Portal is retired — customer UI merged into admin-ui (RBAC-controlled, port 3001).
-  # portal:
-  #   build:
-  #     context: .
-  #     dockerfile: apps/portal/Dockerfile
-  #   ports:
-  #     - "3004:3000"
 
 # ─────────────────────────────────────────────────────────────────────────────
 volumes:

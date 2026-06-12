@@ -199,24 +199,25 @@ pnpm dev
 
 ### What you get
 
-| URL                          | Service           |
-| ---------------------------- | ----------------- |
-| `http://localhost:3001`      | Admin panel       |
-| `http://localhost:3004`      | Customer portal   |
-| `http://localhost:3000`      | API               |
-| `http://localhost:3000/docs` | API docs (Scalar) |
-| `http://localhost:8080`      | Zitadel console   |
-| `http://localhost:8200`      | OpenBao (secrets) |
-| `http://localhost:9001`      | MinIO console     |
+| URL                          | Service                                                  |
+| ---------------------------- | -------------------------------------------------------- |
+| `http://localhost:3001`      | App — admin, agent, and customer views (RBAC-controlled) |
+| `http://localhost:3000`      | API                                                      |
+| `http://localhost:3000/docs` | API docs (Scalar)                                        |
+| `http://localhost:8080`      | Zitadel console                                          |
+| `http://localhost:8200`      | OpenBao (secrets)                                        |
+| `http://localhost:9001`      | MinIO console                                            |
+
+All user types log in at the same URL (`http://localhost:3001`). The app reads the role from the JWT and shows the appropriate view automatically.
 
 ### Demo credentials
 
-| User                   | Password        | Role   | Access                        |
-| ---------------------- | --------------- | ------ | ----------------------------- |
-| `admin@openwind.local` | `OpenWind1234!` | Admin  | Full admin panel + portal     |
-| `agent@openwind.local` | `OpenWind1234!` | Agent  | Admin panel — ticket handling |
-| `user@openwind.local`  | `OpenWind1234!` | User   | Customer portal only          |
-| `admin@platform.local` | `Admin1234!`    | System | Zitadel console only          |
+| User                   | Password        | Role   | View shown after login |
+| ---------------------- | --------------- | ------ | ---------------------- |
+| `admin@openwind.local` | `OpenWind1234!` | Admin  | Full admin panel       |
+| `agent@openwind.local` | `OpenWind1234!` | Agent  | Agent / support view   |
+| `user@openwind.local`  | `OpenWind1234!` | User   | Customer / portal view |
+| `admin@platform.local` | `Admin1234!`    | System | Zitadel console only   |
 
 ### Seeded demo data
 

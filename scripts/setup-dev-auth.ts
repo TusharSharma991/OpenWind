@@ -199,7 +199,6 @@ async function ensureOidcApp(
           body: JSON.stringify({
             redirectUris: [
               "http://localhost:3001/auth/callback",
-              "http://localhost:3004/auth/callback",
               "http://localhost:3000/auth/callback",
             ],
             responseTypes: ["OIDC_RESPONSE_TYPE_CODE"],
@@ -212,8 +211,6 @@ async function ensureOidcApp(
             postLogoutRedirectUris: [
               "http://localhost:3001",
               "http://localhost:3001/login",
-              "http://localhost:3004",
-              "http://localhost:3004/login",
               "http://localhost:3000",
             ],
             accessTokenType: "OIDC_TOKEN_TYPE_JWT",
@@ -246,7 +243,6 @@ async function ensureOidcApp(
         name: APP_NAME,
         redirectUris: [
           "http://localhost:3001/auth/callback",
-          "http://localhost:3004/auth/callback",
           "http://localhost:3000/auth/callback",
         ],
         responseTypes: ["OIDC_RESPONSE_TYPE_CODE"],
@@ -259,8 +255,6 @@ async function ensureOidcApp(
         postLogoutRedirectUris: [
           "http://localhost:3001",
           "http://localhost:3001/login",
-          "http://localhost:3004",
-          "http://localhost:3004/login",
           "http://localhost:3000",
         ],
         accessTokenType: "OIDC_TOKEN_TYPE_JWT",

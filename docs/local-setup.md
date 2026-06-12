@@ -186,14 +186,15 @@ manually, restart the frontend: `docker compose restart ow-frontend`.
 ### Login fails with `client_id` error
 
 The frontend Vite server reads `.env.local` at startup. If `ZITADEL_OIDC_CLIENT_ID`
-was written to `.env.local` after the container started, recreate it:
+was written to `.env.local` after the container started, force-recreate it:
 
 ```bash
-docker compose up -d admin-ui
+docker compose up -d --force-recreate admin-ui
 ```
 
-Note: `docker restart` does NOT re-read `env_file` — it replays the baked-in env
-from container creation. Use `docker compose up -d <service>` to force a re-read.
+Note: `docker restart` and plain `docker compose up -d` do NOT re-read `env_file`
+when the compose config itself hasn't changed. Always use `--force-recreate` to
+guarantee the container picks up new env values.
 
 ### All API requests return 401 after login
 

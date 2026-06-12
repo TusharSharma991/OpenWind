@@ -798,7 +798,7 @@ async function main(): Promise<void> {
   // env_file and the environment: block, recreating the container if anything changed.
   info("Recreating api and frontend containers with updated credentials...");
   try {
-    execSync("docker compose up -d api admin-ui", {
+    execSync("docker compose up -d --force-recreate api admin-ui", {
       stdio: "ignore",
       cwd: ROOT,
     });
@@ -819,7 +819,7 @@ async function main(): Promise<void> {
     email: DEMO_ADMIN_EMAIL,
     firstName: "Admin",
     lastName: "Demo",
-    userName: "admin_demo",
+    userName: "owAdmin",
     role: "admin",
   });
 
@@ -827,7 +827,7 @@ async function main(): Promise<void> {
     email: DEMO_AGENT_EMAIL,
     firstName: "Support",
     lastName: "Agent",
-    userName: "agent_demo",
+    userName: "owAgent",
     role: "agent",
   });
 
@@ -835,7 +835,7 @@ async function main(): Promise<void> {
     email: DEMO_USER_EMAIL,
     firstName: "Portal",
     lastName: "User",
-    userName: "user_demo",
+    userName: "owUser",
     role: "user",
   });
 

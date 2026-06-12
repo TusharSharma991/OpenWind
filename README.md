@@ -165,15 +165,6 @@ pnpm install --frozen-lockfile
 pnpm bootstrap
 ```
 
-**On Windows (PowerShell):**
-
-```powershell
-git clone https://github.com/TinyPhi/OpenWind.git
-cd OpenWind
-pnpm install --frozen-lockfile
-.\bootstrap.ps1
-```
-
 The bootstrap script handles everything automatically:
 
 | Step | What it does                                              |
@@ -181,7 +172,7 @@ The bootstrap script handles everything automatically:
 | 1    | Checks Node.js, pnpm, and Docker versions                 |
 | 2    | Creates `.env.local` from `.env.example`                  |
 | 3    | Starts all Docker services (`docker compose up -d`)       |
-| 4    | Waits for Postgres, Zitadel, and OpenBao to be healthy    |
+| 4    | Waits for Postgres and Zitadel to be healthy              |
 | 5    | Installs all workspace dependencies                       |
 | 6    | Runs database migrations and seeds base data              |
 | 7    | Configures Zitadel (OIDC app, roles, auth credentials)    |
@@ -207,8 +198,6 @@ docker compose up -d --build
 | `http://localhost:3000`      | API                                                      |
 | `http://localhost:3000/docs` | API docs (Scalar)                                        |
 | `http://localhost:8080`      | Zitadel console                                          |
-| `http://localhost:8200`      | OpenBao (secrets)                                        |
-| `http://localhost:9001`      | MinIO console                                            |
 
 All user types log in at the same URL (`http://localhost:3001`). The app reads the role from the JWT and shows the appropriate view automatically.
 
@@ -232,10 +221,12 @@ The bootstrap seeds a fully configured **Helpdesk** module so you can explore th
 ### Resetting everything
 
 ```bash
-docker compose down -v   # removes all container data
-rm .env.local            # removes your local env file
-pnpm bootstrap           # run setup again from scratch
+docker compose down -v   # removes all container data (volumes wiped)
+rm .env.local            # removes your local env + generated credentials
+pnpm bootstrap           # full setup from scratch (one PAT step required again)
 ```
+
+> **Important:** Always use `docker compose down -v` (not just `down`) before re-running bootstrap from scratch. Without `-v`, Docker preserves the Postgres volume and the old Zitadel data will mix with the new setup.
 
 Full setup guide: [`docs/local-setup.md`](docs/local-setup.md)
 

@@ -130,7 +130,7 @@ is safe — inserts use `ON CONFLICT DO NOTHING`.
 ```bash
 docker compose down -v          # wipes postgres volume
 rm .env.local                   # removes generated credentials
-pnpm bootstrap                  # full setup again (one PAT step)
+pnpm bootstrap                  # full setup again (fully automated)
 ```
 
 > Always use `docker compose down -v` before re-bootstrapping. Without `-v`,

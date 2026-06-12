@@ -203,16 +203,16 @@ All user types log in at the same URL (`http://localhost:3001`). The app reads t
 
 ### Demo credentials
 
-| Username  | Password        | Role   | View shown after login |
-| --------- | --------------- | ------ | ---------------------- |
-| `owAdmin` | `OpenWind1234!` | Admin  | Full admin panel       |
-| `owAgent` | `OpenWind1234!` | Agent  | Agent / support view   |
-| `owUser`  | `OpenWind1234!` | User   | Customer / portal view |
+| Username  | Password        | Role  | View shown after login |
+| --------- | --------------- | ----- | ---------------------- |
+| `owAdmin` | `OpenWind1234!` | Admin | Full admin panel       |
+| `owAgent` | `OpenWind1234!` | Agent | Agent / support view   |
+| `owUser`  | `OpenWind1234!` | User  | Customer / portal view |
 
 > You can also log in with the full email (`owAdmin@openwind.local`, etc.) — both work.
 
-| Username               | Password    | Role   | Access               |
-| ---------------------- | ----------- | ------ | -------------------- |
+| Username               | Password     | Role   | Access               |
+| ---------------------- | ------------ | ------ | -------------------- |
 | `admin@platform.local` | `Admin1234!` | System | Zitadel console only |
 
 ### Seeded demo data
@@ -228,7 +228,7 @@ The bootstrap seeds a fully configured **Helpdesk** module so you can explore th
 ```bash
 docker compose down -v   # removes all container data (volumes wiped)
 rm .env.local            # removes your local env + generated credentials
-pnpm bootstrap           # full setup from scratch (one PAT step required again)
+pnpm bootstrap           # full setup from scratch (fully automated, no manual steps)
 ```
 
 > **Important:** Always use `docker compose down -v` (not just `down`) before re-running bootstrap from scratch. Without `-v`, Docker preserves the Postgres volume and the old Zitadel data will mix with the new setup.

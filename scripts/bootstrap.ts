@@ -371,7 +371,9 @@ async function getAdminToken(): Promise<string> {
       ok("Authenticated via saved JWT key — fully headless");
       return token;
     } catch (e) {
-      warn(`Saved key auth failed (${String(e)}) — trying machine key from volume`);
+      warn(
+        `Saved key auth failed (${String(e)}) — trying machine key from volume`,
+      );
     }
   }
 
@@ -381,18 +383,26 @@ async function getAdminToken(): Promise<string> {
   if (machineKey) {
     try {
       const token = await getTokenFromKeyJson(machineKey);
-      ok("Authenticated via Zitadel machine key — fully headless, no manual step needed");
+      ok(
+        "Authenticated via Zitadel machine key — fully headless, no manual step needed",
+      );
       // Save to .env.local so future runs use path A (faster)
       writeEnvVars({
-        ZITADEL_KEY_JSON: Buffer.from(JSON.stringify(machineKey)).toString("base64"),
+        ZITADEL_KEY_JSON: Buffer.from(JSON.stringify(machineKey)).toString(
+          "base64",
+        ),
       });
       ok("Machine key saved to .env.local for future runs");
       return token;
     } catch (e) {
-      warn(`Machine key auth failed (${String(e)}) — falling back to manual PAT`);
+      warn(
+        `Machine key auth failed (${String(e)}) — falling back to manual PAT`,
+      );
     }
   } else {
-    warn("Machine key not found in volume — volume may not be mounted or Zitadel is still initialising");
+    warn(
+      "Machine key not found in volume — volume may not be mounted or Zitadel is still initialising",
+    );
   }
 
   // Fallback — manual PAT (only hits if docker-compose.yml is missing the volume config)
@@ -719,6 +729,17 @@ async function createDemoUser(
       });
     } catch {
       /* some versions accept password in the create body already */
+    }
+
+    // Explicitly mark email as verified — belt-and-suspenders in case the
+    // isEmailVerified flag in the create body was ignored by this Zitadel version.
+    try {
+      await zCall(`/management/v1/users/${userId}/email`, pat, {
+        method: "PUT",
+        body: { email: opts.email, isEmailVerified: true },
+      });
+    } catch {
+      /* ignore — email was already marked verified in the create body */
     }
 
     ok(`Created user ${opts.email}`);

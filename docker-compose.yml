@@ -212,12 +212,12 @@ services:
       ZITADEL_EXTERNALDOMAIN: localhost
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: admin@platform.local
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: Admin1234!
-      # Machine user + PAT for automated setup scripts
+      # Machine user + JSON key written to a volume so bootstrap can use it without manual PAT
       ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_USERNAME: setup-admin
       ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_NAME: Setup Admin
-      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_PAT_EXPIRATIONDATE: "2030-01-01T00:00:00Z"
-      # Write the PAT token to a file so bootstrap can read it without a manual step
-      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_PAT_PATH: /pat/setup-admin.token
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINEKEY_TYPE: 1
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINEKEY_EXPIRATIONDATE: "2040-01-01T00:00:00Z"
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINEKEY_KEYPATH: /machinekey/sa.json
       # Disable Login V2 (the new SPA login) — it requires a separately hosted
       # frontend that isn't bundled in the Docker image, causing 404 in dev.
       # With this off, the console falls back to the built-in Login V1 HTML UI.
@@ -234,7 +234,7 @@ services:
       retries: 30
       start_period: 60s
     volumes:
-      - zitadel_pat:/pat
+      - zitadel_machinekey:/machinekey
 
   # ── Novu (Notifications) — profile:notifications ───────────────────────────
   # Not started by default. Run with: docker compose --profile notifications up -d
@@ -376,7 +376,7 @@ services:
 volumes:
   postgres_data:
   redis_data:
-  zitadel_pat:
+  zitadel_machinekey:
   novu_mongo_data:
   mailhog_data:
   # minio_data:    # uncomment when minio service is enabled

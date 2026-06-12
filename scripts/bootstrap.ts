@@ -339,48 +339,55 @@ async function generateAndSaveKeyJson(token: string): Promise<void> {
   );
 }
 
-// Read the setup-admin PAT that Zitadel writes on first boot via
-// ZITADEL_FIRSTINSTANCE_ORG_MACHINE_PAT_PATH=/pat/setup-admin.token
-function readZitadelPat(): string | null {
+// Read the machine key that Zitadel writes on first boot via
+// ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINEKEY_KEYPATH=/machinekey/sa.json
+function readZitadelMachineKey(): ZitadelKeyJson | null {
   try {
-    const result = execSync(
-      `docker compose exec -T zitadel cat /pat/setup-admin.token`,
+    const raw = execSync(
+      `docker compose exec -T zitadel cat /machinekey/sa.json`,
       { encoding: "utf8", cwd: ROOT },
     ).trim();
-    return result.length > 20 ? result : null;
+    if (!raw || raw.length < 20) return null;
+    return JSON.parse(raw) as ZitadelKeyJson;
   } catch {
     return null;
   }
 }
 
 async function getAdminToken(): Promise<string> {
-  // Headless path — key JSON already in .env.local
+  // Headless path A — saved key JSON already in .env.local (re-runs after first setup)
   const keyJson = readKeyJsonFromEnv();
   if (keyJson) {
     try {
       const token = await getTokenFromKeyJson(keyJson);
-      ok("Authenticated via JWT Profile grant — no browser step needed");
+      ok("Authenticated via saved JWT key — fully headless");
       return token;
     } catch (e) {
-      warn(`Key JSON auth failed (${String(e)}) — falling back to PAT`);
+      warn(`Saved key auth failed (${String(e)}) — trying machine key from volume`);
     }
   }
 
-  // Auto path — read PAT that Zitadel wrote to the mounted volume on first boot
-  info("Reading setup-admin PAT from Zitadel container...");
-  const autoPat = readZitadelPat();
-  if (autoPat) {
-    ok("PAT read automatically from Zitadel — no manual step needed");
-    info("Generating service account key for future headless runs...");
+  // Headless path B — Zitadel wrote a machine key to the mounted volume on first boot
+  info("Reading machine key from Zitadel container volume...");
+  const machineKey = readZitadelMachineKey();
+  if (machineKey) {
     try {
-      await generateAndSaveKeyJson(autoPat);
+      const token = await getTokenFromKeyJson(machineKey);
+      ok("Authenticated via Zitadel machine key — fully headless, no manual step needed");
+      // Save to .env.local so future runs use path A (faster)
+      writeEnvVars({
+        ZITADEL_KEY_JSON: Buffer.from(JSON.stringify(machineKey)).toString("base64"),
+      });
+      ok("Machine key saved to .env.local for future runs");
+      return token;
     } catch (e) {
-      warn(`Could not generate key JSON: ${String(e)}`);
+      warn(`Machine key auth failed (${String(e)}) — falling back to manual PAT`);
     }
-    return autoPat;
+  } else {
+    warn("Machine key not found in volume — volume may not be mounted or Zitadel is still initialising");
   }
 
-  // Fallback — prompt for PAT (only if volume isn't mounted or file missing)
+  // Fallback — manual PAT (only hits if docker-compose.yml is missing the volume config)
   console.log(`
   ${YELLOW}One manual step is required.${RESET}
   Zitadel's API needs a Personal Access Token (PAT) for this first setup.

@@ -339,6 +339,20 @@ async function generateAndSaveKeyJson(token: string): Promise<void> {
   );
 }
 
+// Read the setup-admin PAT that Zitadel writes on first boot via
+// ZITADEL_FIRSTINSTANCE_ORG_MACHINE_PAT_PATH=/pat/setup-admin.token
+function readZitadelPat(): string | null {
+  try {
+    const result = execSync(
+      `docker compose exec -T zitadel cat /pat/setup-admin.token`,
+      { encoding: "utf8", cwd: ROOT },
+    ).trim();
+    return result.length > 20 ? result : null;
+  } catch {
+    return null;
+  }
+}
+
 async function getAdminToken(): Promise<string> {
   // Headless path — key JSON already in .env.local
   const keyJson = readKeyJsonFromEnv();
@@ -352,7 +366,21 @@ async function getAdminToken(): Promise<string> {
     }
   }
 
-  // First-run path — prompt for PAT, then generate a key JSON for future runs
+  // Auto path — read PAT that Zitadel wrote to the mounted volume on first boot
+  info("Reading setup-admin PAT from Zitadel container...");
+  const autoPat = readZitadelPat();
+  if (autoPat) {
+    ok("PAT read automatically from Zitadel — no manual step needed");
+    info("Generating service account key for future headless runs...");
+    try {
+      await generateAndSaveKeyJson(autoPat);
+    } catch (e) {
+      warn(`Could not generate key JSON: ${String(e)}`);
+    }
+    return autoPat;
+  }
+
+  // Fallback — prompt for PAT (only if volume isn't mounted or file missing)
   console.log(`
   ${YELLOW}One manual step is required.${RESET}
   Zitadel's API needs a Personal Access Token (PAT) for this first setup.
@@ -370,7 +398,6 @@ async function getAdminToken(): Promise<string> {
     fail("PAT is too short. Copy the full token from Zitadel and try again.");
   }
 
-  // Generate and save key JSON so future runs skip this step entirely
   info("Generating service account key for future headless runs...");
   try {
     await generateAndSaveKeyJson(pat);

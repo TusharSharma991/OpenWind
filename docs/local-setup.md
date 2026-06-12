@@ -177,9 +177,12 @@ and writes `ZITADEL_OIDC_CLIENT_ID` and `ZITADEL_KEY_JSON` to `.env.local`.
 Demo login usernames: `owAdmin`, `owAgent`, `owUser` — password `OpenWind1234!` for all.
 (Full emails also work: `owAdmin@openwind.local`, etc.)
 
-After bootstrap runs, the frontend container is restarted automatically so
-Vite picks up the new OIDC client ID. If you ever change Zitadel credentials
-manually, restart the frontend: `docker compose restart ow-frontend`.
+Bootstrap reads the Zitadel setup PAT automatically from the container — no
+manual browser step required. After bootstrap runs, the frontend and API
+containers are force-recreated so both pick up the new OIDC credentials.
+
+If you ever change Zitadel credentials manually, force-recreate the frontend:
+`docker compose up -d --force-recreate admin-ui`.
 
 ---
 

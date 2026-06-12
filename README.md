@@ -180,7 +180,7 @@ The bootstrap script handles everything automatically:
 | 9    | Seeds a complete Helpdesk demo with 5 sample tickets      |
 | 10   | Prints all URLs and credentials                           |
 
-> **First-run only** — On a fresh install, the script pauses and walks you through generating a Zitadel PAT in about 30 seconds (browser login → copy token → paste). It then saves a service account key to `.env.local` so every subsequent `pnpm bootstrap` is fully headless — no browser step needed.
+> **Fully automated** — Bootstrap reads the Zitadel setup token automatically from the container. No browser step, no copy-pasting. Every run is headless.
 
 After bootstrap finishes, everything is already running in Docker. Open `http://localhost:3001` and log in.
 

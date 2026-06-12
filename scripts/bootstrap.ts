@@ -868,9 +868,9 @@ ${BOLD}${GREEN}  ✅  OpenWind is ready!${RESET}
 
   ${BOLD}Demo credentials${RESET}  (all at http://localhost:3001)
   ┌─────────────────────────────────────────────────────────┐
-  │  ${YELLOW}owAdmin@openwind.local${RESET}  /  ${YELLOW}OpenWind1234!${RESET}   → admin view  │
-  │  ${YELLOW}owAgent@openwind.local${RESET}  /  ${YELLOW}OpenWind1234!${RESET}   → agent view  │
-  │  ${YELLOW}owUser@openwind.local${RESET}   /  ${YELLOW}OpenWind1234!${RESET}   → user view   │
+  │  ${YELLOW}owAdmin${RESET}  /  ${YELLOW}OpenWind1234!${RESET}   → admin view             │
+  │  ${YELLOW}owAgent${RESET}  /  ${YELLOW}OpenWind1234!${RESET}   → agent view             │
+  │  ${YELLOW}owUser${RESET}   /  ${YELLOW}OpenWind1234!${RESET}   → user view              │
   │                                                         │
   │  Zitadel console (system admin)                         │
   │  ${DIM}admin@platform.local   /  Admin1234!${RESET}                │

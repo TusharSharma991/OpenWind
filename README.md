@@ -203,12 +203,17 @@ All user types log in at the same URL (`http://localhost:3001`). The app reads t
 
 ### Demo credentials
 
-| User                     | Password        | Role   | View shown after login |
-| ------------------------ | --------------- | ------ | ---------------------- |
-| `owAdmin@openwind.local` | `OpenWind1234!` | Admin  | Full admin panel       |
-| `owAgent@openwind.local` | `OpenWind1234!` | Agent  | Agent / support view   |
-| `owUser@openwind.local`  | `OpenWind1234!` | User   | Customer / portal view |
-| `admin@platform.local`   | `Admin1234!`    | System | Zitadel console only   |
+| Username  | Password        | Role   | View shown after login |
+| --------- | --------------- | ------ | ---------------------- |
+| `owAdmin` | `OpenWind1234!` | Admin  | Full admin panel       |
+| `owAgent` | `OpenWind1234!` | Agent  | Agent / support view   |
+| `owUser`  | `OpenWind1234!` | User   | Customer / portal view |
+
+> You can also log in with the full email (`owAdmin@openwind.local`, etc.) — both work.
+
+| Username               | Password    | Role   | Access               |
+| ---------------------- | ----------- | ------ | -------------------- |
+| `admin@platform.local` | `Admin1234!` | System | Zitadel console only |
 
 ### Seeded demo data
 

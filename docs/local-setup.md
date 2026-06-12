@@ -171,9 +171,11 @@ Zitadel is the OIDC/OAuth2 identity provider. In development it runs without TLS
 **Console:** http://localhost:8080  
 **System admin:** `admin@platform.local` / `Admin1234!`
 
-`pnpm bootstrap` creates the `Platform` project, OIDC app, three demo users
-(`owAdmin@openwind.local`, `owAgent@openwind.local`, `owUser@openwind.local`),
+`pnpm bootstrap` creates the `Platform` project, OIDC app, three demo users,
 and writes `ZITADEL_OIDC_CLIENT_ID` and `ZITADEL_KEY_JSON` to `.env.local`.
+
+Demo login usernames: `owAdmin`, `owAgent`, `owUser` — password `OpenWind1234!` for all.
+(Full emails also work: `owAdmin@openwind.local`, etc.)
 
 After bootstrap runs, the frontend container is restarted automatically so
 Vite picks up the new OIDC client ID. If you ever change Zitadel credentials

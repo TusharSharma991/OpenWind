@@ -85,6 +85,20 @@
       "when": 1778749338310,
       "tag": "0009_view_configs",
       "breakpoints": false
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1778749338311,
+      "tag": "0010_tenant_users_profile",
+      "breakpoints": false
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1778749338312,
+      "tag": "0011_workflow_is_active",
+      "breakpoints": false
     }
   ]
 }

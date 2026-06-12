@@ -793,14 +793,21 @@ async function main(): Promise<void> {
   ok(`OIDC client id: ${oidcClientId}`);
   ok(".env.local updated with Zitadel credentials");
 
-  // Restart the frontend container so Vite picks up the new OIDC client ID.
-  // Vite reads loadEnv() at startup — it won't see vars written after it launched.
+  // Recreate api + frontend so both pick up the new env vars written above.
+  // `docker restart` reuses the baked-in env; `docker compose up -d` re-reads
+  // env_file and the environment: block, recreating the container if anything changed.
+  info("Recreating api and frontend containers with updated credentials...");
   try {
-    execSync("docker restart ow-frontend", { stdio: "ignore" });
-    ok("Frontend container restarted (picks up OIDC client ID)");
+    execSync("docker compose up -d api admin-ui", {
+      stdio: "ignore",
+      cwd: ROOT,
+    });
+    ok(
+      "API and frontend containers recreated (ZITADEL_AUDIENCE + OIDC client ID applied)",
+    );
   } catch {
     warn(
-      "Could not restart ow-frontend — run `docker restart ow-frontend` manually",
+      "Could not recreate containers — run `docker compose up -d api admin-ui` manually",
     );
   }
 

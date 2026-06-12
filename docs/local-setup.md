@@ -185,11 +185,25 @@ manually, restart the frontend: `docker compose restart ow-frontend`.
 ### Login fails with `client_id` error
 
 The frontend Vite server reads `.env.local` at startup. If `ZITADEL_OIDC_CLIENT_ID`
-was written to `.env.local` after the container started, restart it:
+was written to `.env.local` after the container started, recreate it:
 
 ```bash
-docker compose restart ow-frontend
+docker compose up -d admin-ui
 ```
+
+Note: `docker restart` does NOT re-read `env_file` — it replays the baked-in env
+from container creation. Use `docker compose up -d <service>` to force a re-read.
+
+### All API requests return 401 after login
+
+The API container has a stale `ZITADEL_AUDIENCE` value from before bootstrap
+wrote the real project ID. Recreate it:
+
+```bash
+docker compose up -d api
+```
+
+Same root cause as above — `docker restart ow-backend` will not help.
 
 ### Migration fails: `permission denied for database platform`
 

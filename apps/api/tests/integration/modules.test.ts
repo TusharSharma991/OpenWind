@@ -104,7 +104,9 @@ describe("Module System Integration Tests", () => {
   it("GET /modules - lists registered modules with installed=false status", async () => {
     const res = await app.request("/modules", { method: "GET" });
     expect(res.status).toBe(200);
-    const json = (await res.json()) as { slug: string; installed: boolean }[];
+    const { data: json } = (await res.json()) as {
+      data: { slug: string; installed: boolean }[];
+    };
     expect(json.length).toBeGreaterThanOrEqual(1);
 
     const helpdesk = json.find((m) => m.slug === "helpdesk");
@@ -190,7 +192,9 @@ describe("Module System Integration Tests", () => {
   it("GET /modules - shows helpdesk as installed", async () => {
     const res = await app.request("/modules", { method: "GET" });
     expect(res.status).toBe(200);
-    const json = (await res.json()) as { slug: string; installed: boolean }[];
+    const { data: json } = (await res.json()) as {
+      data: { slug: string; installed: boolean }[];
+    };
     const helpdesk = json.find((m) => m.slug === "helpdesk");
     expect(helpdesk?.installed).toBe(true);
   });
@@ -215,10 +219,9 @@ describe("Module System Integration Tests", () => {
 
     // Verify listing shows not installed
     const listRes = await app.request("/modules", { method: "GET" });
-    const listJson = (await listRes.json()) as {
-      slug: string;
-      installed: boolean;
-    }[];
+    const { data: listJson } = (await listRes.json()) as {
+      data: { slug: string; installed: boolean }[];
+    };
     const helpdesk = listJson.find((m) => m.slug === "helpdesk");
     expect(helpdesk?.installed).toBe(false);
   });

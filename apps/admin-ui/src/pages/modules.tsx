@@ -97,43 +97,6 @@ const PLAN_LABEL: Record<string, string> = {
   enterprise: "Enterprise",
 };
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-
-function _SectionHeader({
-  title,
-  action,
-}: {
-  title: string;
-  action?: React.ReactNode;
-}): React.ReactElement {
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        paddingBottom: "12px",
-        borderBottom: "1px solid var(--border-color)",
-        marginBottom: "16px",
-      }}
-    >
-      <h3
-        style={{
-          fontSize: "11px",
-          fontWeight: 700,
-          color: "var(--text-muted)",
-          textTransform: "uppercase",
-          letterSpacing: "0.07em",
-          margin: 0,
-        }}
-      >
-        {title}
-      </h3>
-      {action}
-    </div>
-  );
-}
-
 // ── main component ────────────────────────────────────────────────────────────
 
 type FilterTab = "all" | "installed" | "available";

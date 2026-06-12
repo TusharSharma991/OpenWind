@@ -18,7 +18,7 @@ import { viewConfigsRouter } from "./routes/view-configs/index.js";
 import { rolesRouter } from "./routes/platform/roles.js";
 import { usersRouter } from "./routes/platform/users.js";
 
-type AppVars = { Variables: { auth: AuthContext } };
+type AppVars = { Variables: { auth: AuthContext; requestId: string } };
 
 export function createApp(): Hono<AppVars> {
   const app = new Hono<AppVars>();

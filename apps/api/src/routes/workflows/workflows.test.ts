@@ -147,14 +147,14 @@ describe("GET /workflows", () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.data).toHaveLength(1);
-    expect(mockList).toHaveBeenCalledWith({}, "t-aaa", TYPE_ID);
+    expect(mockList).toHaveBeenCalledWith({}, "t-aaa", TYPE_ID, false);
   });
 
   it("allows missing entityTypeId and returns 200", async () => {
     mockList.mockResolvedValue([fakeWorkflowFull]);
     const res = await makeApp().request("/");
     expect(res.status).toBe(200);
-    expect(mockList).toHaveBeenCalledWith({}, "t-aaa", undefined);
+    expect(mockList).toHaveBeenCalledWith({}, "t-aaa", undefined, false);
   });
 });
 

@@ -60,11 +60,11 @@ export const authProvider: AuthProvider = {
         return Promise.resolve({
           logout: true,
           redirectTo: "/login",
-          error: error as Error,
+          error: error as unknown as Error,
         });
       }
     }
-    return Promise.resolve({ error: error as Error });
+    return Promise.resolve({ error: error as unknown as Error });
   },
   check: async () => {
     if (window.location.pathname === "/auth/callback") {

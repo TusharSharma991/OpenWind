@@ -42,8 +42,13 @@ const { updateEntityFieldHandler } = await import("./update-field.js");
 
 // ── Test app ──────────────────────────────────────────────────────────────────
 
-function makeApp() {
-  const app = new Hono<{ Variables: { auth: AuthContext } }>();
+function makeApp(typeId = "") {
+  const app = new Hono<{ Variables: { auth: AuthContext; typeId: string } }>();
+  // Simulate the parent router middleware that sets typeId on the context
+  app.use("*", async (c, next) => {
+    c.set("typeId", typeId);
+    await next();
+  });
   app.patch("/:fieldId", ...updateEntityFieldHandler);
   return app;
 }

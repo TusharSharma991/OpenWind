@@ -191,10 +191,12 @@ The bootstrap script handles everything automatically:
 
 > **One manual step** — Zitadel's API requires a Personal Access Token. The script pauses and walks you through generating one in about 30 seconds (browser login → copy token → paste).
 
-After bootstrap finishes, start the dev servers:
+After bootstrap finishes, everything is already running in Docker. Open `http://localhost:3001` and log in.
+
+To rebuild and restart all containers after code changes:
 
 ```bash
-pnpm dev
+docker compose up -d --build
 ```
 
 ### What you get

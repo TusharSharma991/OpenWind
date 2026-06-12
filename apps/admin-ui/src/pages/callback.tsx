@@ -11,7 +11,7 @@ export function AuthCallback(): React.ReactElement {
       .signinCallback()
       .then(async () => {
         const user = await userManager.getUser();
-        const profile = user?.profile ?? {};
+        const profile = (user?.profile ?? {}) as Record<string, unknown>;
         const rolesMap = (profile["urn:zitadel:iam:org:project:roles"] ??
           {}) as Record<string, unknown>;
         const roles = Object.keys(rolesMap);

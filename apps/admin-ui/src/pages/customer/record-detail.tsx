@@ -817,7 +817,7 @@ export function CustomerRecordDetail(): React.ReactElement {
                                         string,
                                         Record<string, Record<string, unknown>>
                                       >
-                                    )["changed"],
+                                    )["changed"] ?? {},
                                   ).map(([fieldName, change]) => (
                                     <li key={fieldName}>
                                       <strong>

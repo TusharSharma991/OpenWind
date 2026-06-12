@@ -11,10 +11,10 @@ name: openwind
 #   minio      — S3-compatible object storage (local)
 #   zitadel    — Identity provider (OIDC/OAuth2/SAML)
 #   api        — Hono API server (port 3000)
+#   admin-ui   — React app with Vite HMR (port 3001) — admin + portal in one app, RBAC-controlled
 #
-# Note: admin-ui is disabled here via docker-compose.override.yml (profiles: [prod]).
-# In development, run `pnpm --filter @platform/admin-ui dev` on the host (port 3001).
-# Both admin and portal users log in at http://localhost:3001 — RBAC controls the view.
+# All users (admin, agent, customer) log in at http://localhost:3001.
+# The app reads the role from the JWT and renders the appropriate view.
 #
 # Optional services (require explicit profile):
 #   --profile notifications  → novu-api, novu-worker, novu-web, novu-mongo

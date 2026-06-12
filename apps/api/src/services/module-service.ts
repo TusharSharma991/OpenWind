@@ -1,7 +1,6 @@
 import fs from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import {
   db,
@@ -11,9 +10,6 @@ import {
   tenants,
 } from "@platform/db";
 import { logger } from "@platform/logger";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 export function getWorkspaceRoot(): string {
   let dir = __dirname;

@@ -702,7 +702,7 @@ async function main(): Promise<void> {
   console.log(`
 ${BOLD}${GREEN}  ✅  OpenWind is ready!${RESET}
 
-  ${BOLD}Next step:${RESET}  run ${CYAN}pnpm dev${RESET} in a new terminal
+  ${BOLD}Everything is running in Docker.${RESET} Open ${CYAN}http://localhost:3001${RESET} and log in.
 
   ${BOLD}URLs${RESET}
   ┌─────────────────────────────────────────────────────────┐
@@ -729,7 +729,8 @@ ${BOLD}${GREEN}  ✅  OpenWind is ready!${RESET}
   • Ticket Lifecycle workflow: New → Open → In Progress → Resolved → Closed
   • 5 demo tickets spread across all workflow states
 
-  ${DIM}To reset everything: docker compose down -v && rm .env.local && pnpm bootstrap${RESET}
+  ${DIM}Rebuild after code changes: docker compose up -d --build${RESET}
+  ${DIM}Reset everything: docker compose down -v && rm .env.local && pnpm bootstrap${RESET}
 `);
 }
 

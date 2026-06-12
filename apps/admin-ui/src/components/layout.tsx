@@ -117,6 +117,7 @@ export function Layout({
   }>();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [roles, setRoles] = useState<string[]>([]);
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
@@ -128,6 +129,11 @@ export function Layout({
       );
     });
   }, []);
+
+  // Close mobile nav on route change
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [location.pathname]);
 
   useEffect(() => {
     function close(e: MouseEvent): void {
@@ -177,7 +183,14 @@ export function Layout({
       <div className="header-title-section">
         <button
           className="admin-hamburger"
-          onClick={() => setSidebarOpen((o) => !o)}
+          onClick={() => {
+            // On mobile (≤640px) only drive the overlay drawer
+            if (window.innerWidth <= 640) {
+              setMobileNavOpen((o) => !o);
+            } else {
+              setSidebarOpen((o) => !o);
+            }
+          }}
           aria-label="Toggle sidebar"
         >
           <span />
@@ -389,8 +402,15 @@ export function Layout({
       <div className="app-container">
         {topnav}
         <div className="app-body">
+          {mobileNavOpen && (
+            <div
+              className="mobile-nav-backdrop"
+              onClick={() => setMobileNavOpen(false)}
+              aria-hidden="true"
+            />
+          )}
           <aside
-            className={`sidebar ${sidebarOpen ? "sidebar-open" : "sidebar-collapsed"}`}
+            className={`sidebar ${sidebarOpen ? "sidebar-open" : "sidebar-collapsed"} ${mobileNavOpen ? "mobile-nav-open" : ""}`}
           >
             <nav
               style={{
@@ -402,7 +422,7 @@ export function Layout({
             >
               <Link
                 to="/records"
-                className={`menu-item ${!sidebarOpen ? "menu-item-icon-only" : ""} ${isActive("/records") ? "active" : ""}`}
+                className={`menu-item ${!sidebarOpen && !mobileNavOpen ? "menu-item-icon-only" : ""} ${isActive("/records") ? "active" : ""}`}
                 title={!sidebarOpen ? "Records" : undefined}
               >
                 <svg
@@ -418,17 +438,17 @@ export function Layout({
                     d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 00-1.883 2.542l.857 6a2.25 2.25 0 002.227 1.932H19.05a2.25 2.25 0 002.227-1.932l.857-6a2.25 2.25 0 00-1.883-2.542m-16.5 0V6A2.25 2.25 0 016 3.75h3.879a1.5 1.5 0 011.06.44l2.122 2.12a1.5 1.5 0 001.06.44H18A2.25 2.25 0 0120.25 9v.776"
                   />
                 </svg>
-                {sidebarOpen && <span>Records</span>}
+                {(sidebarOpen || mobileNavOpen) && <span>Records</span>}
               </Link>
 
               <div className="nav-divider" />
               <Link
                 to="/settings"
-                className={`menu-item ${!sidebarOpen ? "menu-item-icon-only" : ""} ${isActive("/settings") ? "active" : ""}`}
+                className={`menu-item ${!sidebarOpen && !mobileNavOpen ? "menu-item-icon-only" : ""} ${isActive("/settings") ? "active" : ""}`}
                 title={!sidebarOpen ? "Settings" : undefined}
               >
                 {SETTINGS_NAV.icon}
-                {sidebarOpen && <span>Settings</span>}
+                {(sidebarOpen || mobileNavOpen) && <span>Settings</span>}
               </Link>
             </nav>
           </aside>
@@ -443,19 +463,26 @@ export function Layout({
     <div className="app-container">
       {topnav}
       <div className="app-body">
+        {mobileNavOpen && (
+          <div
+            className="mobile-nav-backdrop"
+            onClick={() => setMobileNavOpen(false)}
+            aria-hidden="true"
+          />
+        )}
         <aside
-          className={`sidebar ${sidebarOpen ? "sidebar-open" : "sidebar-collapsed"}`}
+          className={`sidebar ${sidebarOpen ? "sidebar-open" : "sidebar-collapsed"} ${mobileNavOpen ? "mobile-nav-open" : ""}`}
         >
           <nav className="sidebar-menu">
             {ADMIN_NAV.map((item) => (
               <Link
                 key={item.route}
                 to={item.route}
-                className={`menu-item ${!sidebarOpen ? "menu-item-icon-only" : ""} ${isActive(item.route) ? "active" : ""}`}
+                className={`menu-item ${!sidebarOpen && !mobileNavOpen ? "menu-item-icon-only" : ""} ${isActive(item.route) ? "active" : ""}`}
                 title={!sidebarOpen ? item.label : undefined}
               >
                 {item.icon}
-                {sidebarOpen && <span>{item.label}</span>}
+                {(sidebarOpen || mobileNavOpen) && <span>{item.label}</span>}
               </Link>
             ))}
 
@@ -463,7 +490,7 @@ export function Layout({
 
             <Link
               to={SETTINGS_NAV.route}
-              className={`menu-item ${!sidebarOpen ? "menu-item-icon-only" : ""} ${isActive(SETTINGS_NAV.route) ? "active" : ""}`}
+              className={`menu-item ${!sidebarOpen && !mobileNavOpen ? "menu-item-icon-only" : ""} ${isActive(SETTINGS_NAV.route) ? "active" : ""}`}
               title={!sidebarOpen ? SETTINGS_NAV.label : undefined}
             >
               {SETTINGS_NAV.icon}

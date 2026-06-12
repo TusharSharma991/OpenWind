@@ -30,6 +30,13 @@ type Transition = {
   label: string;
   requiresComment: boolean;
 };
+type WorkflowState = {
+  id: string;
+  name: string;
+  label: string;
+  color: string | null;
+  isTerminal: boolean;
+};
 type WorkflowEvent = {
   id: string;
   fromState: string | null;
@@ -40,6 +47,7 @@ type WorkflowEvent = {
   metadata?: Record<string, unknown>;
 };
 
+/* ── Field display ───────────────────────────────────────────── */
 function FieldValue({
   value,
   fieldType,
@@ -50,7 +58,7 @@ function FieldValue({
   field?: EntityField;
 }): React.ReactElement {
   if (value === null || value === undefined)
-    return <span className="portal-text-muted">—</span>;
+    return <span className="rcd-muted">—</span>;
   if (fieldType === "boolean") {
     const bv = Boolean(value);
     return (
@@ -97,6 +105,7 @@ function FieldValue({
   return <span>{String(value)}</span>;
 }
 
+/* ── Field input (edit mode) ─────────────────────────────────── */
 function FieldInput({
   field,
   value,
@@ -192,6 +201,103 @@ function FieldInput({
   }
 }
 
+/* ── State badge with color ──────────────────────────────────── */
+function StateBadge({
+  stateName,
+  allStates,
+}: {
+  stateName: string | null;
+  allStates: WorkflowState[];
+}): React.ReactElement {
+  if (!stateName) return <span className="rcd-muted">—</span>;
+  const stateObj = allStates.find((s) => s.name === stateName);
+  const color = stateObj?.color ?? null;
+  return (
+    <span
+      className="rcd-state-badge"
+      style={
+        color
+          ? {
+              background: `${color}20`,
+              color,
+              borderColor: `${color}55`,
+            }
+          : undefined
+      }
+    >
+      <span
+        className="rcd-state-dot"
+        style={color ? { background: color } : undefined}
+      />
+      {stateObj?.label ?? stateName}
+    </span>
+  );
+}
+
+/* ── History event icon ──────────────────────────────────────── */
+function HistoryIcon({
+  type,
+}: {
+  type: "create" | "update" | "transition";
+}): React.ReactElement {
+  if (type === "create") {
+    return (
+      <div className="rcd-tl-icon rcd-tl-icon-create">
+        <svg
+          width="11"
+          height="11"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <line x1="12" y1="5" x2="12" y2="19" />
+          <line x1="5" y1="12" x2="19" y2="12" />
+        </svg>
+      </div>
+    );
+  }
+  if (type === "update") {
+    return (
+      <div className="rcd-tl-icon rcd-tl-icon-update">
+        <svg
+          width="11"
+          height="11"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+          <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+        </svg>
+      </div>
+    );
+  }
+  return (
+    <div className="rcd-tl-icon rcd-tl-icon-transition">
+      <svg
+        width="11"
+        height="11"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <polyline points="5 12 19 12" />
+        <polyline points="13 6 19 12 13 18" />
+      </svg>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════ */
 export function CustomerRecordDetail(): React.ReactElement {
   const { typeSlug, id } = useParams<{ typeSlug: string; id: string }>();
   const { getTypeBySlug } = useEntityTypes();
@@ -211,9 +317,8 @@ export function CustomerRecordDetail(): React.ReactElement {
   const [editValues, setEditValues] = useState<Record<string, unknown>>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [allStates, setAllStates] = useState<
-    Array<{ id: string; name: string; label: string }>
-  >([]);
+  const [allStates, setAllStates] = useState<WorkflowState[]>([]);
+  const [allTransitions, setAllTransitions] = useState<Transition[]>([]);
   const [currentState, setCurrentState] = useState("");
   const [users, setUsers] = useState<
     Array<{ userId: string; email: string; displayName: string | null }>
@@ -229,7 +334,7 @@ export function CustomerRecordDetail(): React.ReactElement {
   const getActorName = (actorId: string | null): string => {
     if (!actorId) return "System";
     const u = users.find((user) => user.userId === actorId);
-    return u?.displayName ?? u?.email ?? actorId;
+    return u?.displayName ?? u?.email ?? actorId.slice(0, 8) + "…";
   };
 
   function loadRecord(): Promise<void> {
@@ -273,40 +378,44 @@ export function CustomerRecordDetail(): React.ReactElement {
   }, [entityTypeId, id]);
 
   useEffect(() => {
-    if (record?.workflowId) {
-      fetchWithAuth(`${API_URL}/workflows/${record.workflowId}`)
-        .then((res) => {
-          const wf = (
-            res as {
-              data: {
-                states: Array<{ id: string; name: string; label: string }>;
-              };
-            }
-          ).data;
-          setAllStates(wf.states);
-        })
-        .catch(() => undefined);
-    } else if (entityTypeId) {
-      fetchWithAuth(`${API_URL}/workflows?entityTypeId=${entityTypeId}`)
-        .then((res) => {
-          const wfs =
-            (
+    if (!record?.workflowId && !entityTypeId) {
+      setAllStates([]);
+      setAllTransitions([]);
+      return;
+    }
+
+    const wfUrl = record?.workflowId
+      ? `${API_URL}/workflows/${record.workflowId}`
+      : `${API_URL}/workflows?entityTypeId=${entityTypeId}`;
+
+    fetchWithAuth(wfUrl)
+      .then((res) => {
+        const wf = record?.workflowId
+          ? (
+              res as {
+                data: { states: WorkflowState[]; transitions: Transition[] };
+              }
+            ).data
+          : ((
               res as {
                 data?: Array<{
-                  states?: Array<{ id: string; name: string; label: string }>;
+                  states?: WorkflowState[];
+                  transitions?: Transition[];
                 }>;
               }
-            ).data ?? [];
-          if (wfs[0]?.states) {
-            setAllStates(wfs[0].states);
-          } else {
-            setAllStates([]);
-          }
-        })
-        .catch(() => setAllStates([]));
-    } else {
-      setAllStates([]);
-    }
+            ).data ?? [])[0];
+        if (wf) {
+          setAllStates(wf.states as WorkflowState[]);
+          setAllTransitions(wf.transitions as Transition[]);
+        } else {
+          setAllStates([]);
+          setAllTransitions([]);
+        }
+      })
+      .catch(() => {
+        setAllStates([]);
+        setAllTransitions([]);
+      });
   }, [record?.workflowId, entityTypeId]);
 
   async function saveEdit(): Promise<void> {
@@ -360,9 +469,10 @@ export function CustomerRecordDetail(): React.ReactElement {
         <div className="spinner" />
       </div>
     );
+
   if (error || !record) {
     return (
-      <div className="portal-page">
+      <div className="rcd-page">
         <div className="portal-alert-error">{error ?? "Record not found"}</div>
         <Link
           to={`/records/${typeSlug ?? ""}`}
@@ -375,308 +485,607 @@ export function CustomerRecordDetail(): React.ReactElement {
     );
   }
 
+  const availableTransitions = allTransitions.filter(
+    (t) => t.fromState === record.currentState,
+  );
+  const currentStateObj = allStates.find((s) => s.name === record.currentState);
+  const isTerminal = currentStateObj?.isTerminal ?? false;
+
+  const titleField = fields.find(
+    (f) => f.name === "subject" || f.name === "title" || f.name === "name",
+  );
+  const recordTitle = titleField
+    ? String(record.fields[titleField.name] ?? "")
+    : `${entityType?.name ?? "Record"} #${record.id.slice(0, 8)}`;
+
   return (
-    <div className="portal-page">
-      <Link to={`/records/${typeSlug ?? ""}`} className="portal-back-link">
-        ← {entityType?.plural ?? "Records"}
-      </Link>
-
-      <div className="portal-detail-header">
-        <div>
-          <h1 className="portal-page-title">
-            {entityType?.name ?? "Record"}
-            {record.currentState && (
-              <span
-                className="portal-state-badge"
-                style={{ marginLeft: "12px", fontSize: "14px" }}
-              >
-                {record.currentState}
-              </span>
-            )}
-          </h1>
-          <p
-            className="portal-text-muted"
-            style={{ fontSize: "12px", marginTop: "4px" }}
+    <div className="rcd-page">
+      {/* ── Breadcrumb ───────────────────────────────────────── */}
+      <div className="rcd-breadcrumb">
+        <Link to={`/records/${typeSlug ?? ""}`} className="rcd-bc-link">
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
           >
-            Created {new Date(record.createdAt).toLocaleString()}
-          </p>
-        </div>
-
-        <div className="portal-transitions">
-          {transError && (
-            <div className="portal-alert-error" style={{ marginBottom: "8px" }}>
-              {transError}
-            </div>
-          )}
-        </div>
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+          {entityType?.plural ?? "Records"}
+        </Link>
+        <span className="rcd-bc-sep">/</span>
+        <span className="rcd-bc-current">{recordTitle}</span>
       </div>
 
-      <div className="portal-card">
-        <div className="portal-card-header">
-          <h3 className="portal-card-title">Details</h3>
-          {!editing && (
-            <button
-              className="portal-btn-secondary portal-btn-sm"
-              onClick={() => {
-                setEditValues(record.fields);
-                setCurrentState(record.currentState ?? "");
-                setEditing(true);
-                setSaveError(null);
-              }}
+      {/* ── Page Header ─────────────────────────────────────── */}
+      <div className="rcd-header">
+        <div className="rcd-header-left">
+          <div className="rcd-header-icon">
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
             >
-              Edit
-            </button>
-          )}
+              <rect x="2" y="7" width="20" height="14" rx="2" />
+              <path d="M16 3H8a2 2 0 00-2 2v2h12V5a2 2 0 00-2-2z" />
+            </svg>
+          </div>
+          <div>
+            <h1 className="rcd-title">{recordTitle}</h1>
+            <div className="rcd-meta-row">
+              <StateBadge
+                stateName={record.currentState}
+                allStates={allStates}
+              />
+              <span className="rcd-meta-sep" />
+              <span className="rcd-meta-text">
+                Created{" "}
+                {new Date(record.createdAt).toLocaleDateString(undefined, {
+                  month: "short",
+                  day: "numeric",
+                  year: "numeric",
+                })}
+              </span>
+              <span className="rcd-meta-sep" />
+              <span className="rcd-meta-text">
+                Updated{" "}
+                {new Date(record.updatedAt).toLocaleDateString(undefined, {
+                  month: "short",
+                  day: "numeric",
+                  year: "numeric",
+                })}
+              </span>
+              <span className="rcd-id-chip">{record.id.slice(0, 8)}</span>
+            </div>
+          </div>
         </div>
-        {fields.length === 0 ? (
-          <p className="portal-text-muted" style={{ padding: "18px" }}>
-            No fields defined.
-          </p>
-        ) : editing ? (
-          <div style={{ padding: "18px" }}>
-            {saveError && (
-              <div
-                className="portal-alert-error"
-                style={{ marginBottom: "16px" }}
-              >
-                {saveError}
-              </div>
-            )}
-            <div className="portal-edit-grid">
-              {allStates.length > 0 && (
-                <div className="portal-field-group portal-field-full">
-                  <label className="portal-field-label">State</label>
-                  <select
-                    className="portal-input"
-                    value={currentState}
-                    onChange={(e) => setCurrentState(e.target.value)}
-                  >
-                    {allStates.map((st) => (
-                      <option key={st.id} value={st.name}>
-                        {st.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-              {fields.map((f) => (
-                <div
-                  key={f.id}
-                  className={`portal-field-group ${f.fieldType === "longtext" ? "portal-field-full" : ""}`}
-                >
-                  <label className="portal-field-label">
-                    {f.label}
-                    {f.isRequired && <span className="portal-required">*</span>}
-                  </label>
-                  <FieldInput
-                    field={f}
-                    value={editValues[f.name]}
-                    onChange={(v) =>
-                      setEditValues((p) => ({ ...p, [f.name]: v }))
-                    }
-                  />
-                </div>
-              ))}
-            </div>
-            <div className="portal-form-actions" style={{ marginTop: "20px" }}>
-              <button
-                className="portal-btn-secondary"
-                onClick={() => {
-                  setEditing(false);
-                  setSaveError(null);
-                }}
-                disabled={saving}
-              >
-                Cancel
-              </button>
-              <button
-                className="portal-btn-primary"
-                onClick={() => void saveEdit()}
-                disabled={saving}
-              >
-                {saving ? "Saving…" : "Save changes"}
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="portal-fields-grid">
-            <div className="portal-field-row">
-              <div className="portal-field-label-sm">State</div>
-              <div className="portal-field-value">
-                {record.currentState ? (
-                  <span className="portal-state-badge">
-                    {record.currentState}
-                  </span>
-                ) : (
-                  <span className="portal-text-muted">—</span>
-                )}
-              </div>
-            </div>
-            <div className="portal-field-row">
-              <div className="portal-field-label-sm">Created At</div>
-              <div className="portal-field-value">
-                {new Date(record.createdAt).toLocaleString()}
-              </div>
-            </div>
-            <div className="portal-field-row">
-              <div className="portal-field-label-sm">Updated At</div>
-              <div className="portal-field-value">
-                {new Date(record.updatedAt).toLocaleString()}
-              </div>
-            </div>
-            {fields.map((f) => (
-              <div key={f.id} className="portal-field-row">
-                <div className="portal-field-label-sm">{f.label}</div>
-                <div className="portal-field-value">
-                  <FieldValue
-                    value={record.fields[f.name]}
-                    fieldType={f.fieldType}
-                    field={f}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
+
+        {!editing && (
+          <button
+            className="rcd-edit-btn"
+            onClick={() => {
+              setEditValues(record.fields);
+              setCurrentState(record.currentState ?? "");
+              setEditing(true);
+              setSaveError(null);
+            }}
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+              <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+            </svg>
+            Edit
+          </button>
         )}
       </div>
 
-      {history.length > 0 && (
-        <div className="portal-card">
-          <div className="portal-card-header">
-            <h3 className="portal-card-title">History</h3>
-          </div>
-          <div className="portal-history">
-            {history.map((event) => {
-              const meta = event.metadata;
-              const isCreate = meta?.type === "create";
-              const isUpdate = meta?.type === "update";
-
-              return (
-                <div key={event.id} className="portal-history-item">
-                  <div className="portal-history-dot" />
-                  <div className="portal-history-body">
-                    {isCreate ? (
-                      <div style={{ fontWeight: 600, color: "var(--text)" }}>
-                        🆕 Record created{" "}
-                        <span
-                          style={{
-                            fontWeight: 400,
-                            color: "var(--text-3)",
-                            marginLeft: "4px",
-                          }}
-                        >
-                          by {getActorName(event.actorId)}
-                        </span>
-                      </div>
-                    ) : isUpdate ? (
-                      <div>
-                        <div
-                          style={{
-                            fontWeight: 600,
-                            color: "var(--text)",
-                            marginBottom: "4px",
-                          }}
-                        >
-                          ✏️ Record updated{" "}
-                          <span
-                            style={{
-                              fontWeight: 400,
-                              color: "var(--text-3)",
-                              marginLeft: "4px",
-                            }}
-                          >
-                            by {getActorName(event.actorId)}
-                          </span>
-                        </div>
-                        {"changed" in meta &&
-                        typeof meta["changed"] === "object" &&
-                        meta["changed"] !== null &&
-                        Object.keys(meta["changed"] as object).length > 0 ? (
-                          <ul
-                            style={{
-                              margin: "4px 0 0 16px",
-                              padding: 0,
-                              fontSize: "12px",
-                              color: "var(--text-2)",
-                            }}
-                          >
-                            {Object.entries(
-                              meta.changed as Record<
-                                string,
-                                Record<string, unknown>
-                              >,
-                            ).map(([fieldName, change]) => (
-                              <li
-                                key={fieldName}
-                                style={{ listStyleType: "disc" }}
-                              >
-                                <strong>{getFieldLabel(fieldName)}</strong>:
-                                changed from{" "}
-                                <em>{String(change["old"] ?? "—")}</em> to{" "}
-                                <em>{String(change["new"] ?? "—")}</em>
-                              </li>
-                            ))}
-                          </ul>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <div className="portal-history-transition">
-                        {event.fromState && (
-                          <>
-                            <span className="portal-state-badge portal-state-badge-sm">
-                              {event.fromState}
-                            </span>
-                            <span
-                              style={{
-                                margin: "0 6px",
-                                color: "var(--text-3)",
-                              }}
-                            >
-                              →
-                            </span>
-                          </>
-                        )}
-                        <span className="portal-state-badge portal-state-badge-sm">
-                          {event.toState}
-                        </span>
-                        <span
-                          style={{
-                            marginLeft: "8px",
-                            fontSize: "12px",
-                            color: "var(--text-3)",
-                          }}
-                        >
-                          by {getActorName(event.actorId)}
-                        </span>
-                      </div>
-                    )}
-                    {event.comment && !isCreate && !isUpdate && (
-                      <p className="portal-history-comment">{event.comment}</p>
-                    )}
-                    <p className="portal-history-meta">
-                      {new Date(event.triggeredAt).toLocaleString()}
-                    </p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+      {transError && (
+        <div className="portal-alert-error rcd-trans-error">
+          ⚠ {transError}
+          <button
+            onClick={() => setTransError(null)}
+            className="rcd-error-close"
+          >
+            ×
+          </button>
         </div>
       )}
 
+      {/* ── Two-column layout ──────────────────────────────── */}
+      <div className="rcd-layout">
+        {/* ── Left: Fields + History ── */}
+        <div className="rcd-main">
+          {/* Fields panel */}
+          <div className="rcd-panel">
+            <div className="rcd-panel-header">
+              <div className="rcd-panel-title">
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                </svg>
+                Details
+              </div>
+              {!editing && (
+                <button
+                  className="rcd-panel-action"
+                  onClick={() => {
+                    setEditValues(record.fields);
+                    setCurrentState(record.currentState ?? "");
+                    setEditing(true);
+                    setSaveError(null);
+                  }}
+                >
+                  Edit
+                </button>
+              )}
+            </div>
+
+            {fields.length === 0 ? (
+              <p className="rcd-empty-hint">
+                No fields defined for this record type.
+              </p>
+            ) : editing ? (
+              <div className="rcd-edit-body">
+                {saveError && (
+                  <div
+                    className="portal-alert-error"
+                    style={{ marginBottom: "16px" }}
+                  >
+                    {saveError}
+                  </div>
+                )}
+                <div className="portal-edit-grid">
+                  {allStates.length > 0 && (
+                    <div className="portal-field-group portal-field-full">
+                      <label className="portal-field-label">State</label>
+                      <select
+                        className="portal-input"
+                        value={currentState}
+                        onChange={(e) => setCurrentState(e.target.value)}
+                      >
+                        {allStates.map((st) => (
+                          <option key={st.id} value={st.name}>
+                            {st.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  {fields.map((f) => (
+                    <div
+                      key={f.id}
+                      className={`portal-field-group ${f.fieldType === "longtext" ? "portal-field-full" : ""}`}
+                    >
+                      <label className="portal-field-label">
+                        {f.label}
+                        {f.isRequired && (
+                          <span className="portal-required">*</span>
+                        )}
+                      </label>
+                      <FieldInput
+                        field={f}
+                        value={editValues[f.name]}
+                        onChange={(v) =>
+                          setEditValues((p) => ({ ...p, [f.name]: v }))
+                        }
+                      />
+                    </div>
+                  ))}
+                </div>
+                <div className="rcd-edit-footer">
+                  <button
+                    className="portal-btn-secondary"
+                    onClick={() => {
+                      setEditing(false);
+                      setSaveError(null);
+                    }}
+                    disabled={saving}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="portal-btn-primary"
+                    onClick={() => void saveEdit()}
+                    disabled={saving}
+                  >
+                    {saving ? "Saving…" : "Save changes"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="rcd-fields">
+                {fields.map((f) => (
+                  <div key={f.id} className="rcd-field-row">
+                    <div className="rcd-field-label">{f.label}</div>
+                    <div className="rcd-field-value">
+                      <FieldValue
+                        value={record.fields[f.name]}
+                        fieldType={f.fieldType}
+                        field={f}
+                      />
+                    </div>
+                  </div>
+                ))}
+                {fields.length === 0 && (
+                  <p className="rcd-empty-hint">No custom fields.</p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* History timeline */}
+          {history.length > 0 && (
+            <div className="rcd-panel">
+              <div className="rcd-panel-header">
+                <div className="rcd-panel-title">
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <circle cx="12" cy="12" r="10" />
+                    <polyline points="12 6 12 12 16 14" />
+                  </svg>
+                  Activity
+                  <span className="rcd-panel-count">{history.length}</span>
+                </div>
+              </div>
+              <div className="rcd-timeline">
+                {[...history].reverse().map((event) => {
+                  const meta = event.metadata;
+                  const isCreate = meta?.type === "create";
+                  const isUpdate = meta?.type === "update";
+                  const eventType = isCreate
+                    ? "create"
+                    : isUpdate
+                      ? "update"
+                      : "transition";
+
+                  return (
+                    <div key={event.id} className="rcd-tl-item">
+                      <div className="rcd-tl-left">
+                        <HistoryIcon type={eventType} />
+                        <div className="rcd-tl-line" />
+                      </div>
+                      <div className="rcd-tl-body">
+                        {isCreate ? (
+                          <div className="rcd-tl-title">
+                            Record created
+                            <span className="rcd-tl-actor">
+                              by {getActorName(event.actorId)}
+                            </span>
+                          </div>
+                        ) : isUpdate ? (
+                          <div>
+                            <div className="rcd-tl-title">
+                              Record updated
+                              <span className="rcd-tl-actor">
+                                by {getActorName(event.actorId)}
+                              </span>
+                            </div>
+                            {"changed" in (meta as Record<string, unknown>) &&
+                              typeof (meta as Record<string, unknown>)[
+                                "changed"
+                              ] === "object" &&
+                              (meta as Record<string, unknown>)["changed"] !==
+                                null &&
+                              Object.keys(
+                                (meta as Record<string, unknown>)[
+                                  "changed"
+                                ] as object,
+                              ).length > 0 && (
+                                <ul className="rcd-tl-changes">
+                                  {Object.entries(
+                                    (
+                                      meta as Record<
+                                        string,
+                                        Record<string, Record<string, unknown>>
+                                      >
+                                    )["changed"],
+                                  ).map(([fieldName, change]) => (
+                                    <li key={fieldName}>
+                                      <strong>
+                                        {getFieldLabel(fieldName)}
+                                      </strong>
+                                      : {String(change["old"] ?? "—")} →{" "}
+                                      {String(change["new"] ?? "—")}
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                          </div>
+                        ) : (
+                          <div className="rcd-tl-transition-row">
+                            {event.fromState && (
+                              <>
+                                <span className="rcd-tl-state">
+                                  {event.fromState}
+                                </span>
+                                <svg
+                                  width="12"
+                                  height="12"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2.5"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  className="rcd-tl-arrow"
+                                >
+                                  <polyline points="5 12 19 12" />
+                                  <polyline points="13 6 19 12 13 18" />
+                                </svg>
+                              </>
+                            )}
+                            <span className="rcd-tl-state rcd-tl-state-to">
+                              {event.toState}
+                            </span>
+                            <span className="rcd-tl-actor">
+                              by {getActorName(event.actorId)}
+                            </span>
+                          </div>
+                        )}
+                        {event.comment && !isCreate && !isUpdate && (
+                          <div className="rcd-tl-comment">
+                            "{event.comment}"
+                          </div>
+                        )}
+                        <div className="rcd-tl-time">
+                          {new Date(event.triggeredAt).toLocaleString(
+                            undefined,
+                            {
+                              month: "short",
+                              day: "numeric",
+                              year: "numeric",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            },
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── Right sidebar ── */}
+        <div className="rcd-sidebar">
+          {/* Actions — available transitions */}
+          <div className="rcd-panel rcd-panel-actions">
+            <div className="rcd-panel-header">
+              <div className="rcd-panel-title">
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <polyline points="13 2 13 9 20 9" />
+                  <path d="M19 14v6a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2h7" />
+                </svg>
+                Actions
+              </div>
+            </div>
+            <div className="rcd-actions-body">
+              {isTerminal ? (
+                <div className="rcd-terminal-note">
+                  <svg
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="12" y1="8" x2="12" y2="12" />
+                    <line x1="12" y1="16" x2="12.01" y2="16" />
+                  </svg>
+                  This record is in a terminal state.
+                </div>
+              ) : availableTransitions.length === 0 ? (
+                <div className="rcd-terminal-note">
+                  No actions available for this state.
+                </div>
+              ) : (
+                <div className="rcd-action-list">
+                  {availableTransitions.map((t) => (
+                    <button
+                      key={t.id}
+                      className="rcd-action-btn"
+                      disabled={transitioning !== null}
+                      onClick={() => {
+                        if (t.requiresComment) {
+                          setStateModal(t);
+                        } else {
+                          void executeTransition(t);
+                        }
+                      }}
+                    >
+                      {transitioning === t.id ? (
+                        <span className="rcd-action-spinner" />
+                      ) : (
+                        <svg
+                          width="13"
+                          height="13"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <polyline points="5 12 19 12" />
+                          <polyline points="13 6 19 12 13 18" />
+                        </svg>
+                      )}
+                      <span>{t.label || `Move to ${t.toState}`}</span>
+                      <span className="rcd-action-target">{t.toState}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Record info */}
+          <div className="rcd-panel">
+            <div className="rcd-panel-header">
+              <div className="rcd-panel-title">
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="8" x2="12" y2="12" />
+                  <line x1="12" y1="16" x2="12.01" y2="16" />
+                </svg>
+                Info
+              </div>
+            </div>
+            <div className="rcd-info-list">
+              {[
+                { label: "Record ID", value: record.id.slice(0, 8) + "…" },
+                {
+                  label: "Current State",
+                  value: currentStateObj?.label ?? record.currentState ?? "—",
+                },
+                { label: "Type", value: entityType?.name ?? "—" },
+                {
+                  label: "Created",
+                  value: new Date(record.createdAt).toLocaleDateString(),
+                },
+                {
+                  label: "Last Updated",
+                  value: new Date(record.updatedAt).toLocaleDateString(),
+                },
+              ].map((row) => (
+                <div key={row.label} className="rcd-info-row">
+                  <div className="rcd-info-label">{row.label}</div>
+                  <div className="rcd-info-value">{row.value}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* State pipeline */}
+          {allStates.length > 0 && (
+            <div className="rcd-panel">
+              <div className="rcd-panel-header">
+                <div className="rcd-panel-title">
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M3 8.689c0-.864.933-1.406 1.683-.977l7.108 4.061a1.125 1.125 0 010 1.954l-7.108 4.061A1.125 1.125 0 013 16.811V8.69zM12.75 8.689c0-.864.933-1.406 1.683-.977l7.108 4.061a1.125 1.125 0 010 1.954l-7.108 4.061a1.125 1.125 0 01-1.683-.977V8.69z" />
+                  </svg>
+                  Workflow States
+                </div>
+              </div>
+              <div className="rcd-states-list">
+                {allStates.map((s) => {
+                  const isCurrent = s.name === record.currentState;
+                  return (
+                    <div
+                      key={s.id}
+                      className={`rcd-state-row ${isCurrent ? "rcd-state-row-current" : ""}`}
+                    >
+                      <span
+                        className="rcd-state-pip"
+                        style={{ background: s.color ?? "var(--accent)" }}
+                      />
+                      <span className="rcd-state-name">{s.label}</span>
+                      {isCurrent && (
+                        <span className="rcd-state-current-tag">current</span>
+                      )}
+                      {s.isTerminal && !isCurrent && (
+                        <span className="rcd-state-end-tag">end</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Transition modal ─────────────────────────────────── */}
       {stateModal && (
         <div
-          className="portal-modal-overlay"
+          className="modal-overlay"
           onClick={() => {
             setStateModal(null);
             setComment("");
           }}
         >
-          <div className="portal-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="portal-modal-header">
-              <h3>Move to "{stateModal.label || stateModal.toState}"</h3>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">
+                Move to "{stateModal.label || stateModal.toState}"
+              </h3>
               <button
-                className="portal-modal-close"
+                className="modal-close"
                 onClick={() => {
                   setStateModal(null);
                   setComment("");
@@ -685,39 +1094,29 @@ export function CustomerRecordDetail(): React.ReactElement {
                 ×
               </button>
             </div>
-            <div className="portal-modal-body">
-              <p
-                style={{
-                  marginBottom: "14px",
-                  color: "var(--text-2)",
-                  fontSize: "13px",
-                }}
-              >
-                This will move the ticket from{" "}
-                <strong style={{ color: "var(--text)" }}>
-                  {record.currentState}
-                </strong>{" "}
-                to{" "}
-                <strong style={{ color: "var(--text)" }}>
-                  {stateModal.toState}
-                </strong>
-                .
+            <div className="modal-body">
+              <p className="rcd-modal-desc">
+                This will transition the record from{" "}
+                <strong>{record.currentState}</strong> to{" "}
+                <strong>{stateModal.toState}</strong>.
               </p>
-              <label className="portal-field-label">
-                Comment {stateModal.requiresComment ? "*" : "(optional)"}
-              </label>
-              <textarea
-                className="portal-input portal-textarea"
-                rows={3}
-                placeholder="Add a note…"
-                value={comment}
-                onChange={(e) => setComment(e.target.value)}
-                autoFocus
-              />
+              <div className="form-group">
+                <label className="form-label">
+                  Comment {stateModal.requiresComment ? "*" : "(optional)"}
+                </label>
+                <textarea
+                  className="form-input portal-textarea"
+                  rows={3}
+                  placeholder="Add a note about this transition…"
+                  value={comment}
+                  onChange={(e) => setComment(e.target.value)}
+                  autoFocus
+                />
+              </div>
             </div>
-            <div className="portal-modal-footer">
+            <div className="modal-footer">
               <button
-                className="portal-btn-secondary"
+                className="btn-secondary"
                 onClick={() => {
                   setStateModal(null);
                   setComment("");
@@ -726,7 +1125,7 @@ export function CustomerRecordDetail(): React.ReactElement {
                 Cancel
               </button>
               <button
-                className="portal-btn-primary"
+                className="btn-primary"
                 disabled={
                   (stateModal.requiresComment && !comment.trim()) ||
                   transitioning === stateModal.id

@@ -28,6 +28,32 @@ function fieldDisplay(value: unknown, fieldType: string): string {
   return String(value);
 }
 
+function StateChip({ state }: { state: string | null }): React.ReactElement {
+  if (!state) return <span className="rl-muted">—</span>;
+  const lower = state.toLowerCase();
+  let mod = "";
+  if (
+    lower.includes("open") ||
+    lower.includes("new") ||
+    lower.includes("active")
+  )
+    mod = "rl-state--open";
+  else if (
+    lower.includes("done") ||
+    lower.includes("closed") ||
+    lower.includes("resolved") ||
+    lower.includes("complete")
+  )
+    mod = "rl-state--done";
+  else if (
+    lower.includes("progress") ||
+    lower.includes("review") ||
+    lower.includes("pending")
+  )
+    mod = "rl-state--progress";
+  return <span className={`rl-state-chip ${mod}`}>{state}</span>;
+}
+
 export function RecordList(): React.ReactElement {
   const { typeSlug } = useParams<{ typeSlug: string }>();
   const navigate = useNavigate();
@@ -40,6 +66,7 @@ export function RecordList(): React.ReactElement {
   const [records, setRecords] = useState<EntityInstance[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
 
   useEffect(() => {
     if (!entityTypeId) return;
@@ -66,6 +93,21 @@ export function RecordList(): React.ReactElement {
 
   const visibleFields = fields.slice(0, 4);
   const slug = typeSlug ?? "";
+  const typeName = entityType?.plural ?? "Records";
+
+  const filtered = search.trim()
+    ? records.filter((r) => {
+        const q = search.toLowerCase();
+        return (
+          (r.currentState ?? "").toLowerCase().includes(q) ||
+          Object.values(r.fields).some((v) =>
+            String(v ?? "")
+              .toLowerCase()
+              .includes(q),
+          )
+        );
+      })
+    : records;
 
   if (!entityType && !loading) {
     return (
@@ -93,81 +135,176 @@ export function RecordList(): React.ReactElement {
 
   return (
     <div className="portal-page">
-      <div className="portal-page-header">
-        <div>
-          <h1 className="portal-page-title">
-            {entityType?.icon && (
-              <span style={{ marginRight: "8px" }}>{entityType.icon}</span>
-            )}
-            {entityType?.plural ?? "Records"}
-          </h1>
-          <p className="portal-page-subtitle">{records.length} records</p>
+      {/* ── Page header ── */}
+      <div className="rl-page-header">
+        <div className="rl-header-left">
+          <div className="rl-header-accent" />
+          <div>
+            <h1 className="rl-title">
+              {entityType?.icon && (
+                <span className="rl-title-icon">{entityType.icon}</span>
+              )}
+              {typeName}
+            </h1>
+            <p className="rl-subtitle">
+              {records.length} {records.length === 1 ? "record" : "records"}{" "}
+              total
+            </p>
+          </div>
         </div>
-        <Link to={`/${slug}/new`} className="portal-btn-primary">
-          + New {entityType?.name}
+        <Link to={`/${slug}/new`} className="rl-btn-new">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+          New {entityType?.name ?? "Record"}
         </Link>
       </div>
 
+      {/* ── Toolbar ── */}
+      <div className="rl-toolbar">
+        <div className="rl-search-wrap">
+          <svg
+            className="rl-search-icon"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input
+            className="rl-search"
+            type="search"
+            placeholder={`Search ${typeName.toLowerCase()}…`}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+        {search && (
+          <span className="rl-filter-count">
+            {filtered.length} of {records.length}
+          </span>
+        )}
+      </div>
+
+      {/* ── Table / empty ── */}
       {records.length === 0 ? (
-        <div className="portal-empty">
-          <p>No {(entityType?.plural ?? "Records").toLowerCase()} yet.</p>
+        <div className="rl-empty">
+          <div className="rl-empty-icon">
+            <svg
+              width="32"
+              height="32"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+            </svg>
+          </div>
+          <p className="rl-empty-title">No {typeName.toLowerCase()} yet</p>
+          <p className="rl-empty-sub">Create your first one to get started.</p>
           <Link
             to={`/${slug}/new`}
-            className="portal-btn-primary"
+            className="rl-btn-new"
             style={{ marginTop: "16px" }}
           >
-            Create the first one
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            Create {entityType?.name ?? "Record"}
           </Link>
         </div>
+      ) : filtered.length === 0 ? (
+        <div className="rl-empty">
+          <p className="rl-empty-title">No results for "{search}"</p>
+          <p className="rl-empty-sub">Try a different search term.</p>
+        </div>
       ) : (
-        <div className="portal-table-wrap">
-          <table className="portal-table">
+        <div className="rl-table-card">
+          <table className="rl-table">
             <thead>
               <tr>
-                <th>State</th>
+                <th>Status</th>
                 {visibleFields.map((f) => (
                   <th key={f.id}>{f.label}</th>
                 ))}
                 <th>Created</th>
-                <th style={{ width: "40px" }}></th>
+                <th style={{ width: "36px" }} />
               </tr>
             </thead>
             <tbody>
-              {records.map((rec) => (
+              {filtered.map((rec) => (
                 <tr
                   key={rec.id}
-                  className="portal-table-row"
+                  className="rl-row"
                   onClick={() => navigate(`/${slug}/${rec.id}`)}
                 >
                   <td>
-                    {rec.currentState ? (
-                      <span className="portal-state-badge">
-                        {rec.currentState}
-                      </span>
-                    ) : (
-                      <span className="portal-text-muted">—</span>
-                    )}
+                    <StateChip state={rec.currentState} />
                   </td>
                   {visibleFields.map((f) => (
-                    <td key={f.id} className="portal-cell">
+                    <td key={f.id} className="rl-cell">
                       {fieldDisplay(rec.fields[f.name], f.fieldType)}
                     </td>
                   ))}
-                  <td
-                    className="portal-text-muted"
-                    style={{ fontSize: "13px" }}
-                  >
+                  <td className="rl-date">
                     {new Date(rec.createdAt).toLocaleDateString()}
                   </td>
                   <td>
                     <button
-                      className="portal-btn-icon"
+                      className="rl-arrow-btn"
                       onClick={(e) => {
                         e.stopPropagation();
                         navigate(`/${slug}/${rec.id}`);
                       }}
+                      aria-label="Open record"
                     >
-                      →
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <polyline points="9 18 15 12 9 6" />
+                      </svg>
                     </button>
                   </td>
                 </tr>

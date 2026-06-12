@@ -136,27 +136,41 @@ function ConfirmDeleteModal({
           background: "var(--bg-primary)",
           border: "1px solid var(--border-color)",
           borderRadius: "14px",
-          padding: "24px 28px",
+          padding: "28px 32px",
           width: "100%",
-          maxWidth: "400px",
+          maxWidth: "420px",
           boxShadow: "var(--shadow-lg)",
         }}
       >
-        <div style={{ fontSize: "24px", marginBottom: "10px" }}>🗑</div>
+        <div
+          style={{
+            width: "44px",
+            height: "44px",
+            borderRadius: "10px",
+            background: "hsla(0,84%,60%,.12)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: "20px",
+            marginBottom: "16px",
+          }}
+        >
+          🗑
+        </div>
         <p
           style={{
             margin: "0 0 6px",
-            fontSize: "14px",
+            fontSize: "15px",
             color: "var(--text-primary)",
-            fontWeight: 500,
+            fontWeight: 600,
           }}
         >
           {message}
         </p>
         <p
           style={{
-            margin: "0 0 20px",
-            fontSize: "12px",
+            margin: "0 0 24px",
+            fontSize: "13px",
             color: "var(--danger)",
           }}
         >
@@ -195,6 +209,7 @@ function StateDot({ color }: { color: string | null }): React.ReactElement {
   );
 }
 
+/* ── UX4G Pipeline Flow ─────────────────────────────────────── */
 function StateFlowDiagram({
   states,
   initialState,
@@ -205,52 +220,245 @@ function StateFlowDiagram({
 }): React.ReactElement {
   const sorted = [...states].sort((a, b) => a.sortOrder - b.sortOrder);
   return (
-    <div className="state-flow">
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "0",
+        flexWrap: "wrap",
+        padding: "8px 0 4px",
+      }}
+    >
       {sorted.map((state, i) => {
         const isLast = i === sorted.length - 1;
+        const accent = state.color ?? "var(--accent-primary)";
+        const isInitial = state.name === initialState;
         return (
           <React.Fragment key={state.id}>
             <div
-              className={[
-                "state-flow-node",
-                state.name === initialState ? "state-flow-node--initial" : "",
-                state.isTerminal ? "state-flow-node--terminal" : "",
-              ].join(" ")}
-              style={state.color ? { borderColor: state.color } : {}}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: "6px",
+                minWidth: "90px",
+              }}
             >
-              <StateDot color={state.color} />
-              <span className="state-flow-label">{state.label}</span>
-              <div className="state-flow-badges">
-                {state.name === initialState && (
+              <div
+                style={{
+                  width: "36px",
+                  height: "36px",
+                  borderRadius: "50%",
+                  background: `${accent}22`,
+                  border: `2px solid ${accent}`,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  position: "relative",
+                }}
+              >
+                <span
+                  style={{
+                    width: "10px",
+                    height: "10px",
+                    borderRadius: "50%",
+                    background: accent,
+                    display: "block",
+                  }}
+                />
+                {isInitial && (
                   <span
-                    className="badge badge-primary"
-                    style={{ fontSize: "9px", padding: "2px 5px" }}
+                    style={{
+                      position: "absolute",
+                      top: "-8px",
+                      left: "50%",
+                      transform: "translateX(-50%)",
+                      fontSize: "9px",
+                      fontWeight: 700,
+                      color: "var(--accent-primary)",
+                      letterSpacing: "0.3px",
+                      whiteSpace: "nowrap",
+                    }}
                   >
-                    start
+                    START
                   </span>
                 )}
                 {state.isTerminal && (
                   <span
-                    className="badge badge-muted"
-                    style={{ fontSize: "9px", padding: "2px 5px" }}
+                    style={{
+                      position: "absolute",
+                      bottom: "-8px",
+                      left: "50%",
+                      transform: "translateX(-50%)",
+                      fontSize: "9px",
+                      fontWeight: 700,
+                      color: "var(--text-muted)",
+                      letterSpacing: "0.3px",
+                      whiteSpace: "nowrap",
+                    }}
                   >
-                    end
-                  </span>
-                )}
-                {state.slaHours !== null && (
-                  <span
-                    className="badge badge-warning"
-                    style={{ fontSize: "9px", padding: "2px 5px" }}
-                  >
-                    SLA {state.slaHours}h
+                    END
                   </span>
                 )}
               </div>
+              <div style={{ textAlign: "center" }}>
+                <div
+                  style={{
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    color: "var(--text-primary)",
+                    lineHeight: 1.2,
+                  }}
+                >
+                  {state.label}
+                </div>
+                {state.slaHours !== null && (
+                  <div
+                    style={{
+                      fontSize: "10px",
+                      color: "var(--warning)",
+                      fontWeight: 600,
+                      marginTop: "2px",
+                    }}
+                  >
+                    SLA {state.slaHours}h
+                  </div>
+                )}
+              </div>
             </div>
-            {!isLast && <span className="flow-arrow">→</span>}
+            {!isLast && (
+              <div
+                style={{
+                  flex: 1,
+                  minWidth: "24px",
+                  height: "2px",
+                  background: "var(--border-color)",
+                  position: "relative",
+                  top: "-12px",
+                  margin: "0 4px",
+                }}
+              >
+                <span
+                  style={{
+                    position: "absolute",
+                    right: "-4px",
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    color: "var(--text-muted)",
+                    fontSize: "14px",
+                    lineHeight: 1,
+                  }}
+                >
+                  ›
+                </span>
+              </div>
+            )}
           </React.Fragment>
         );
       })}
+    </div>
+  );
+}
+
+/* ── KPI Chip ───────────────────────────────────────────────── */
+function KpiChip({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: string | number;
+  accent: string;
+}): React.ReactElement {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: "2px",
+        padding: "10px 20px",
+        background: "var(--bg-card)",
+        border: "1px solid var(--border-color)",
+        borderTop: `3px solid ${accent}`,
+        borderRadius: "var(--radius-md)",
+        minWidth: "90px",
+      }}
+    >
+      <span
+        style={{
+          fontSize: "20px",
+          fontWeight: 700,
+          color: accent,
+          lineHeight: 1,
+          fontFamily: "var(--font-heading)",
+        }}
+      >
+        {value}
+      </span>
+      <span
+        style={{
+          fontSize: "10px",
+          fontWeight: 600,
+          color: "var(--text-muted)",
+          textTransform: "uppercase",
+          letterSpacing: "0.5px",
+        }}
+      >
+        {label}
+      </span>
+    </div>
+  );
+}
+
+/* ── Section Header ─────────────────────────────────────────── */
+function SectionHeader({
+  label,
+  count,
+  action,
+}: {
+  label: string;
+  count?: number;
+  action?: React.ReactNode;
+}): React.ReactElement {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        marginBottom: "16px",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+        <span
+          style={{
+            fontSize: "11px",
+            fontWeight: 700,
+            color: "var(--text-muted)",
+            textTransform: "uppercase",
+            letterSpacing: "0.8px",
+          }}
+        >
+          {label}
+        </span>
+        {count !== undefined && (
+          <span
+            style={{
+              fontSize: "11px",
+              fontWeight: 700,
+              color: "var(--accent-primary)",
+              background: "hsla(250,84%,60%,.1)",
+              border: "1px solid hsla(250,84%,60%,.2)",
+              borderRadius: "20px",
+              padding: "1px 8px",
+            }}
+          >
+            {count}
+          </span>
+        )}
+      </div>
+      {action}
     </div>
   );
 }
@@ -314,7 +522,6 @@ export function WorkflowDetail(): React.ReactElement {
     }
   }
 
-  // Shared inline confirm modal for field/state/transition deletes
   const [confirmDelete, setConfirmDelete] = useState<{
     message: string;
     onConfirm: () => void;
@@ -619,143 +826,281 @@ export function WorkflowDetail(): React.ReactElement {
     (a, b) => a.sortOrder - b.sortOrder,
   );
   const stateNames = sortedStates.map((s) => s.name);
+  const slaStates = workflow.states.filter((s) => s.slaHours !== null).length;
 
   return (
     <div>
-      {/* Breadcrumb */}
+      {/* ── Breadcrumb ─────────────────────────────────────── */}
       <div
         style={{
           display: "flex",
           alignItems: "center",
-          gap: "8px",
-          marginBottom: "16px",
+          gap: "6px",
+          marginBottom: "20px",
+          fontSize: "12px",
+          color: "var(--text-muted)",
         }}
       >
-        <Link to="/workflows" className="back-link" style={{ margin: 0 }}>
-          ← Workflows
-        </Link>
-        <span style={{ color: "var(--text-muted)", fontSize: "13px" }}>/</span>
-        <span
+        <Link
+          to="/workflows"
           style={{
-            fontSize: "12px",
-            fontWeight: 600,
-            padding: "2px 10px",
-            borderRadius: "20px",
-            background: "hsla(250,84%,60%,.12)",
             color: "var(--accent-primary)",
-            border: "1px solid hsla(250,84%,60%,.25)",
-            letterSpacing: "0.3px",
+            textDecoration: "none",
+            fontWeight: 600,
           }}
         >
-          Workflow Details
+          Workflows
+        </Link>
+        <span>/</span>
+        <span style={{ color: "var(--text-secondary)", fontWeight: 500 }}>
+          {workflow.name}
         </span>
       </div>
 
-      {/* Page header card */}
+      {/* ── Page Header ────────────────────────────────────── */}
       <div
         style={{
           background: "var(--bg-secondary)",
           border: "1px solid var(--border-color)",
-          borderRadius: "16px",
+          borderRadius: "var(--radius-lg)",
           padding: "24px 28px",
-          marginBottom: "24px",
-          display: "flex",
-          alignItems: "flex-start",
-          justifyContent: "space-between",
-          gap: "20px",
-          flexWrap: "wrap",
+          marginBottom: "20px",
+          borderLeft: "4px solid var(--accent-primary)",
         }}
       >
-        <div style={{ display: "flex", alignItems: "flex-start", gap: "16px" }}>
-          <div className="workflow-icon workflow-icon-lg">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              strokeWidth="2"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M3 8.689c0-.864.933-1.406 1.683-.977l7.108 4.061a1.125 1.125 0 010 1.954l-7.108 4.061A1.125 1.125 0 013 16.811V8.69zM12.75 8.689c0-.864.933-1.406 1.683-.977l7.108 4.061a1.125 1.125 0 010 1.954l-7.108 4.061a1.125 1.125 0 01-1.683-.977V8.69z"
-              />
-            </svg>
-          </div>
-          <div>
-            <h2 className="page-title" style={{ marginBottom: "6px" }}>
-              {workflow.name}
-            </h2>
+        <div
+          className="wfd-page-inner"
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "space-between",
+            gap: "20px",
+            flexWrap: "wrap",
+          }}
+        >
+          {/* Left: title block */}
+          <div
+            style={{ display: "flex", alignItems: "flex-start", gap: "16px" }}
+          >
             <div
               style={{
+                width: "48px",
+                height: "48px",
+                borderRadius: "12px",
+                background: "hsla(250,84%,60%,.12)",
+                border: "1px solid hsla(250,84%,60%,.25)",
                 display: "flex",
-                gap: "8px",
                 alignItems: "center",
-                flexWrap: "wrap",
+                justifyContent: "center",
+                flexShrink: 0,
               }}
             >
-              <Link
-                to={`/entity-types/${workflow.entityTypeId}`}
-                className="badge badge-primary"
-                style={{ textDecoration: "none" }}
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                strokeWidth="2"
+                stroke="var(--accent-primary)"
+                style={{ width: "22px", height: "22px" }}
               >
-                Manage Fields ↗
-              </Link>
-              <span
-                className={
-                  workflow.isActive
-                    ? "badge badge-success"
-                    : "badge badge-muted"
-                }
-              >
-                {workflow.isActive ? "Active" : "Inactive"}
-              </span>
-              <span style={{ color: "var(--text-muted)", fontSize: "13px" }}>
-                {workflow.states.length} states · {workflow.transitions.length}{" "}
-                transitions
-              </span>
-              <span style={{ color: "var(--text-muted)", fontSize: "12px" }}>
-                Created {new Date(workflow.createdAt).toLocaleDateString()}
-              </span>
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M3 8.689c0-.864.933-1.406 1.683-.977l7.108 4.061a1.125 1.125 0 010 1.954l-7.108 4.061A1.125 1.125 0 013 16.811V8.69zM12.75 8.689c0-.864.933-1.406 1.683-.977l7.108 4.061a1.125 1.125 0 010 1.954l-7.108 4.061a1.125 1.125 0 01-1.683-.977V8.69z"
+                />
+              </svg>
             </div>
+            <div>
+              <h2
+                className="wfd-page-title"
+                style={{
+                  margin: "0 0 8px",
+                  fontSize: "22px",
+                  fontWeight: 700,
+                  color: "var(--text-primary)",
+                  fontFamily: "var(--font-heading)",
+                }}
+              >
+                {workflow.name}
+              </h2>
+              <div
+                style={{
+                  display: "flex",
+                  gap: "8px",
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                }}
+              >
+                <span
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "5px",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                  }}
+                >
+                  <span
+                    style={{
+                      width: "7px",
+                      height: "7px",
+                      borderRadius: "50%",
+                      background: workflow.isActive
+                        ? "var(--success)"
+                        : "var(--text-muted)",
+                      display: "inline-block",
+                    }}
+                  />
+                  <span
+                    style={{
+                      color: workflow.isActive
+                        ? "var(--success)"
+                        : "var(--text-muted)",
+                    }}
+                  >
+                    {workflow.isActive ? "Active" : "Inactive"}
+                  </span>
+                </span>
+                <span
+                  style={{
+                    width: "1px",
+                    height: "12px",
+                    background: "var(--border-color)",
+                    display: "inline-block",
+                  }}
+                />
+                <span
+                  style={{ fontSize: "12px", color: "var(--text-secondary)" }}
+                >
+                  Created {new Date(workflow.createdAt).toLocaleDateString()}
+                </span>
+                <span
+                  style={{
+                    width: "1px",
+                    height: "12px",
+                    background: "var(--border-color)",
+                    display: "inline-block",
+                  }}
+                />
+                <Link
+                  to={`/entity-types/${workflow.entityTypeId}`}
+                  style={{
+                    fontSize: "12px",
+                    color: "var(--accent-primary)",
+                    textDecoration: "none",
+                    fontWeight: 600,
+                  }}
+                >
+                  Manage Fields ↗
+                </Link>
+              </div>
+            </div>
+          </div>
+
+          {/* Right: action buttons */}
+          <div
+            className="wfd-header-actions"
+            style={{
+              display: "flex",
+              gap: "10px",
+              alignItems: "center",
+              flexShrink: 0,
+              flexWrap: "wrap",
+            }}
+          >
+            {recordsSlug && (
+              <button
+                className="btn-primary"
+                onClick={() => navigate(`/records/${recordsSlug}`)}
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+                  <polyline points="15 3 21 3 21 9" />
+                  <line x1="10" y1="14" x2="21" y2="3" />
+                </svg>
+                View Records
+              </button>
+            )}
+            <button
+              className={
+                workflow.isActive ? "btn btn-secondary" : "btn-primary"
+              }
+              onClick={() => void handleToggleActive()}
+              disabled={togglingActive}
+              style={{ minWidth: "110px" }}
+            >
+              {togglingActive
+                ? "Saving…"
+                : workflow.isActive
+                  ? "Deactivate"
+                  : "Activate"}
+            </button>
+            <button
+              className="icon-btn icon-btn-delete"
+              style={{ width: "36px", height: "36px" }}
+              onClick={() => setShowDeleteWorkflow(true)}
+              title="Delete workflow"
+              aria-label="Delete workflow"
+            >
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+                <path d="M10 11v6M14 11v6" />
+                <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" />
+              </svg>
+            </button>
           </div>
         </div>
 
-        {/* Action buttons */}
+        {/* KPI strip */}
         <div
+          className="wfd-kpi-strip"
           style={{
             display: "flex",
-            gap: "10px",
-            alignItems: "center",
-            flexShrink: 0,
+            gap: "12px",
+            marginTop: "20px",
+            flexWrap: "wrap",
           }}
         >
-          {recordsSlug && (
-            <button
-              className="btn-primary"
-              onClick={() => navigate(`/records/${recordsSlug}`)}
-            >
-              View Records →
-            </button>
-          )}
-          <button
-            className={workflow.isActive ? "btn btn-secondary" : "btn-primary"}
-            onClick={() => void handleToggleActive()}
-            disabled={togglingActive}
-            style={{ minWidth: "110px" }}
-          >
-            {togglingActive
-              ? "Saving…"
-              : workflow.isActive
-                ? "Deactivate"
-                : "Activate"}
-          </button>
-          <button
-            className="btn btn-danger-sm"
-            onClick={() => setShowDeleteWorkflow(true)}
-          >
-            Delete Workflow
-          </button>
+          <KpiChip
+            label="States"
+            value={workflow.states.length}
+            accent="var(--accent-primary)"
+          />
+          <KpiChip
+            label="Transitions"
+            value={workflow.transitions.length}
+            accent="hsl(185,80%,40%)"
+          />
+          <KpiChip
+            label="Fields"
+            value={fieldsLoading ? "…" : fields.length}
+            accent="hsl(265,84%,60%)"
+          />
+          <KpiChip
+            label="SLA States"
+            value={slaStates}
+            accent="hsl(35,90%,50%)"
+          />
         </div>
       </div>
 
@@ -786,356 +1131,747 @@ export function WorkflowDetail(): React.ReactElement {
         </div>
       )}
 
-      {/* State flow diagram */}
-      <div className="data-panel" style={{ marginBottom: "24px" }}>
-        <div className="panel-header">
-          <h3 className="panel-title">State Flow</h3>
-          <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>
-            initial → … → terminal
-          </span>
-        </div>
-        <StateFlowDiagram
-          states={workflow.states}
-          transitions={workflow.transitions}
-          initialState={workflow.initialState}
-        />
-      </div>
-
-      {/* Fields panel */}
-      <div className="data-panel" style={{ marginBottom: "24px" }}>
-        <div className="panel-header">
-          <h3 className="panel-title">Fields</h3>
-          <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-            <span className="badge badge-muted">{fields.length}</span>
-            <button
-              className="btn-primary btn-sm"
-              onClick={() => setShowAddField(true)}
-            >
-              + Add Field
-            </button>
-          </div>
-        </div>
-        {fieldsLoading ? (
-          <div style={{ padding: "20px", textAlign: "center" }}>
-            <div className="spinner" style={{ margin: "0 auto" }} />
-          </div>
-        ) : fields.length === 0 ? (
+      {/* ── Two-column layout ──────────────────────────────── */}
+      <div
+        className="wfd-two-col"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 300px",
+          gap: "20px",
+          alignItems: "start",
+        }}
+      >
+        {/* ── Left column ── */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+          {/* State Flow */}
           <div
-            className="empty-state"
-            style={{ padding: "28px", fontSize: "13px" }}
+            className="data-panel"
+            style={{ borderTop: "3px solid var(--accent-primary)" }}
           >
-            <p>No fields yet. Add fields to capture data on records.</p>
+            <SectionHeader label="State Pipeline" />
+            <StateFlowDiagram
+              states={workflow.states}
+              transitions={workflow.transitions}
+              initialState={workflow.initialState}
+            />
           </div>
-        ) : (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Label</th>
-                <th>Type</th>
-                <th>Required</th>
-                <th style={{ width: "80px" }}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {[...fields]
-                .sort((a, b) => a.sortOrder - b.sortOrder)
-                .map((f) => (
-                  <tr key={f.id}>
-                    <td>
-                      <code className="code-inline">{f.name}</code>
-                    </td>
-                    <td style={{ fontWeight: 500 }}>{f.label}</td>
-                    <td>
-                      <span className="badge badge-muted">{f.fieldType}</span>
-                    </td>
-                    <td>
-                      {f.isRequired ? (
-                        <span className="badge badge-primary">Yes</span>
-                      ) : (
-                        <span className="text-muted-sm">—</span>
-                      )}
-                    </td>
-                    <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                      <button
-                        className="btn-edit-sm"
-                        style={{ marginRight: "6px" }}
-                        onClick={() => {
-                          setEditingField(f);
-                          setFieldForm({
-                            name: f.name,
-                            label: f.label,
-                            fieldType: f.fieldType,
-                            isRequired: f.isRequired,
-                          });
-                          setFieldError(null);
-                        }}
-                        title="Edit field"
-                      >
-                        ✎
-                      </button>
-                      <button
-                        className="btn-danger-sm"
-                        disabled={deletingFieldId === f.id}
-                        onClick={() =>
-                          setConfirmDelete({
-                            message: `Delete field "${f.label}"?`,
-                            onConfirm: () => {
-                              setConfirmDelete(null);
-                              void handleDeleteField(f.id);
-                            },
-                          })
-                        }
-                        title="Delete field"
-                      >
-                        {deletingFieldId === f.id ? "…" : "✕"}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
-        )}
-      </div>
 
-      {/* States table */}
-      <div className="data-panel" style={{ marginBottom: "24px" }}>
-        <div className="panel-header">
-          <h3 className="panel-title">States</h3>
-          <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-            <span className="badge badge-muted">{workflow.states.length}</span>
-            <button
-              className="btn-primary btn-sm"
-              onClick={() => setShowAddState(true)}
-            >
-              + Add State
-            </button>
+          {/* Fields */}
+          <div
+            className="data-panel"
+            style={{ borderTop: "3px solid hsl(265,84%,60%)" }}
+          >
+            <SectionHeader
+              label="Fields"
+              count={fields.length}
+              action={
+                <button
+                  className="btn-primary btn-sm"
+                  onClick={() => setShowAddField(true)}
+                >
+                  + Add Field
+                </button>
+              }
+            />
+            {fieldsLoading ? (
+              <div style={{ padding: "20px", textAlign: "center" }}>
+                <div className="spinner" style={{ margin: "0 auto" }} />
+              </div>
+            ) : fields.length === 0 ? (
+              <div
+                className="empty-state-inline"
+                style={{ padding: "28px", fontSize: "13px" }}
+              >
+                No fields yet. Add fields to capture data on records.
+              </div>
+            ) : (
+              <div className="table-scroll">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Field</th>
+                      <th className="wfd-table-hide-xs">Type</th>
+                      <th className="wfd-table-hide-xs">Required</th>
+                      <th style={{ width: "80px" }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...fields]
+                      .sort((a, b) => a.sortOrder - b.sortOrder)
+                      .map((f) => (
+                        <tr key={f.id}>
+                          <td>
+                            <div>
+                              <div
+                                style={{ fontWeight: 600, fontSize: "13px" }}
+                              >
+                                {f.label}
+                              </div>
+                              <code
+                                className="code-inline"
+                                style={{ fontSize: "11px" }}
+                              >
+                                {f.name}
+                              </code>
+                            </div>
+                          </td>
+                          <td className="wfd-table-hide-xs">
+                            <span className="badge badge-muted">
+                              {f.fieldType}
+                            </span>
+                          </td>
+                          <td className="wfd-table-hide-xs">
+                            {f.isRequired ? (
+                              <span className="badge badge-primary">Yes</span>
+                            ) : (
+                              <span className="text-muted-sm">—</span>
+                            )}
+                          </td>
+                          <td
+                            style={{ textAlign: "right", whiteSpace: "nowrap" }}
+                          >
+                            <div
+                              style={{
+                                display: "flex",
+                                gap: "6px",
+                                justifyContent: "flex-end",
+                              }}
+                            >
+                              <button
+                                className="icon-btn icon-btn-edit"
+                                onClick={() => {
+                                  setEditingField(f);
+                                  setFieldForm({
+                                    name: f.name,
+                                    label: f.label,
+                                    fieldType: f.fieldType,
+                                    isRequired: f.isRequired,
+                                  });
+                                  setFieldError(null);
+                                }}
+                                title="Edit field"
+                              >
+                                <svg
+                                  width="13"
+                                  height="13"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                                  <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                                </svg>
+                              </button>
+                              <button
+                                className="icon-btn icon-btn-delete"
+                                disabled={deletingFieldId === f.id}
+                                onClick={() =>
+                                  setConfirmDelete({
+                                    message: `Delete field "${f.label}"?`,
+                                    onConfirm: () => {
+                                      setConfirmDelete(null);
+                                      void handleDeleteField(f.id);
+                                    },
+                                  })
+                                }
+                                title="Delete field"
+                              >
+                                {deletingFieldId === f.id ? (
+                                  <span style={{ fontSize: "11px" }}>…</span>
+                                ) : (
+                                  <svg
+                                    width="13"
+                                    height="13"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  >
+                                    <polyline points="3 6 5 6 21 6" />
+                                    <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+                                    <path d="M10 11v6M14 11v6" />
+                                  </svg>
+                                )}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* States */}
+          <div
+            className="data-panel"
+            style={{ borderTop: "3px solid hsl(185,80%,40%)" }}
+          >
+            <SectionHeader
+              label="States"
+              count={workflow.states.length}
+              action={
+                <button
+                  className="btn-primary btn-sm"
+                  onClick={() => setShowAddState(true)}
+                >
+                  + Add State
+                </button>
+              }
+            />
+            <div className="table-scroll">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>State</th>
+                    <th>Type</th>
+                    <th className="wfd-table-hide-xs">SLA</th>
+                    <th className="wfd-table-hide-xs">Order</th>
+                    <th style={{ width: "80px" }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedStates.map((state) => (
+                    <tr key={state.id}>
+                      <td>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                          }}
+                        >
+                          <StateDot color={state.color} />
+                          <div>
+                            <div style={{ fontWeight: 600, fontSize: "13px" }}>
+                              {state.label}
+                            </div>
+                            <code
+                              className="code-inline"
+                              style={{ fontSize: "11px" }}
+                            >
+                              {state.name}
+                            </code>
+                          </div>
+                        </div>
+                      </td>
+                      <td>
+                        {state.isTerminal ? (
+                          <span className="badge badge-muted">Terminal</span>
+                        ) : state.name === workflow.initialState ? (
+                          <span className="badge badge-primary">Initial</span>
+                        ) : (
+                          <span className="badge badge-success">Active</span>
+                        )}
+                      </td>
+                      <td
+                        className="wfd-table-hide-xs"
+                        style={{ fontSize: "13px" }}
+                      >
+                        {state.slaHours !== null ? (
+                          <span
+                            style={{
+                              color: "var(--warning)",
+                              fontWeight: 600,
+                            }}
+                          >
+                            {state.slaHours}h
+                          </span>
+                        ) : (
+                          <span className="text-muted-sm">—</span>
+                        )}
+                      </td>
+                      <td
+                        className="wfd-table-hide-xs"
+                        style={{ fontSize: "13px", color: "var(--text-muted)" }}
+                      >
+                        {state.sortOrder}
+                      </td>
+                      <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: "6px",
+                            justifyContent: "flex-end",
+                          }}
+                        >
+                          <button
+                            className="icon-btn icon-btn-edit"
+                            onClick={() => {
+                              setEditingState(state);
+                              setStateForm({
+                                name: state.name,
+                                label: state.label,
+                                color: state.color ?? "#6366f1",
+                                isTerminal: state.isTerminal,
+                                slaHours:
+                                  state.slaHours !== null
+                                    ? String(state.slaHours)
+                                    : "",
+                                sortOrder: String(state.sortOrder),
+                              });
+                              setStateError(null);
+                            }}
+                            title="Edit state"
+                          >
+                            <svg
+                              width="13"
+                              height="13"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                              <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                            </svg>
+                          </button>
+                          {state.name !== workflow.initialState ? (
+                            <button
+                              className="icon-btn icon-btn-delete"
+                              disabled={deletingStateId === state.id}
+                              onClick={() =>
+                                setConfirmDelete({
+                                  message: `Delete state "${state.label}"?`,
+                                  onConfirm: () => {
+                                    setConfirmDelete(null);
+                                    void handleDeleteState(state.id);
+                                  },
+                                })
+                              }
+                              title="Delete state"
+                            >
+                              {deletingStateId === state.id ? (
+                                <span style={{ fontSize: "11px" }}>…</span>
+                              ) : (
+                                <svg
+                                  width="13"
+                                  height="13"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <polyline points="3 6 5 6 21 6" />
+                                  <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+                                  <path d="M10 11v6M14 11v6" />
+                                </svg>
+                              )}
+                            </button>
+                          ) : (
+                            <span
+                              style={{ display: "inline-block", width: "30px" }}
+                            />
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Transitions */}
+          <div
+            className="data-panel"
+            style={{ borderTop: "3px solid hsl(35,90%,50%)" }}
+          >
+            <SectionHeader
+              label="Transitions"
+              count={workflow.transitions.length}
+              action={
+                <button
+                  className="btn-primary btn-sm"
+                  onClick={() => setShowAddTransition(true)}
+                >
+                  + Add Transition
+                </button>
+              }
+            />
+            {workflow.transitions.length === 0 ? (
+              <div
+                className="empty-state-inline"
+                style={{ padding: "28px", fontSize: "13px" }}
+              >
+                No transitions yet. Add transitions to define how records move
+                between states.
+              </div>
+            ) : (
+              <div className="table-scroll">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Route</th>
+                      <th className="wfd-table-hide-xs">Label</th>
+                      <th className="wfd-table-hide-xs">Allowed Roles</th>
+                      <th className="wfd-table-hide-xs">Requirements</th>
+                      <th style={{ width: "80px" }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {workflow.transitions.map((t) => (
+                      <tr key={t.id}>
+                        <td>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "6px",
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            <code
+                              className="code-inline"
+                              style={{ fontSize: "11px" }}
+                            >
+                              {t.fromState}
+                            </code>
+                            <span
+                              style={{
+                                color: "var(--accent-primary)",
+                                fontWeight: 700,
+                                fontSize: "14px",
+                              }}
+                            >
+                              →
+                            </span>
+                            <code
+                              className="code-inline"
+                              style={{ fontSize: "11px" }}
+                            >
+                              {t.toState}
+                            </code>
+                          </div>
+                        </td>
+                        <td
+                          className="wfd-table-hide-xs"
+                          style={{ fontWeight: 500, fontSize: "13px" }}
+                        >
+                          {t.label || <span className="text-muted-sm">—</span>}
+                        </td>
+                        <td className="wfd-table-hide-xs">
+                          {t.allowedRoles.length === 0 ? (
+                            <span className="text-muted-sm">Any</span>
+                          ) : (
+                            <div
+                              style={{
+                                display: "flex",
+                                gap: "4px",
+                                flexWrap: "wrap",
+                              }}
+                            >
+                              {t.allowedRoles.map((r) => (
+                                <span key={r} className="badge badge-primary">
+                                  {r}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </td>
+                        <td className="wfd-table-hide-xs">
+                          {!t.requiresComment &&
+                          t.requiresFields.length === 0 ? (
+                            <span className="text-muted-sm">—</span>
+                          ) : (
+                            <div
+                              style={{
+                                display: "flex",
+                                gap: "4px",
+                                flexWrap: "wrap",
+                              }}
+                            >
+                              {t.requiresComment && (
+                                <span className="badge badge-warning">
+                                  Comment
+                                </span>
+                              )}
+                              {t.requiresFields.length > 0 && (
+                                <span className="badge badge-warning">
+                                  {t.requiresFields.length} field
+                                  {t.requiresFields.length > 1 ? "s" : ""}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </td>
+                        <td
+                          style={{ textAlign: "right", whiteSpace: "nowrap" }}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: "6px",
+                              justifyContent: "flex-end",
+                            }}
+                          >
+                            <button
+                              className="icon-btn icon-btn-edit"
+                              onClick={() => {
+                                setEditingTransition(t);
+                                setTransForm({
+                                  fromState: t.fromState,
+                                  toState: t.toState,
+                                  label: t.label,
+                                  allowedRoles: t.allowedRoles.join(", "),
+                                  requiresComment: t.requiresComment,
+                                });
+                                setTransError(null);
+                              }}
+                              title="Edit transition"
+                            >
+                              <svg
+                                width="13"
+                                height="13"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                                <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                              </svg>
+                            </button>
+                            <button
+                              className="icon-btn icon-btn-delete"
+                              disabled={deletingTransId === t.id}
+                              onClick={() =>
+                                setConfirmDelete({
+                                  message: `Delete transition "${t.label || `${t.fromState} → ${t.toState}`}"?`,
+                                  onConfirm: () => {
+                                    setConfirmDelete(null);
+                                    void handleDeleteTransition(t.id);
+                                  },
+                                })
+                              }
+                              title="Delete transition"
+                            >
+                              {deletingTransId === t.id ? (
+                                <span style={{ fontSize: "11px" }}>…</span>
+                              ) : (
+                                <svg
+                                  width="13"
+                                  height="13"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <polyline points="3 6 5 6 21 6" />
+                                  <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+                                  <path d="M10 11v6M14 11v6" />
+                                </svg>
+                              )}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>State</th>
-              <th>Label</th>
-              <th>Type</th>
-              <th>SLA</th>
-              <th style={{ width: "80px" }}></th>
-            </tr>
-          </thead>
-          <tbody>
-            {sortedStates.map((state) => (
-              <tr key={state.id}>
-                <td>
+
+        {/* ── Right sidebar ── */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          {/* Summary card */}
+          <div
+            className="data-panel"
+            style={{ borderTop: "3px solid var(--accent-primary)" }}
+          >
+            <SectionHeader label="Workflow Info" />
+            <div
+              style={{ display: "flex", flexDirection: "column", gap: "12px" }}
+            >
+              {[
+                { label: "Workflow ID", value: id?.slice(0, 8) + "…" },
+                { label: "Initial State", value: workflow.initialState },
+                {
+                  label: "Terminal States",
+                  value:
+                    workflow.states
+                      .filter((s) => s.isTerminal)
+                      .map((s) => s.label)
+                      .join(", ") || "None",
+                },
+                {
+                  label: "SLA Coverage",
+                  value:
+                    slaStates > 0
+                      ? `${slaStates} of ${workflow.states.length} states`
+                      : "No SLAs set",
+                },
+              ].map((row) => (
+                <div key={row.label}>
                   <div
+                    style={{
+                      fontSize: "10px",
+                      fontWeight: 700,
+                      color: "var(--text-muted)",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.5px",
+                      marginBottom: "3px",
+                    }}
+                  >
+                    {row.label}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: "13px",
+                      fontWeight: 500,
+                      color: "var(--text-primary)",
+                      wordBreak: "break-all",
+                    }}
+                  >
+                    {row.value}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* State color legend */}
+          {workflow.states.length > 0 && (
+            <div className="data-panel">
+              <SectionHeader label="State Colors" />
+              <div
+                style={{ display: "flex", flexDirection: "column", gap: "8px" }}
+              >
+                {sortedStates.map((s) => (
+                  <div
+                    key={s.id}
                     style={{
                       display: "flex",
                       alignItems: "center",
-                      gap: "8px",
+                      gap: "10px",
+                      padding: "6px 10px",
+                      borderRadius: "var(--radius-sm)",
+                      background: "var(--bg-tertiary)",
                     }}
                   >
-                    <StateDot color={state.color} />
-                    <code className="code-inline">{state.name}</code>
-                    {state.name === workflow.initialState && (
+                    <span
+                      style={{
+                        width: "10px",
+                        height: "10px",
+                        borderRadius: "50%",
+                        background: s.color ?? "var(--accent-primary)",
+                        flexShrink: 0,
+                      }}
+                    />
+                    <span
+                      style={{
+                        fontSize: "12px",
+                        fontWeight: 500,
+                        color: "var(--text-primary)",
+                        flex: 1,
+                      }}
+                    >
+                      {s.label}
+                    </span>
+                    {s.name === workflow.initialState && (
                       <span
-                        className="badge badge-primary"
-                        style={{ fontSize: "10px" }}
+                        style={{
+                          fontSize: "9px",
+                          fontWeight: 700,
+                          color: "var(--accent-primary)",
+                          textTransform: "uppercase",
+                          letterSpacing: "0.4px",
+                        }}
                       >
-                        initial
+                        start
+                      </span>
+                    )}
+                    {s.isTerminal && (
+                      <span
+                        style={{
+                          fontSize: "9px",
+                          fontWeight: 700,
+                          color: "var(--text-muted)",
+                          textTransform: "uppercase",
+                          letterSpacing: "0.4px",
+                        }}
+                      >
+                        end
                       </span>
                     )}
                   </div>
-                </td>
-                <td style={{ fontWeight: 500 }}>{state.label}</td>
-                <td>
-                  {state.isTerminal ? (
-                    <span className="badge badge-muted">Terminal</span>
-                  ) : state.name === workflow.initialState ? (
-                    <span className="badge badge-primary">Initial</span>
-                  ) : (
-                    <span className="badge badge-success">Active</span>
-                  )}
-                </td>
-                <td style={{ fontSize: "13px" }}>
-                  {state.slaHours !== null ? (
-                    <span style={{ color: "var(--warning)", fontWeight: 500 }}>
-                      {state.slaHours}h
-                    </span>
-                  ) : (
-                    <span className="text-muted-sm">—</span>
-                  )}
-                </td>
-                <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                  <button
-                    className="btn-edit-sm"
-                    style={{ marginRight: "6px" }}
-                    onClick={() => {
-                      setEditingState(state);
-                      setStateForm({
-                        name: state.name,
-                        label: state.label,
-                        color: state.color ?? "#6366f1",
-                        isTerminal: state.isTerminal,
-                        slaHours:
-                          state.slaHours !== null ? String(state.slaHours) : "",
-                        sortOrder: String(state.sortOrder),
-                      });
-                      setStateError(null);
-                    }}
-                    title="Edit state"
-                  >
-                    ✎
-                  </button>
-                  {state.name !== workflow.initialState ? (
-                    <button
-                      className="btn-danger-sm"
-                      disabled={deletingStateId === state.id}
-                      onClick={() =>
-                        setConfirmDelete({
-                          message: `Delete state "${state.label}"?`,
-                          onConfirm: () => {
-                            setConfirmDelete(null);
-                            void handleDeleteState(state.id);
-                          },
-                        })
-                      }
-                      title="Delete state"
-                    >
-                      {deletingStateId === state.id ? "…" : "✕"}
-                    </button>
-                  ) : (
-                    <span style={{ display: "inline-block", width: "24px" }} />
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+                ))}
+              </div>
+            </div>
+          )}
 
-      {/* Transitions table */}
-      <div className="data-panel">
-        <div className="panel-header">
-          <h3 className="panel-title">Transitions</h3>
-          <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-            <span className="badge badge-muted">
-              {workflow.transitions.length}
-            </span>
-            <button
-              className="btn-primary btn-sm"
-              onClick={() => setShowAddTransition(true)}
+          {/* Quick actions */}
+          <div className="data-panel">
+            <SectionHeader label="Quick Actions" />
+            <div
+              style={{ display: "flex", flexDirection: "column", gap: "8px" }}
             >
-              + Add Transition
-            </button>
+              <button
+                className="btn btn-secondary"
+                style={{
+                  width: "100%",
+                  textAlign: "left",
+                  justifyContent: "flex-start",
+                }}
+                onClick={() => setShowAddState(true)}
+              >
+                + Add State
+              </button>
+              <button
+                className="btn btn-secondary"
+                style={{
+                  width: "100%",
+                  textAlign: "left",
+                  justifyContent: "flex-start",
+                }}
+                onClick={() => setShowAddTransition(true)}
+              >
+                + Add Transition
+              </button>
+              <button
+                className="btn btn-secondary"
+                style={{
+                  width: "100%",
+                  textAlign: "left",
+                  justifyContent: "flex-start",
+                }}
+                onClick={() => setShowAddField(true)}
+              >
+                + Add Field
+              </button>
+              {recordsSlug && (
+                <button
+                  className="btn-primary"
+                  style={{ width: "100%" }}
+                  onClick={() => navigate(`/records/${recordsSlug}`)}
+                >
+                  View Records →
+                </button>
+              )}
+            </div>
           </div>
         </div>
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>From</th>
-              <th style={{ width: "28px" }}></th>
-              <th>To</th>
-              <th>Label</th>
-              <th>Allowed Roles</th>
-              <th>Requirements</th>
-              <th style={{ width: "80px" }}></th>
-            </tr>
-          </thead>
-          <tbody>
-            {workflow.transitions.map((t) => (
-              <tr key={t.id}>
-                <td>
-                  <code className="code-inline">{t.fromState}</code>
-                </td>
-                <td
-                  style={{
-                    color: "var(--text-muted)",
-                    fontWeight: 700,
-                    textAlign: "center",
-                  }}
-                >
-                  →
-                </td>
-                <td>
-                  <code className="code-inline">{t.toState}</code>
-                </td>
-                <td style={{ fontWeight: 500 }}>{t.label}</td>
-                <td>
-                  {t.allowedRoles.length === 0 ? (
-                    <span className="text-muted-sm">Any</span>
-                  ) : (
-                    <div
-                      style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}
-                    >
-                      {t.allowedRoles.map((r) => (
-                        <span key={r} className="badge badge-primary">
-                          {r}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </td>
-                <td>
-                  {!t.requiresComment && t.requiresFields.length === 0 ? (
-                    <span className="text-muted-sm">—</span>
-                  ) : (
-                    <div
-                      style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}
-                    >
-                      {t.requiresComment && (
-                        <span className="badge badge-warning">Comment</span>
-                      )}
-                      {t.requiresFields.length > 0 && (
-                        <span className="badge badge-warning">
-                          {t.requiresFields.length} field
-                          {t.requiresFields.length > 1 ? "s" : ""}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </td>
-                <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                  <button
-                    className="btn-edit-sm"
-                    style={{ marginRight: "6px" }}
-                    onClick={() => {
-                      setEditingTransition(t);
-                      setTransForm({
-                        fromState: t.fromState,
-                        toState: t.toState,
-                        label: t.label,
-                        allowedRoles: t.allowedRoles.join(", "),
-                        requiresComment: t.requiresComment,
-                      });
-                      setTransError(null);
-                    }}
-                    title="Edit transition"
-                  >
-                    ✎
-                  </button>
-                  <button
-                    className="btn-danger-sm"
-                    disabled={deletingTransId === t.id}
-                    onClick={() =>
-                      setConfirmDelete({
-                        message: `Delete transition "${t.label || `${t.fromState} → ${t.toState}`}"?`,
-                        onConfirm: () => {
-                          setConfirmDelete(null);
-                          void handleDeleteTransition(t.id);
-                        },
-                      })
-                    }
-                    title="Delete transition"
-                  >
-                    {deletingTransId === t.id ? "…" : "✕"}
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
       </div>
 
-      {/* Add Field modal */}
+      {/* ── Modals ─────────────────────────────────────────── */}
+
+      {/* Add Field */}
       {showAddField && (
         <div className="modal-overlay" onClick={() => setShowAddField(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -1198,7 +1934,10 @@ export function WorkflowDetail(): React.ReactElement {
                     className="form-input"
                     value={fieldForm.fieldType}
                     onChange={(e) =>
-                      setFieldForm((f) => ({ ...f, fieldType: e.target.value }))
+                      setFieldForm((f) => ({
+                        ...f,
+                        fieldType: e.target.value,
+                      }))
                     }
                   >
                     {FIELD_TYPES.map((ft) => (
@@ -1243,7 +1982,7 @@ export function WorkflowDetail(): React.ReactElement {
         </div>
       )}
 
-      {/* Add State modal */}
+      {/* Add State */}
       {showAddState && (
         <div className="modal-overlay" onClick={() => setShowAddState(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -1314,7 +2053,10 @@ export function WorkflowDetail(): React.ReactElement {
                         type="color"
                         value={stateForm.color}
                         onChange={(e) =>
-                          setStateForm((f) => ({ ...f, color: e.target.value }))
+                          setStateForm((f) => ({
+                            ...f,
+                            color: e.target.value,
+                          }))
                         }
                         style={{
                           width: "40px",
@@ -1328,7 +2070,10 @@ export function WorkflowDetail(): React.ReactElement {
                         className="form-input"
                         value={stateForm.color}
                         onChange={(e) =>
-                          setStateForm((f) => ({ ...f, color: e.target.value }))
+                          setStateForm((f) => ({
+                            ...f,
+                            color: e.target.value,
+                          }))
                         }
                         placeholder="#6366f1"
                         style={{ flex: 1 }}
@@ -1360,7 +2105,10 @@ export function WorkflowDetail(): React.ReactElement {
                     placeholder="e.g. 24"
                     value={stateForm.slaHours}
                     onChange={(e) =>
-                      setStateForm((f) => ({ ...f, slaHours: e.target.value }))
+                      setStateForm((f) => ({
+                        ...f,
+                        slaHours: e.target.value,
+                      }))
                     }
                   />
                 </div>
@@ -1399,7 +2147,7 @@ export function WorkflowDetail(): React.ReactElement {
         </div>
       )}
 
-      {/* Add Transition modal */}
+      {/* Add Transition */}
       {showAddTransition && (
         <div
           className="modal-overlay"
@@ -1453,7 +2201,10 @@ export function WorkflowDetail(): React.ReactElement {
                       className="form-input"
                       value={transForm.toState}
                       onChange={(e) =>
-                        setTransForm((f) => ({ ...f, toState: e.target.value }))
+                        setTransForm((f) => ({
+                          ...f,
+                          toState: e.target.value,
+                        }))
                       }
                       required
                     >
@@ -1528,7 +2279,8 @@ export function WorkflowDetail(): React.ReactElement {
           </div>
         </div>
       )}
-      {/* Edit Field modal */}
+
+      {/* Edit Field */}
       {editingField && (
         <div className="modal-overlay" onClick={() => setEditingField(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -1620,7 +2372,7 @@ export function WorkflowDetail(): React.ReactElement {
         </div>
       )}
 
-      {/* Edit State modal */}
+      {/* Edit State */}
       {editingState && (
         <div className="modal-overlay" onClick={() => setEditingState(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -1680,7 +2432,10 @@ export function WorkflowDetail(): React.ReactElement {
                         type="color"
                         value={stateForm.color}
                         onChange={(e) =>
-                          setStateForm((f) => ({ ...f, color: e.target.value }))
+                          setStateForm((f) => ({
+                            ...f,
+                            color: e.target.value,
+                          }))
                         }
                         style={{
                           width: "40px",
@@ -1694,7 +2449,10 @@ export function WorkflowDetail(): React.ReactElement {
                         className="form-input"
                         value={stateForm.color}
                         onChange={(e) =>
-                          setStateForm((f) => ({ ...f, color: e.target.value }))
+                          setStateForm((f) => ({
+                            ...f,
+                            color: e.target.value,
+                          }))
                         }
                         placeholder="#6366f1"
                         style={{ flex: 1 }}
@@ -1726,7 +2484,10 @@ export function WorkflowDetail(): React.ReactElement {
                     placeholder="e.g. 24"
                     value={stateForm.slaHours}
                     onChange={(e) =>
-                      setStateForm((f) => ({ ...f, slaHours: e.target.value }))
+                      setStateForm((f) => ({
+                        ...f,
+                        slaHours: e.target.value,
+                      }))
                     }
                   />
                 </div>
@@ -1765,7 +2526,7 @@ export function WorkflowDetail(): React.ReactElement {
         </div>
       )}
 
-      {/* Edit Transition modal */}
+      {/* Edit Transition */}
       {editingTransition && (
         <div
           className="modal-overlay"
@@ -1872,7 +2633,7 @@ export function WorkflowDetail(): React.ReactElement {
         </div>
       )}
 
-      {/* Shared confirm-delete modal for fields / states / transitions */}
+      {/* Shared confirm-delete */}
       {confirmDelete && (
         <ConfirmDeleteModal
           message={confirmDelete.message}
@@ -1886,7 +2647,7 @@ export function WorkflowDetail(): React.ReactElement {
         />
       )}
 
-      {/* Delete workflow confirmation modal */}
+      {/* Delete workflow */}
       {showDeleteWorkflow && (
         <div
           style={{
@@ -1914,7 +2675,21 @@ export function WorkflowDetail(): React.ReactElement {
               boxShadow: "var(--shadow-lg)",
             }}
           >
-            <div style={{ fontSize: "28px", marginBottom: "12px" }}>🗑</div>
+            <div
+              style={{
+                width: "48px",
+                height: "48px",
+                borderRadius: "12px",
+                background: "hsla(0,84%,60%,.12)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "22px",
+                marginBottom: "16px",
+              }}
+            >
+              🗑
+            </div>
             <h3
               style={{ margin: "0 0 8px", fontSize: "18px", fontWeight: 700 }}
             >

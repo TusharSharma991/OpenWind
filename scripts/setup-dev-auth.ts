@@ -21,8 +21,9 @@
  * Re-running is safe — it detects existing resources and skips creation.
  */
 
-import { writeFileSync, readFileSync } from "node:fs";
+import { writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { createSign } from "node:crypto";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -32,6 +33,8 @@ const ADMIN_EMAIL =
 const ADMIN_PASSWORD = process.env["ZITADEL_ADMIN_PASSWORD"] ?? "Admin1234!";
 // Accept a pre-generated PAT directly (bypasses the auth flow entirely)
 const ADMIN_PAT = process.env["ZITADEL_ADMIN_PAT"];
+
+const ENV_FILE_PATH = join(process.cwd(), ".env.local");
 const PROJECT_NAME = "Platform";
 const APP_NAME = "platform-api";
 const INTROSPECTION_SA_NAME = "platform-introspection";
@@ -82,39 +85,109 @@ async function zitadelFetch(
   return res.json() as Promise<unknown>;
 }
 
+// ── JWT Profile Grant helpers (authNexus pattern) ────────────────────────────
+
+interface ZitadelKeyJson {
+  type: string;
+  keyId: string;
+  key: string; // RSA private key PEM
+  userId: string;
+}
+
+function signJwt(
+  payload: Record<string, unknown>,
+  privateKeyPem: string,
+  keyId: string,
+): string {
+  const b64url = (obj: unknown) =>
+    Buffer.from(JSON.stringify(obj)).toString("base64url");
+  const header = b64url({ alg: "RS256", typ: "JWT", kid: keyId });
+  const body = b64url(payload);
+  const signer = createSign("RSA-SHA256");
+  signer.update(`${header}.${body}`);
+  return `${header}.${body}.${signer.sign(privateKeyPem, "base64url")}`;
+}
+
+async function getTokenFromKeyJson(keyJson: ZitadelKeyJson): Promise<string> {
+  const now = Math.floor(Date.now() / 1000);
+  const jwt = signJwt(
+    {
+      iss: keyJson.userId,
+      sub: keyJson.userId,
+      aud: [ZITADEL_BASE],
+      iat: now,
+      exp: now + 60,
+    },
+    keyJson.key,
+    keyJson.keyId,
+  );
+  const res = await fetch(`${ZITADEL_BASE}/oauth/v2/token`, {
+    method: "POST",
+    signal: AbortSignal.timeout(15_000),
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      scope: "openid urn:zitadel:iam:org:project:id:zitadel:aud",
+      assertion: jwt,
+    }).toString(),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`JWT token exchange failed ${res.status}: ${text}`);
+  }
+  const data = (await res.json()) as { access_token: string };
+  return data.access_token;
+}
+
+function readKeyJsonFromEnvFile(): ZitadelKeyJson | null {
+  // Check process env first (set by docker or CI), then .env.local
+  const fromEnv = process.env["ZITADEL_KEY_JSON"];
+  const raw =
+    fromEnv ??
+    (() => {
+      if (!existsSync(ENV_FILE_PATH)) return undefined;
+      const line = readFileSync(ENV_FILE_PATH, "utf8")
+        .split("\n")
+        .find((l) => l.startsWith("ZITADEL_KEY_JSON="));
+      return line?.slice("ZITADEL_KEY_JSON=".length);
+    })();
+  if (!raw) return null;
+  try {
+    return JSON.parse(
+      Buffer.from(raw, "base64").toString("utf8"),
+    ) as ZitadelKeyJson;
+  } catch {
+    return null;
+  }
+}
+
 // ── Step 1: Authenticate ──────────────────────────────────────────────────────
-// Zitadel v2 removed the password grant type. We use the Sessions API instead:
-// 1. Create a session with username + password → get a session token
-// 2. Create an OIDC auth request + callback using the session token
-// 3. Extract the access token from the callback
-// Alternatively pass ZITADEL_ADMIN_PAT to skip this entirely.
+// Priority: ZITADEL_KEY_JSON (JWT Profile grant) → ZITADEL_ADMIN_PAT → fail
 
 async function getAdminToken(): Promise<string> {
-  // If a PAT is provided directly, skip the full auth flow
+  // 1. JWT Profile grant — headless, works after first bootstrap
+  const keyJson = readKeyJsonFromEnvFile();
+  if (keyJson) {
+    log("Authenticating via ZITADEL_KEY_JSON (JWT Profile grant)...");
+    return getTokenFromKeyJson(keyJson);
+  }
+
+  // 2. PAT — explicit override via env var
   if (ADMIN_PAT) {
     log("Using ZITADEL_ADMIN_PAT directly.");
     return ADMIN_PAT;
   }
 
-  // Zitadel v2 removed the password grant and requires client authentication for
-  // the Sessions API. A Personal Access Token (PAT) is the correct approach for
-  // automated local dev setup.
-  //
-  // One-time steps to generate a PAT:
-  //   1. Open http://localhost:8080 in your browser
-  //   2. Log in as admin@platform.local / Admin1234!
-  //   3. Click your avatar (top-right) → "Personal Access Tokens"
-  //   4. Click "+ New" → set no expiry → copy the token
-  //   5. Re-run: ZITADEL_ADMIN_PAT=<token> pnpm setup-auth
-  //
+  // 3. Neither set — explain what's needed
   fail(
-    `ZITADEL_ADMIN_PAT env var is required.\n\n` +
-      `  Zitadel v2 does not support password grant. Generate a PAT:\n` +
+    `No Zitadel credentials found.\n\n` +
+      `  Option A (recommended): run \`pnpm bootstrap\` first — it sets up\n` +
+      `  ZITADEL_KEY_JSON in .env.local so future runs are fully headless.\n\n` +
+      `  Option B: generate a PAT manually:\n` +
       `  1. Open http://localhost:8080\n` +
       `  2. Log in as ${ADMIN_EMAIL} / ${ADMIN_PASSWORD}\n` +
-      `  3. Avatar → Personal Access Tokens → New (no expiry)\n` +
-      `  4. Copy the token\n` +
-      `  5. Run: ZITADEL_ADMIN_PAT=<token> pnpm setup-auth\n`,
+      `  3. Avatar → Personal Access Tokens → New (no expiry) → copy\n` +
+      `  4. Run: ZITADEL_ADMIN_PAT=<token> pnpm setup-auth\n`,
   );
 }
 

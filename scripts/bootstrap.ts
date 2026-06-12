@@ -25,6 +25,7 @@ import { existsSync, readFileSync, writeFileSync, copyFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
+import { createSign } from "node:crypto";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -233,6 +234,153 @@ async function zCall(
     );
   }
   return res.json() as Promise<unknown>;
+}
+
+// ── JWT Profile Grant (authNexus pattern) ────────────────────────────────────
+// Once ZITADEL_KEY_JSON is in .env.local, bootstrap is fully headless — no PAT.
+
+interface ZitadelKeyJson {
+  type: string;
+  keyId: string;
+  key: string; // RSA private key PEM
+  userId: string;
+}
+
+function signJwt(
+  payload: Record<string, unknown>,
+  privateKeyPem: string,
+  keyId: string,
+): string {
+  const b64url = (obj: unknown) =>
+    Buffer.from(JSON.stringify(obj)).toString("base64url");
+  const header = b64url({ alg: "RS256", typ: "JWT", kid: keyId });
+  const body = b64url(payload);
+  const signer = createSign("RSA-SHA256");
+  signer.update(`${header}.${body}`);
+  return `${header}.${body}.${signer.sign(privateKeyPem, "base64url")}`;
+}
+
+async function getTokenFromKeyJson(keyJson: ZitadelKeyJson): Promise<string> {
+  const now = Math.floor(Date.now() / 1000);
+  const jwt = signJwt(
+    {
+      iss: keyJson.userId,
+      sub: keyJson.userId,
+      aud: [ZITADEL_BASE],
+      iat: now,
+      exp: now + 60,
+    },
+    keyJson.key,
+    keyJson.keyId,
+  );
+  const res = await fetch(`${ZITADEL_BASE}/oauth/v2/token`, {
+    method: "POST",
+    signal: AbortSignal.timeout(15_000),
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      scope: "openid urn:zitadel:iam:org:project:id:zitadel:aud",
+      assertion: jwt,
+    }).toString(),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`JWT token exchange failed ${res.status}: ${text}`);
+  }
+  const data = (await res.json()) as { access_token: string };
+  return data.access_token;
+}
+
+function readKeyJsonFromEnv(): ZitadelKeyJson | null {
+  const raw = readEnvLocal().get("ZITADEL_KEY_JSON");
+  if (!raw) return null;
+  try {
+    return JSON.parse(
+      Buffer.from(raw, "base64").toString("utf8"),
+    ) as ZitadelKeyJson;
+  } catch {
+    return null;
+  }
+}
+
+async function generateAndSaveKeyJson(token: string): Promise<void> {
+  const search = (await zCall("/management/v1/users/_search", token, {
+    method: "POST",
+    body: {
+      queries: [
+        {
+          userNameQuery: {
+            userName: "setup-admin",
+            method: "TEXT_QUERY_METHOD_EQUALS",
+          },
+        },
+      ],
+    },
+  })) as { result?: Array<{ id: string }> };
+
+  const userId = search.result?.[0]?.id;
+  if (!userId) {
+    warn("Could not find setup-admin user — skipping key JSON generation");
+    return;
+  }
+
+  const keyRes = (await zCall(`/management/v1/users/${userId}/keys`, token, {
+    method: "POST",
+    body: { type: "KEY_TYPE_JSON", expirationDate: "2035-01-01T00:00:00Z" },
+  })) as { keyId: string; keyDetails: string };
+
+  // keyDetails is base64-encoded JSON — re-encode the raw JSON for our env var
+  const keyJsonStr = Buffer.from(keyRes.keyDetails, "base64").toString("utf8");
+  writeEnvVars({
+    ZITADEL_KEY_JSON: Buffer.from(keyJsonStr).toString("base64"),
+  });
+  ok(
+    "ZITADEL_KEY_JSON saved to .env.local — future bootstrap runs will be fully headless",
+  );
+}
+
+async function getAdminToken(): Promise<string> {
+  // Headless path — key JSON already in .env.local
+  const keyJson = readKeyJsonFromEnv();
+  if (keyJson) {
+    try {
+      const token = await getTokenFromKeyJson(keyJson);
+      ok("Authenticated via JWT Profile grant — no browser step needed");
+      return token;
+    } catch (e) {
+      warn(`Key JSON auth failed (${String(e)}) — falling back to PAT`);
+    }
+  }
+
+  // First-run path — prompt for PAT, then generate a key JSON for future runs
+  console.log(`
+  ${YELLOW}One manual step is required.${RESET}
+  Zitadel's API needs a Personal Access Token (PAT) for this first setup.
+  This is a one-time step — afterwards, a service account key is saved to
+  .env.local and all future runs will be fully headless.
+
+  ${BOLD}1.${RESET} Open:  ${CYAN}http://localhost:8080${RESET}
+  ${BOLD}2.${RESET} Log in: ${DIM}admin@platform.local  /  Admin1234!${RESET}
+  ${BOLD}3.${RESET} Click your avatar (top-right) → "Personal Access Tokens"
+  ${BOLD}4.${RESET} Click "${BOLD}+ New${RESET}" → set no expiry → click "Add" → ${BOLD}copy the token${RESET}
+`);
+
+  const pat = await ask(`  ${BOLD}Paste your PAT here:${RESET} `);
+  if (!pat || pat.length < 20) {
+    fail("PAT is too short. Copy the full token from Zitadel and try again.");
+  }
+
+  // Generate and save key JSON so future runs skip this step entirely
+  info("Generating service account key for future headless runs...");
+  try {
+    await generateAndSaveKeyJson(pat);
+  } catch (e) {
+    warn(
+      `Could not generate key JSON: ${String(e)} — future runs will still need a PAT`,
+    );
+  }
+
+  return pat;
 }
 
 // ── Zitadel setup (mirrors setup-dev-auth.ts but returns projectId) ───────────
@@ -599,7 +747,7 @@ async function main(): Promise<void> {
 
   run("docker compose up -d");
   ok("Docker services started");
-  info("Postgres, PgBouncer, Redis, MinIO, Zitadel, OpenBao");
+  info("Postgres, PgBouncer, Redis, Zitadel, API, Frontend");
 
   // ── 4. Health checks ──────────────────────────────────────────────────────────
 
@@ -609,7 +757,6 @@ async function main(): Promise<void> {
 
   await waitForPostgres();
   await waitForHttp(`${ZITADEL_BASE}/healthz`, "Zitadel", 80, 3000);
-  await waitForHttp("http://localhost:8200/v1/sys/health", "OpenBao", 30, 2000);
 
   // Extra buffer for Zitadel internal startup (database migrations, admin user creation)
   info("Giving Zitadel 10s to complete internal setup...");
@@ -635,24 +782,9 @@ async function main(): Promise<void> {
 
   step(7, "Configuring Zitadel authentication");
 
-  console.log(`
-  ${YELLOW}One manual step is required.${RESET}
-  Zitadel's API needs a Personal Access Token (PAT) for admin operations.
-  This is a one-time 30-second step.
-
-  ${BOLD}1.${RESET} Open:  ${CYAN}http://localhost:8080${RESET}
-  ${BOLD}2.${RESET} Log in: ${DIM}admin@platform.local  /  Admin1234!${RESET}
-  ${BOLD}3.${RESET} Click your avatar (top-right) → "Personal Access Tokens"
-  ${BOLD}4.${RESET} Click "${BOLD}+ New${RESET}" → set no expiry → click "Add" → ${BOLD}copy the token${RESET}
-`);
-
-  const pat = await ask(`  ${BOLD}Paste your PAT here:${RESET} `);
-  if (!pat || pat.length < 20) {
-    fail("PAT is too short. Copy the full token from Zitadel and try again.");
-  }
-
+  const authToken = await getAdminToken();
   console.log("");
-  const { projectId, oidcClientId } = await runZitadelSetup(pat);
+  const { projectId, oidcClientId } = await runZitadelSetup(authToken);
   ok(`Project configured (id=${projectId})`);
   ok(`OIDC client id: ${oidcClientId}`);
   ok(".env.local updated with Zitadel credentials");
@@ -661,7 +793,7 @@ async function main(): Promise<void> {
 
   step(8, "Creating demo users");
 
-  await createDemoUser(pat, projectId, {
+  await createDemoUser(authToken, projectId, {
     email: DEMO_ADMIN_EMAIL,
     firstName: "Admin",
     lastName: "Demo",
@@ -669,7 +801,7 @@ async function main(): Promise<void> {
     role: "admin",
   });
 
-  await createDemoUser(pat, projectId, {
+  await createDemoUser(authToken, projectId, {
     email: DEMO_AGENT_EMAIL,
     firstName: "Support",
     lastName: "Agent",
@@ -677,7 +809,7 @@ async function main(): Promise<void> {
     role: "agent",
   });
 
-  await createDemoUser(pat, projectId, {
+  await createDemoUser(authToken, projectId, {
     email: DEMO_USER_EMAIL,
     firstName: "Portal",
     lastName: "User",
@@ -710,8 +842,6 @@ ${BOLD}${GREEN}  ✅  OpenWind is ready!${RESET}
   │  API                   ${CYAN}http://localhost:3000${RESET}            │
   │  API docs              ${CYAN}http://localhost:3000/docs${RESET}       │
   │  Zitadel console       ${CYAN}http://localhost:8080${RESET}            │
-  │  MinIO console         ${CYAN}http://localhost:9001${RESET}            │
-  │  OpenBao UI            ${CYAN}http://localhost:8200${RESET}            │
   └─────────────────────────────────────────────────────────┘
 
   ${BOLD}Demo credentials${RESET}  (all at http://localhost:3001)

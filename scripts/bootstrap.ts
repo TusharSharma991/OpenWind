@@ -772,8 +772,9 @@ async function main(): Promise<void> {
 
   step(6, "Running database migrations and base seed");
 
-  // @platform/config must be built before any package that imports it (e.g. db/client.ts)
-  run("pnpm turbo run build --filter=@platform/config");
+  // Build internal packages needed by db:seed and seed:demo scripts.
+  // Turbo respects the dependency graph: config is built before db.
+  run("pnpm turbo run build --filter=@platform/config --filter=@platform/db");
 
   run("pnpm db:migrate", { env: { DOTENV_CONFIG_PATH: ".env.local" } });
   ok("Migrations applied");
@@ -791,6 +792,17 @@ async function main(): Promise<void> {
   ok(`Project configured (id=${projectId})`);
   ok(`OIDC client id: ${oidcClientId}`);
   ok(".env.local updated with Zitadel credentials");
+
+  // Restart the frontend container so Vite picks up the new OIDC client ID.
+  // Vite reads loadEnv() at startup — it won't see vars written after it launched.
+  try {
+    execSync("docker restart ow-frontend", { stdio: "ignore" });
+    ok("Frontend container restarted (picks up OIDC client ID)");
+  } catch {
+    warn(
+      "Could not restart ow-frontend — run `docker restart ow-frontend` manually",
+    );
+  }
 
   // ── 8. Demo users ─────────────────────────────────────────────────────────────
 

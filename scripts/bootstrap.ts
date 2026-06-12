@@ -698,7 +698,10 @@ async function createDemoUser(
   let userId = search.result?.[0]?.id ?? null;
 
   if (!userId) {
-    // Create the human user
+    // Create the human user.
+    // The Management API v1 proto field is `initial_password` (→ `initialPassword` in JSON),
+    // NOT a nested `password` object. Using the correct field name creates the user in
+    // ACTIVE state immediately — no init-code activation screen on first login.
     const created = (await zCall("/management/v1/users/human", pat, {
       method: "POST",
       body: {
@@ -713,34 +716,10 @@ async function createDemoUser(
           email: opts.email,
           isEmailVerified: true,
         },
-        password: {
-          value: DEMO_PASSWORD,
-          changeRequired: false,
-        },
+        initialPassword: DEMO_PASSWORD,
       },
     })) as { userId: string };
     userId = created.userId;
-
-    // Set a known password (some Zitadel versions need this separate call)
-    try {
-      await zCall(`/management/v1/users/${userId}/password`, pat, {
-        method: "POST",
-        body: { password: DEMO_PASSWORD, noChangeRequired: true },
-      });
-    } catch {
-      /* some versions accept password in the create body already */
-    }
-
-    // Explicitly mark email as verified — belt-and-suspenders in case the
-    // isEmailVerified flag in the create body was ignored by this Zitadel version.
-    try {
-      await zCall(`/management/v1/users/${userId}/email`, pat, {
-        method: "PUT",
-        body: { email: opts.email, isEmailVerified: true },
-      });
-    } catch {
-      /* ignore — email was already marked verified in the create body */
-    }
 
     ok(`Created user ${opts.email}`);
   } else {

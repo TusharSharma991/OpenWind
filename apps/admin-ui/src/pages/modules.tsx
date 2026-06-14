@@ -99,15 +99,12 @@ const PLAN_LABEL: Record<string, string> = {
 
 // ── main component ────────────────────────────────────────────────────────────
 
-type FilterTab = "all" | "installed" | "available";
-
 export function Modules(): React.ReactElement {
-  const { data, isLoading, refetch } = useList<Module>({ resource: "modules" });
+  const { data, isLoading } = useList<Module>({ resource: "modules" });
   const [actionError, setActionError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<FilterTab>("all");
   const [search, setSearch] = useState("");
 
-  // Install modal state
+  // Fork modal state
   const [forkTarget, setForkTarget] = useState<Module | null>(null);
   const [forkName, setForkName] = useState("");
   const [forking, setForking] = useState(false);
@@ -116,24 +113,17 @@ export function Modules(): React.ReactElement {
   );
 
   const modules = data?.data ?? [];
-  const installedCount = modules.filter((m) => m.installed).length;
-  const availableCount = modules.length - installedCount;
 
   const filtered = useMemo(() => {
-    let list = modules;
-    if (filter === "installed") list = list.filter((m) => m.installed);
-    if (filter === "available") list = list.filter((m) => !m.installed);
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      list = list.filter(
-        (m) =>
-          m.name.toLowerCase().includes(q) ||
-          m.slug.toLowerCase().includes(q) ||
-          (m.description ?? "").toLowerCase().includes(q),
-      );
-    }
-    return list;
-  }, [modules, filter, search]);
+    if (!search.trim()) return modules;
+    const q = search.trim().toLowerCase();
+    return modules.filter(
+      (m) =>
+        m.name.toLowerCase().includes(q) ||
+        m.slug.toLowerCase().includes(q) ||
+        (m.description ?? "").toLowerCase().includes(q),
+    );
+  }, [modules, search]);
 
   function openForkModal(mod: Module): void {
     setForkTarget(mod);
@@ -170,10 +160,9 @@ export function Modules(): React.ReactElement {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ workflowName: name }),
       });
-      void refetch();
       closeForkModal();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Install failed");
+      setActionError(err instanceof Error ? err.message : "Fork failed");
     } finally {
       setForking(false);
     }
@@ -183,7 +172,7 @@ export function Modules(): React.ReactElement {
     return (
       <div className="loading-center">
         <div className="spinner" />
-        <span className="loader-text">Loading modules…</span>
+        <span className="loader-text">Loading templates…</span>
       </div>
     );
   }
@@ -202,127 +191,35 @@ export function Modules(): React.ReactElement {
           borderRadius: "var(--radius-md)",
           padding: "20px 24px",
           marginBottom: "20px",
-          display: "flex",
-          alignItems: "flex-start",
-          justifyContent: "space-between",
-          gap: "16px",
-          flexWrap: "wrap",
         }}
       >
-        <div>
-          <div
-            style={{
-              fontSize: "11px",
-              fontWeight: 600,
-              color: "var(--text-muted)",
-              textTransform: "uppercase",
-              letterSpacing: "0.07em",
-              marginBottom: "4px",
-            }}
-          >
-            Platform / Modules
-          </div>
-          <h2
-            style={{
-              fontSize: "20px",
-              fontWeight: 700,
-              fontFamily: "var(--font-heading)",
-              margin: "0 0 4px",
-            }}
-          >
-            Module Templates
-          </h2>
-          <p
-            style={{ fontSize: "13px", color: "var(--text-muted)", margin: 0 }}
-          >
-            Pre-built workflow templates. Fork a module to instantly create
-            entity types, fields, and a state machine workflow — then customise
-            freely.
-          </p>
-        </div>
-
-        {/* Summary chips */}
         <div
           style={{
-            display: "flex",
-            gap: "10px",
-            flexShrink: 0,
-            flexWrap: "wrap",
+            fontSize: "11px",
+            fontWeight: 600,
+            color: "var(--text-muted)",
+            textTransform: "uppercase",
+            letterSpacing: "0.07em",
+            marginBottom: "4px",
           }}
         >
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              padding: "10px 18px",
-              background: "hsla(150,75%,40%,.08)",
-              border: "1px solid hsla(150,75%,40%,.2)",
-              borderRadius: "var(--radius-sm)",
-              minWidth: "70px",
-            }}
-          >
-            <span
-              style={{
-                fontSize: "22px",
-                fontWeight: 800,
-                fontFamily: "var(--font-heading)",
-                color: "hsl(150,75%,45%)",
-                lineHeight: 1,
-              }}
-            >
-              {installedCount}
-            </span>
-            <span
-              style={{
-                fontSize: "10px",
-                fontWeight: 600,
-                color: "var(--text-muted)",
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
-                marginTop: "4px",
-              }}
-            >
-              Installed
-            </span>
-          </div>
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              padding: "10px 18px",
-              background: "var(--bg-secondary)",
-              border: "1px solid var(--border-color)",
-              borderRadius: "var(--radius-sm)",
-              minWidth: "70px",
-            }}
-          >
-            <span
-              style={{
-                fontSize: "22px",
-                fontWeight: 800,
-                fontFamily: "var(--font-heading)",
-                color: "var(--text-primary)",
-                lineHeight: 1,
-              }}
-            >
-              {availableCount}
-            </span>
-            <span
-              style={{
-                fontSize: "10px",
-                fontWeight: 600,
-                color: "var(--text-muted)",
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
-                marginTop: "4px",
-              }}
-            >
-              Available
-            </span>
-          </div>
+          Platform / Templates
         </div>
+        <h2
+          style={{
+            fontSize: "20px",
+            fontWeight: 700,
+            fontFamily: "var(--font-heading)",
+            margin: "0 0 4px",
+          }}
+        >
+          Module Templates
+        </h2>
+        <p style={{ fontSize: "13px", color: "var(--text-muted)", margin: 0 }}>
+          Pre-built blueprints for common business workflows. Fork any template
+          to create a named copy — entity types, fields, and state machine
+          included. Fork the same template multiple times with different names.
+        </p>
       </div>
 
       {actionError && (
@@ -331,74 +228,15 @@ export function Modules(): React.ReactElement {
         </div>
       )}
 
-      {/* ── Filter bar ──────────────────────────────────────────────────── */}
-      <div className="mod-filter-bar">
-        {/* tabs */}
-        <div
-          style={{
-            display: "flex",
-            background: "var(--bg-secondary)",
-            border: "1px solid var(--border-color)",
-            borderRadius: "var(--radius-sm)",
-            padding: "3px",
-            gap: "2px",
-          }}
-        >
-          {(["all", "installed", "available"] as FilterTab[]).map((tab) => {
-            const count =
-              tab === "all"
-                ? modules.length
-                : tab === "installed"
-                  ? installedCount
-                  : availableCount;
-            return (
-              <button
-                key={tab}
-                onClick={() => setFilter(tab)}
-                style={{
-                  padding: "5px 14px",
-                  borderRadius: "5px",
-                  fontSize: "12px",
-                  fontWeight: 600,
-                  border: "none",
-                  cursor: "pointer",
-                  textTransform: "capitalize",
-                  transition: "background .12s, color .12s",
-                  background:
-                    filter === tab ? "var(--accent-primary)" : "transparent",
-                  color: filter === tab ? "#fff" : "var(--text-muted)",
-                  display: "flex",
-                  gap: "6px",
-                  alignItems: "center",
-                }}
-              >
-                {tab}
-                <span
-                  style={{
-                    fontSize: "10px",
-                    fontWeight: 700,
-                    background:
-                      filter === tab
-                        ? "rgba(255,255,255,.2)"
-                        : "var(--bg-tertiary)",
-                    padding: "0px 5px",
-                    borderRadius: "10px",
-                  }}
-                >
-                  {count}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-
-        {/* search */}
+      {/* ── Search bar ──────────────────────────────────────────────────── */}
+      <div style={{ marginBottom: "16px" }}>
         <input
           type="text"
           className="mod-search"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search modules…"
+          placeholder="Search templates…"
+          style={{ width: "100%", maxWidth: "320px" }}
         />
       </div>
 
@@ -406,11 +244,11 @@ export function Modules(): React.ReactElement {
       {filtered.length === 0 ? (
         <div className="empty-state">
           <div className="empty-icon">⬡</div>
-          <h4>No modules found</h4>
+          <h4>No templates found</h4>
           <p>
             {search
-              ? `No modules match "${search}"`
-              : "Run the platform seed to populate the module registry."}
+              ? `No templates match "${search}"`
+              : "Run the platform seed to populate the template registry."}
           </p>
         </div>
       ) : (
@@ -424,14 +262,14 @@ export function Modules(): React.ReactElement {
                 mod={mod}
                 accent={accent}
                 features={features}
-                onInstall={openForkModal}
+                onFork={openForkModal}
               />
             );
           })}
         </div>
       )}
 
-      {/* ── Install modal ────────────────────────────────────────────────── */}
+      {/* ── Fork modal ───────────────────────────────────────────────────── */}
       {forkTarget && (
         <div
           className="modal-overlay"
@@ -484,7 +322,7 @@ export function Modules(): React.ReactElement {
                     color: "var(--text-primary)",
                   }}
                 >
-                  Install "{forkTarget.name}"
+                  Fork "{forkTarget.name}"
                 </div>
                 <div
                   style={{
@@ -493,7 +331,8 @@ export function Modules(): React.ReactElement {
                     marginTop: "2px",
                   }}
                 >
-                  Creates entity type, fields, and a workflow for your tenant.
+                  Creates a named copy — entity type, fields, and workflow ready
+                  to use.
                 </div>
               </div>
               <button
@@ -535,7 +374,7 @@ export function Modules(): React.ReactElement {
                     marginBottom: "8px",
                   }}
                 >
-                  What will be created
+                  What gets created
                 </div>
                 <div
                   style={{
@@ -586,7 +425,7 @@ export function Modules(): React.ReactElement {
                   autoFocus
                 />
                 <div className="form-hint">
-                  This becomes the workflow name visible in Records.
+                  Names the workflow created from this template. Must be unique.
                 </div>
                 {nameConflict && (
                   <div
@@ -634,7 +473,7 @@ export function Modules(): React.ReactElement {
                 disabled={forking || !forkName.trim() || nameConflict}
                 style={{ minWidth: "120px" }}
               >
-                {forking ? "Installing…" : "Install Module"}
+                {forking ? "Forking…" : "Fork Template"}
               </button>
             </div>
           </div>
@@ -650,12 +489,12 @@ function ModuleCard({
   mod,
   accent,
   features,
-  onInstall,
+  onFork,
 }: {
   mod: Module;
   accent: string;
   features: string[];
-  onInstall: (mod: Module) => void;
+  onFork: (mod: Module) => void;
 }): React.ReactElement {
   const [hovered, setHovered] = useState(false);
 
@@ -679,10 +518,7 @@ function ModuleCard({
       <div
         style={{
           height: "3px",
-          background: mod.installed
-            ? `linear-gradient(90deg, ${accent}, ${accent}99)`
-            : "var(--bg-tertiary)",
-          transition: "background .2s",
+          background: `linear-gradient(90deg, ${accent}, ${accent}99)`,
         }}
       />
 
@@ -745,40 +581,8 @@ function ModuleCard({
             )}
           </div>
 
-          {/* status + plan row */}
+          {/* plan badge */}
           <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-            {/* status dot + label */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "5px",
-                padding: "2px 8px",
-                borderRadius: "20px",
-                fontSize: "11px",
-                fontWeight: 600,
-                background: mod.installed
-                  ? "hsla(150,75%,40%,.12)"
-                  : "var(--bg-tertiary)",
-                color: mod.installed ? "hsl(150,75%,45%)" : "var(--text-muted)",
-                border: `1px solid ${mod.installed ? "hsla(150,75%,40%,.25)" : "var(--border-color)"}`,
-              }}
-            >
-              <div
-                style={{
-                  width: "6px",
-                  height: "6px",
-                  borderRadius: "50%",
-                  background: mod.installed
-                    ? "hsl(150,75%,45%)"
-                    : "var(--text-muted)",
-                  flexShrink: 0,
-                }}
-              />
-              {mod.installed ? "Installed" : "Available"}
-            </div>
-
-            {/* plan */}
             <span
               style={{
                 padding: "2px 8px",
@@ -809,7 +613,7 @@ function ModuleCard({
           }}
         >
           {mod.description ??
-            `The ${mod.name} module provides domain-specific entity types, state machine workflows, and automation rules.`}
+            `The ${mod.name} template provides pre-built entity types, state machine workflows, and field definitions ready to customise.`}
         </p>
 
         {features.length > 0 && (
@@ -877,33 +681,18 @@ function ModuleCard({
           </span>
         </div>
 
-        {!mod.isSystem &&
-          (mod.installed ? (
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "6px",
-                fontSize: "12px",
-                color: "hsl(150,75%,45%)",
-                fontWeight: 600,
-              }}
-            >
-              <span>✓</span>
-              Installed
-            </div>
-          ) : (
-            <button
-              className="btn-primary btn-sm"
-              onClick={() => onInstall(mod)}
-              style={{
-                background: `linear-gradient(135deg, ${accent}, ${accent}cc)`,
-                boxShadow: `0 2px 8px ${accent}33`,
-              }}
-            >
-              + Install
-            </button>
-          ))}
+        {!mod.isSystem && (
+          <button
+            className="btn-primary btn-sm"
+            onClick={() => onFork(mod)}
+            style={{
+              background: `linear-gradient(135deg, ${accent}, ${accent}cc)`,
+              boxShadow: `0 2px 8px ${accent}33`,
+            }}
+          >
+            Fork
+          </button>
+        )}
       </div>
     </div>
   );

@@ -462,10 +462,29 @@ async function runZitadelSetup(
 
   if (projectId) {
     ok(`Project "${PROJECT_NAME}" already exists`);
+    // Ensure projectRoleAssertion is enabled — roles won't appear in JWT without it
+    try {
+      await zCall(`/management/v1/projects/${projectId}`, pat, {
+        method: "PUT",
+        body: {
+          name: PROJECT_NAME,
+          projectRoleAssertion: true,
+          projectRoleCheck: false,
+          hasProjectCheck: false,
+        },
+      });
+    } catch {
+      /* best effort */
+    }
   } else {
     const created = (await zCall("/management/v1/projects", pat, {
       method: "POST",
-      body: { name: PROJECT_NAME },
+      body: {
+        name: PROJECT_NAME,
+        projectRoleAssertion: true,
+        projectRoleCheck: false,
+        hasProjectCheck: false,
+      },
     })) as { id: string };
     projectId = created.id;
     ok(`Created project "${PROJECT_NAME}"`);

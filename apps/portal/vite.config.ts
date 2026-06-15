@@ -15,6 +15,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    build: { target: "es2022" },
     server: { port: 3004 },
     define: {
       "process.env.ZITADEL_ISSUER": JSON.stringify(zitadelIssuer),

@@ -25,6 +25,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react(), envJsPlugin(env)],
+    build: { target: "es2022" },
     server: {
       port: 3001,
       host: "0.0.0.0",

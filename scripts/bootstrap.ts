@@ -11,7 +11,7 @@
  *   6.  Database — migrate + base seed
  *   7.  Auth — Zitadel project, OIDC app, roles  (one manual PAT step)
  *   8.  Demo users — admin@openwind.local + user@openwind.local
- *   9.  Demo data — Helpdesk module, Support Ticket entity, 5 sample tickets
+ *   9.  Templates — seed module registry so all templates appear on the Templates page
  *  10.  Summary — all URLs and credentials printed
  *
  * Run:
@@ -902,13 +902,12 @@ async function main(): Promise<void> {
 
   // ── 9. Demo data ──────────────────────────────────────────────────────────────
 
-  step(9, "Seeding Helpdesk demo data");
+  step(9, "Seeding module templates");
 
   run("pnpm seed:demo");
-  ok("Helpdesk module registered");
-  ok("Support Ticket entity type created (6 fields)");
-  ok("Ticket Lifecycle workflow seeded (6 states, 8 transitions)");
-  ok("5 sample tickets across all states");
+  ok(
+    "7 templates seeded (Helpdesk, CRM, HRMS, Reimbursements, Projects, Invoicing, Procurement)",
+  );
 
   // ── 10. Summary ───────────────────────────────────────────────────────────────
 
@@ -937,10 +936,10 @@ ${BOLD}${GREEN}  ✅  OpenWind is ready!${RESET}
   │  ${DIM}admin@platform.local   /  Admin1234!${RESET}                │
   └─────────────────────────────────────────────────────────┘
 
-  ${BOLD}What's seeded${RESET}
-  • Helpdesk module with Support Ticket entity type
-  • Ticket Lifecycle workflow: New → Open → In Progress → Resolved → Closed
-  • 5 demo tickets spread across all workflow states
+  ${BOLD}What's ready${RESET}
+  • 7 module templates available on the Templates page
+  • Fork any template to create a named entity type + workflow
+  • Clean slate — no pre-created workflows or records
 
   ${DIM}Rebuild after code changes: docker compose up -d --build${RESET}
   ${DIM}Reset everything: docker compose down -v && rm .env.local && pnpm bootstrap${RESET}

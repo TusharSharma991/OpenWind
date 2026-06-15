@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
   db,
   withTenantContext,
@@ -227,15 +227,32 @@ export class ModuleService {
         }
       }
 
-      // 2b. If a custom workflow name was requested, apply it via a parameterized
-      //     Drizzle update — never via string interpolation into raw SQL.
+      // 2b. If a custom workflow name was requested, find the workflow created
+      //     during seeding by (tenantId, canonical name), then rename it via
+      //     a parameterized Drizzle update. Never use entityTypeId = moduleRecord.id
+      //     — moduleRecord.id is the modules registry PK, not entity_types.id.
       if (options?.workflowName) {
-        await withTenantContext(tenantId, (tx) =>
+        const [seededWorkflow] = await withTenantContext(tenantId, (tx) =>
           tx
-            .update(workflows)
-            .set({ name: options.workflowName as string })
-            .where(eq(workflows.entityTypeId, moduleRecord.id)),
+            .select({ id: workflows.id })
+            .from(workflows)
+            .where(
+              and(
+                eq(workflows.tenantId, tenantId),
+                eq(workflows.name, moduleRecord.name),
+              ),
+            )
+            .limit(1),
         );
+        if (seededWorkflow && options.workflowName) {
+          const newName = options.workflowName;
+          await withTenantContext(tenantId, (tx) =>
+            tx
+              .update(workflows)
+              .set({ name: newName })
+              .where(eq(workflows.id, seededWorkflow.id)),
+          );
+        }
       }
     } else {
       logger.warn(

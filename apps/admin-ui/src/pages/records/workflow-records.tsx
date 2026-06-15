@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { fetchWithAuth, API_URL } from "../../lib/api.js";
-import { useEntityTypes } from "../../entity-type-context.js";
+import { useEntityTypes, toTypeSlug } from "../../entity-type-context.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -244,11 +244,11 @@ function TransitionModal({
 function RecordCard({
   record,
   fields,
-  entityTypeId,
+  typeSlug,
 }: {
   record: EntityInstance;
   fields: EntityField[];
-  entityTypeId: string;
+  typeSlug: string;
 }): React.ReactElement {
   const navigate = useNavigate();
   const divRef = useRef<HTMLDivElement>(null);
@@ -280,9 +280,7 @@ function RecordCard({
         _activeDragId = null;
         divRef.current?.classList.remove("kb-card--ghost");
       }}
-      onClick={() =>
-        navigate(`/entity-types/${entityTypeId}/records/${record.id}`)
-      }
+      onClick={() => navigate(`/records/${typeSlug}/${record.id}`)}
     >
       <div className="kb-card-title">
         {preview[0]?.value ?? `#${record.id.slice(0, 8)}`}
@@ -311,7 +309,7 @@ function KanbanColumn({
   state,
   records,
   fields,
-  entityTypeId,
+  typeSlug,
   workflowId,
   transitions,
   allRecords,
@@ -321,7 +319,7 @@ function KanbanColumn({
   state: WorkflowState | null;
   records: EntityInstance[];
   fields: EntityField[];
-  entityTypeId: string;
+  typeSlug: string;
   workflowId: string;
   transitions: Transition[];
   allRecords: EntityInstance[];
@@ -478,7 +476,7 @@ function KanbanColumn({
             key={rec.id}
             record={rec}
             fields={fields}
-            entityTypeId={entityTypeId}
+            typeSlug={typeSlug}
           />
         ))}
 
@@ -500,7 +498,7 @@ function KanbanColumn({
         <button
           className="kb-add-btn"
           onClick={() =>
-            navigate(`/entity-types/${entityTypeId}/records/new`, {
+            navigate(`/records/${typeSlug}/new`, {
               state: { workflowId, initialState: state?.name },
             })
           }
@@ -623,6 +621,9 @@ export function WorkflowRecords(): React.ReactElement {
   }, [workflowSlug]);
 
   const entityType = entityTypeId ? getTypeById(entityTypeId) : undefined;
+  const typeSlug = entityType
+    ? toTypeSlug(entityType.plural || entityType.name)
+    : "";
 
   const orderedStates: WorkflowState[] = colOrder
     .map((name) => states.find((s) => s.name === name))
@@ -854,11 +855,8 @@ export function WorkflowRecords(): React.ReactElement {
             </svg>
             Settings
           </Link>
-          {entityTypeId && (
-            <Link
-              to={`/entity-types/${entityTypeId}/records/new`}
-              className="kb-new-btn"
-            >
+          {typeSlug && (
+            <Link to={`/records/${typeSlug}/new`} className="kb-new-btn">
               <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
                 <path
                   d="M6.5 1v11M1 6.5h11"
@@ -880,11 +878,8 @@ export function WorkflowRecords(): React.ReactElement {
         <div className="kb-empty-state">
           <div className="kb-empty-icon">📋</div>
           <p className="kb-empty-title">No {displayName.toLowerCase()} yet</p>
-          {entityTypeId && (
-            <Link
-              to={`/entity-types/${entityTypeId}/records/new`}
-              className="kb-new-btn"
-            >
+          {typeSlug && (
+            <Link to={`/records/${typeSlug}/new`} className="kb-new-btn">
               Create the first one
             </Link>
           )}
@@ -898,7 +893,7 @@ export function WorkflowRecords(): React.ReactElement {
                 state={state}
                 records={recs}
                 fields={fields}
-                entityTypeId={entityTypeId}
+                typeSlug={typeSlug}
                 workflowId={workflowId}
                 transitions={transitions}
                 allRecords={records}

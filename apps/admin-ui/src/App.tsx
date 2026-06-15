@@ -18,6 +18,7 @@ import { Dashboard } from "./pages/dashboard.js";
 import { Modules } from "./pages/modules.js";
 import { EntityTypeDetail } from "./pages/entity-types/detail.js";
 import { EntityInstanceDetail } from "./pages/entity-types/instance-detail.js";
+import { EntityInstanceCreate } from "./pages/entity-types/instance-create.js";
 import { Workflows } from "./pages/workflows/index.js";
 import { WorkflowDetail } from "./pages/workflows/detail.js";
 import { CreateWorkflow } from "./pages/workflows/create.js";
@@ -81,6 +82,10 @@ export function App(): React.ReactElement {
 
             {/* Entity types — still accessible from workflow detail "Manage Fields" link */}
             <Route path="/entity-types/:id" element={<EntityTypeDetail />} />
+            <Route
+              path="/entity-types/:id/records/new"
+              element={<EntityInstanceCreate />}
+            />
             <Route
               path="/entity-types/:id/records/:instanceId"
               element={<EntityInstanceDetail />}

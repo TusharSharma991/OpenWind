@@ -228,7 +228,9 @@ export function EntityInstanceCreate(): React.ReactElement {
     Promise.all([
       fetchWithAuth(`${API_URL}/entity-types/${entityTypeId}`),
       fetchWithAuth(`${API_URL}/entity-types/${entityTypeId}/fields`),
-      fetchWithAuth(`${API_URL}/workflows?entityTypeId=${entityTypeId}`),
+      fetchWithAuth(
+        `${API_URL}/workflows?${new URLSearchParams({ entityTypeId }).toString()}`,
+      ),
     ])
       .then(([etRes, fieldsRes, wfRes]) => {
         setEntityType((etRes as { data: EntityTypeMeta }).data);

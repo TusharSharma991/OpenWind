@@ -541,7 +541,9 @@ export function CustomerRecordList(): React.ReactElement {
     Promise.all([
       fetchWithAuth(`${API_URL}/entity-types/${entityTypeId}/fields`),
       fetchWithAuth(`${API_URL}/entities?entityTypeId=${entityTypeId}`),
-      fetchWithAuth(`${API_URL}/workflows?entityTypeId=${entityTypeId}`),
+      fetchWithAuth(
+        `${API_URL}/workflows?${new URLSearchParams({ entityTypeId }).toString()}`,
+      ),
     ])
       .then(([fieldsRes, recRes, wfRes]) => {
         setFields(

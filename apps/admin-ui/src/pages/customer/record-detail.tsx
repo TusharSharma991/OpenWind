@@ -448,7 +448,7 @@ export function CustomerRecordDetail(): React.ReactElement {
 
     const wfUrl = record?.workflowId
       ? `${API_URL}/workflows/${record.workflowId}`
-      : `${API_URL}/workflows?entityTypeId=${entityTypeId}`;
+      : `${API_URL}/workflows?${new URLSearchParams({ entityTypeId: entityTypeId ?? "" }).toString()}`;
 
     fetchWithAuth(wfUrl)
       .then((res) => {

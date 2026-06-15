@@ -241,8 +241,9 @@ export function EntityInstanceDetail(): React.ReactElement {
   useEffect(() => {
     if (record?.workflowId) {
       void loadStates(record.workflowId);
-    } else if (entityTypeId) {
-      fetchWithAuth(`${API_URL}/workflows?entityTypeId=${entityTypeId}`)
+    } else if (entityTypeId && /^[0-9a-f-]{36}$/i.test(entityTypeId)) {
+      const params = new URLSearchParams({ entityTypeId });
+      fetchWithAuth(`${API_URL}/workflows?${params.toString()}`)
         .then((res) => {
           const wfs = (res as { data?: Array<{ id: string }> }).data ?? [];
           if (wfs[0]?.id) void loadStates(wfs[0].id);

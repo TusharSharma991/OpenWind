@@ -216,7 +216,9 @@ export function CustomerRecordCreate(): React.ReactElement {
     if (!entityTypeId) return;
     Promise.all([
       fetchWithAuth(`${API_URL}/entity-types/${entityTypeId}/fields`),
-      fetchWithAuth(`${API_URL}/workflows?entityTypeId=${entityTypeId}`),
+      fetchWithAuth(
+        `${API_URL}/workflows?${new URLSearchParams({ entityTypeId }).toString()}`,
+      ),
     ])
       .then(([fieldsRes, wfRes]) => {
         const fs = (fieldsRes as { data: EntityField[] }).data.filter(

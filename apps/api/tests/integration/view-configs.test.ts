@@ -78,18 +78,22 @@ describe("View Configs Integration Tests", () => {
     currentTenantId = TEST_TENANT_ID;
     const res = await app.request("/modules/helpdesk/install", {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
     });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(201);
 
     // Now GET should work
     const getRes = await app.request("/admin/view-configs/ticket", {
       method: "GET",
     });
     expect(getRes.status).toBe(200);
-    const json = (await getRes.json()) as {
-      entityTypeSlug: string;
-      formFieldOrder: string[];
-      listColumns: unknown[];
+    const { data: json } = (await getRes.json()) as {
+      data: {
+        entityTypeSlug: string;
+        formFieldOrder: string[];
+        listColumns: unknown[];
+      };
     };
     expect(json.entityTypeSlug).toBe("ticket");
     expect(json.formFieldOrder).toContain("title");
@@ -111,8 +115,8 @@ describe("View Configs Integration Tests", () => {
     });
 
     expect(patchRes.status).toBe(200);
-    const json = (await patchRes.json()) as {
-      listColumns: { label: string }[];
+    const { data: json } = (await patchRes.json()) as {
+      data: { listColumns: { label: string }[] };
     };
     expect(json.listColumns[0]?.label).toBe("Custom Title");
 
@@ -120,12 +124,11 @@ describe("View Configs Integration Tests", () => {
     const getRes = await app.request("/admin/view-configs/ticket", {
       method: "GET",
     });
-    const getJson = (await getRes.json()) as {
-      listColumns: { label: string }[];
-      formFieldOrder: string[];
+    const { data: getJson } = (await getRes.json()) as {
+      data: { listColumns: { label: string }[]; formFieldOrder: string[] };
     };
     expect(getJson.listColumns[0]?.label).toBe("Custom Title");
-    // Ensure existing fields not overridden by patch are kept (fromFieldOrder, etc.)
+    // Ensure existing fields not overridden by patch are kept (formFieldOrder, etc.)
     expect(getJson.formFieldOrder).toContain("title");
   });
 

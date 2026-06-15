@@ -116,10 +116,14 @@ describe("Module System Integration Tests", () => {
   it("POST /modules/helpdesk/install - successfully installs helpdesk module and runs seed SQL", async () => {
     const res = await app.request("/modules/helpdesk/install", {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
     });
-    expect(res.status).toBe(200);
-    const json = (await res.json()) as { status: string };
-    expect(json.status).toBe("success");
+    expect(res.status).toBe(201);
+    const { data: json } = (await res.json()) as {
+      data: { slug: string; status: string };
+    };
+    expect(json.status).toBe("installed");
 
     // Verify tenant config has 'helpdesk'
     const [tenant] = await db
@@ -203,8 +207,10 @@ describe("Module System Integration Tests", () => {
       method: "POST",
     });
     expect(res.status).toBe(200);
-    const json = (await res.json()) as { status: string };
-    expect(json.status).toBe("success");
+    const { data: json } = (await res.json()) as {
+      data: { slug: string; status: string };
+    };
+    expect(json.status).toBe("uninstalled");
 
     // Verify tenant config has 'helpdesk' removed
     const [tenant] = await db

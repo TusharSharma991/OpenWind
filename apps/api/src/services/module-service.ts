@@ -8,8 +8,12 @@ import {
   executeRawInTenantContext,
   modules,
   tenants,
+  workflows,
 } from "@platform/db";
 import { logger } from "@platform/logger";
+
+// Allowlist for module slugs — prevents path traversal via slug param
+const SLUG_RE = /^[a-z0-9-]+$/;
 
 export function getWorkspaceRoot(): string {
   let dir = __dirname;
@@ -92,7 +96,7 @@ export class ModuleService {
       },
     ];
 
-    logger.info("Seeding modules registry...");
+    logger.info({}, "Seeding modules registry...");
     for (const mod of standardModules) {
       await db
         .insert(modules)
@@ -114,7 +118,7 @@ export class ModuleService {
           },
         });
     }
-    logger.info("Modules registry seeded.");
+    logger.info({}, "Modules registry seeded.");
   }
 
   /**
@@ -158,6 +162,11 @@ export class ModuleService {
     slug: string,
     options?: { workflowName?: string },
   ): Promise<void> {
+    // Validate slug against allowlist before any filesystem access (path traversal guard)
+    if (!SLUG_RE.test(slug)) {
+      throw new Error(`Invalid module slug: ${slug}`);
+    }
+
     const [moduleRecord] = await db
       .select()
       .from(modules)
@@ -192,6 +201,9 @@ export class ModuleService {
     // 2. Run seed SQL files using simple query protocol (supports data-modifying
     //    CTEs). Each file is a single CTE chain executed inside its own
     //    tenant-scoped transaction via executeRawInTenantContext.
+    //    NOTE: {WORKFLOW_NAME} is intentionally NOT replaced here. Seed SQL uses
+    //    the module's canonical name. If a custom name was requested, it is applied
+    //    afterward via a parameterized Drizzle update (see step 3) to avoid SQL injection.
     const seedDir = join(getWorkspaceRoot(), "modules", slug, "seed");
     if (existsSync(seedDir)) {
       const files = await fs.readdir(seedDir);
@@ -203,19 +215,27 @@ export class ModuleService {
         const filePath = join(seedDir, file);
         const sqlContent = await fs.readFile(filePath, "utf8");
 
-        // Replace tokens and add ::uuid casts so postgres-js simple-protocol
-        // text literals satisfy uuid column type expectations.
+        // Replace only UUID tokens — both are validated as uuid columns by
+        // ::uuid cast so non-UUID values will error at the DB layer.
         const processedSql = sqlContent
           .replaceAll("'{TENANT_ID}'", `'${tenantId}'::uuid`)
           .replaceAll("'{MODULE_ID}'", `'${moduleRecord.id}'::uuid`)
-          .replaceAll(
-            "{WORKFLOW_NAME}",
-            options?.workflowName?.trim() ?? moduleRecord.name,
-          );
+          .replaceAll("{WORKFLOW_NAME}", moduleRecord.name);
 
         if (processedSql.trim().length > 0) {
           await executeRawInTenantContext(tenantId, processedSql);
         }
+      }
+
+      // 2b. If a custom workflow name was requested, apply it via a parameterized
+      //     Drizzle update — never via string interpolation into raw SQL.
+      if (options?.workflowName) {
+        await withTenantContext(tenantId, (tx) =>
+          tx
+            .update(workflows)
+            .set({ name: options.workflowName as string })
+            .where(eq(workflows.entityTypeId, moduleRecord.id)),
+        );
       }
     } else {
       logger.warn(

@@ -46,13 +46,26 @@ export function createApp(): Hono<AppVars> {
 
   // Middleware order matters:
   // 1. CORS — before everything so preflight OPTIONS requests are handled immediately
+  const ALLOWED_ORIGINS =
+    env.NODE_ENV === "production"
+      ? [env.CORS_ORIGIN ?? ""].filter(Boolean)
+      : null; // null = use the localhost-wildcard logic below in dev/test
+
   app.use(
     "*",
     cors({
-      origin: (origin) =>
-        origin.startsWith("http://localhost:")
-          ? origin
-          : "http://localhost:3001",
+      origin: (origin) => {
+        if (
+          env.NODE_ENV !== "production" &&
+          origin.startsWith("http://localhost:")
+        ) {
+          return origin;
+        }
+        if (ALLOWED_ORIGINS?.includes(origin)) {
+          return origin;
+        }
+        return ALLOWED_ORIGINS?.[0] ?? "http://localhost:3001";
+      },
       allowMethods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
       allowHeaders: ["Content-Type", "Authorization", "X-Correlation-ID"],
       exposeHeaders: ["X-Correlation-ID"],

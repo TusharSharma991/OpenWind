@@ -1,16 +1,19 @@
 import { importPKCS8, SignJWT } from "jose";
+import { z } from "zod";
 import { env } from "@platform/config";
 import { logger } from "@platform/logger";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-interface ServiceAccountKey {
-  type: string;
-  keyId: string;
-  key: string;
-  userId: string;
-  expirationDate: string;
-}
+const ServiceAccountKeySchema = z.object({
+  type: z.string(),
+  keyId: z.string(),
+  key: z.string(),
+  userId: z.string(),
+  expirationDate: z.string(),
+});
+
+type ServiceAccountKey = z.infer<typeof ServiceAccountKeySchema>;
 
 interface ZitadelRole {
   key: string;
@@ -35,11 +38,11 @@ function parseServiceAccountKey(): ServiceAccountKey | null {
   const raw = env.ZITADEL_SERVICE_ACCOUNT_KEY;
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as ServiceAccountKey;
+    return ServiceAccountKeySchema.parse(JSON.parse(raw));
   } catch {
     logger.error(
       {},
-      "Failed to parse ZITADEL_SERVICE_ACCOUNT_KEY — invalid JSON",
+      "Failed to parse ZITADEL_SERVICE_ACCOUNT_KEY — invalid JSON or missing fields",
     );
     return null;
   }

@@ -1,6 +1,6 @@
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { requireAuth } from "@platform/auth";
+import { requireAuth, requireRole } from "@platform/auth";
 import { withTenantContext } from "@platform/db";
 import { listWorkflows } from "@platform/workflow-engine";
 import { factory } from "./factory.js";
@@ -16,6 +16,7 @@ const ListWorkflowsQuerySchema = z.object({
 
 export const listWorkflowsHandler = factory.createHandlers(
   requireAuth(),
+  requireRole("admin"),
   zValidator("query", ListWorkflowsQuerySchema),
   async (c) => {
     const { entityTypeId, activeOnly } = c.req.valid("query");

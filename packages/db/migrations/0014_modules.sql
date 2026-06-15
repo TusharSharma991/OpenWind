@@ -1,6 +1,8 @@
 -- Down migration (rollback):
 -- DROP TABLE IF EXISTS "modules";
 
+-- analytics: excluded (platform-global registry — no tenant_id, no PII; not tenant-scoped)
+
 CREATE TABLE "modules" (
   "id"          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   "slug"        text        NOT NULL UNIQUE,

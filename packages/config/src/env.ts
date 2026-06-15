@@ -34,8 +34,11 @@ const EnvSchema = z
     // Override the JWKS fetch URL when running inside Docker (issuer claim still
     // matches localhost:8080 in the JWT, but we fetch keys via container hostname).
     ZITADEL_JWKS_URL: z.string().url().optional(),
-    ZITADEL_AUDIENCE: z.string().optional(),
-    // Dev fallback: used as tenantId when urn:zitadel:iam:org:id is absent (instance admin login)
+    // Required — used by JWKS middleware to validate the JWT aud claim.
+    // ZITADEL_PROJECT_ID may fall back to this value in zitadel-management.ts.
+    ZITADEL_AUDIENCE: z.string(),
+    // Dev fallback: used as tenantId when urn:zitadel:iam:org:id is absent (instance admin login).
+    // Must never be set in production — it bypasses tenant isolation for instance-admin logins.
     DEV_TENANT_ID: z.string().optional(),
     // Service account key JSON (contents of the .json key file from Zitadel console).
     // Used to call the Zitadel Management API for live role/user queries.
@@ -47,6 +50,9 @@ const EnvSchema = z
     ZITADEL_INTROSPECTION_URL: z.string().url(),
     ZITADEL_INTROSPECTION_CLIENT_ID: z.string(),
     ZITADEL_INTROSPECTION_CLIENT_SECRET: z.string(),
+    // Required in production — the exact origin the admin-ui is served from.
+    // In development/test the API accepts all http://localhost:* origins.
+    CORS_ORIGIN: z.string().url().optional(),
     NOVU_API_KEY: z.string(),
     S3_ENDPOINT: z.string().url(),
     S3_BUCKET: z.string(),
@@ -86,7 +92,18 @@ const EnvSchema = z
       message:
         "Either OPENBAO_TOKEN (dev) or both OPENBAO_ROLE_ID and OPENBAO_SECRET_ID (prod) must be set",
     },
-  );
+  )
+  .refine(
+    (v) => !(v.NODE_ENV === "production" && v.DEV_TENANT_ID !== undefined),
+    {
+      message:
+        "DEV_TENANT_ID must not be set in production — it bypasses tenant isolation",
+    },
+  )
+  .refine((v) => v.NODE_ENV !== "production" || v.CORS_ORIGIN !== undefined, {
+    message:
+      "CORS_ORIGIN must be set in production to restrict allowed origins",
+  });
 
 export const env = EnvSchema.parse(process.env);
 export type Env = z.infer<typeof EnvSchema>;

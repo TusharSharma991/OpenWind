@@ -41,7 +41,7 @@ function parseServiceAccountKey(): ServiceAccountKey | null {
     return ServiceAccountKeySchema.parse(JSON.parse(raw));
   } catch {
     logger.error(
-      {},
+      { keyConfigured: !!raw },
       "Failed to parse ZITADEL_SERVICE_ACCOUNT_KEY — invalid JSON or missing fields",
     );
     return null;
@@ -115,7 +115,7 @@ export async function listProjectRoles(): Promise<string[]> {
   const projectId = env.ZITADEL_PROJECT_ID ?? env.ZITADEL_AUDIENCE;
   if (!projectId) {
     logger.warn(
-      {},
+      { projectId: env.ZITADEL_PROJECT_ID, audience: env.ZITADEL_AUDIENCE },
       "ZITADEL_PROJECT_ID and ZITADEL_AUDIENCE are both unset — cannot fetch roles",
     );
     return [];

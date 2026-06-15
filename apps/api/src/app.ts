@@ -3,7 +3,7 @@ import { cors } from "hono/cors";
 import { logger as honoLogger } from "hono/logger";
 import { env } from "@platform/config";
 import { db } from "@platform/db";
-import { requireAuth } from "@platform/auth";
+import { requireAuth, requireRole } from "@platform/auth";
 import type { AuthContext } from "@platform/auth";
 import { correlationId } from "./middleware/correlation-id.js";
 import { handleError } from "./middleware/error-handler.js";
@@ -87,9 +87,10 @@ export function createApp(): Hono<AppVars> {
   app.get("/openapi.json", (c) => c.json(openApiSpec));
 
   // Temporary debug route — shows the parsed auth context for the current token.
+  // Restricted to superadmin to prevent any authenticated user from probing their own context.
   if (env.NODE_ENV !== "production") {
-    app.get("/auth/debug", requireAuth(db), (c) => {
-      const auth = c.get("auth") as AuthContext;
+    app.get("/auth/debug", requireAuth(db), requireRole("superadmin"), (c) => {
+      const auth = c.get("auth");
       return c.json({ data: auth });
     });
   }

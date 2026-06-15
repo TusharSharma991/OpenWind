@@ -241,15 +241,16 @@ export function EntityInstanceDetail(): React.ReactElement {
   useEffect(() => {
     if (record?.workflowId) {
       void loadStates(record.workflowId);
-    } else if (entityTypeId) {
-      const params = new URLSearchParams({ entityTypeId });
-      fetchWithAuth(`${API_URL}/workflows?${params.toString()}`)
-        .then((res) => {
-          const wfs = (res as { data?: Array<{ id: string }> }).data ?? [];
-          if (wfs[0]?.id) void loadStates(wfs[0].id);
-        })
-        .catch(() => undefined);
+      return;
     }
+    if (!entityTypeId) return;
+    const params = new URLSearchParams({ entityTypeId });
+    void fetchWithAuth(`${API_URL}/workflows?${params.toString()}`)
+      .then((res) => {
+        const wfs = (res as { data?: Array<{ id: string }> }).data ?? [];
+        if (wfs[0]?.id) void loadStates(wfs[0].id);
+      })
+      .catch(() => undefined);
   }, [record?.workflowId, entityTypeId]);
 
   async function saveEdit(): Promise<void> {

@@ -46,6 +46,12 @@ export const entityFields = pgTable(
     isIndexed: boolean("is_indexed").default(false).notNull(),
     isSystem: boolean("is_system").default(false).notNull(),
     sortOrder: integer("sort_order").default(0).notNull(),
+    /**
+     * PII classification — controls redaction when values are written to
+     * workflow_events.metadata.  Default: 'internal'.
+     * 'pii' and 'financial' values are replaced with "[REDACTED]" at INSERT.
+     */
+    sensitivity: text("sensitivity").default("internal").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

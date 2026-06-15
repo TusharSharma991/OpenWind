@@ -1,6 +1,9 @@
 import type { FieldType } from "./field-types.js";
 import type { FieldError } from "./errors.js";
 
+/** PII classification for a field — controls redaction in workflow_events.metadata. */
+export type FieldSensitivity = "public" | "internal" | "pii" | "financial";
+
 export interface EntityType {
   id: string;
   tenantId: string | null;
@@ -24,6 +27,8 @@ export interface EntityField {
   isIndexed: boolean;
   isSystem: boolean;
   sortOrder: number;
+  /** PII classification — governs redaction in workflow_events.metadata. */
+  sensitivity: FieldSensitivity;
   createdAt: Date;
 }
 
@@ -66,6 +71,8 @@ export type UpdateEntityInput = {
   currentState?: string | null | undefined;
   updatedBy?: string | undefined;
   actorId?: string | undefined;
+  /** Actor performing the update — used by the audit hook. */
+  actorType?: "user" | "api_key" | "system" | undefined;
 };
 
 export type ListEntitiesInput = {

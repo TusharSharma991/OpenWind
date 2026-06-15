@@ -22,6 +22,9 @@ const CreateFieldSchema = z.object({
   isRequired: z.boolean().default(false),
   isIndexed: z.boolean().default(false),
   sortOrder: z.number().int().min(0).default(0),
+  sensitivity: z
+    .enum(["public", "internal", "pii", "financial"])
+    .default("internal"),
 });
 
 export const createEntityFieldHandler = factory.createHandlers(
@@ -29,7 +32,7 @@ export const createEntityFieldHandler = factory.createHandlers(
   requireRole("admin"),
   zValidator("json", CreateFieldSchema),
   async (c) => {
-    const typeId = c.get("typeId");
+    const typeId = c.req.param("typeId") ?? "";
     const input = c.req.valid("json");
     const { tenantId } = c.get("auth");
 
@@ -74,6 +77,7 @@ export const createEntityFieldHandler = factory.createHandlers(
           isIndexed: input.isIndexed,
           isSystem: false,
           sortOrder: input.sortOrder,
+          sensitivity: input.sensitivity,
           createdAt: new Date(),
         }),
       );

@@ -65,7 +65,12 @@ describe("DELETE /entities/:id", () => {
 
     expect(res.status).toBe(204);
     expect(await res.text()).toBe("");
-    expect(mockDeleteEntity).toHaveBeenCalledWith({}, "t-aaa", INST_ID);
+    expect(mockDeleteEntity).toHaveBeenCalledWith(
+      {},
+      "t-aaa",
+      INST_ID,
+      "u-bbb",
+    );
   });
 
   it("returns 404 when the entity does not exist", async () => {

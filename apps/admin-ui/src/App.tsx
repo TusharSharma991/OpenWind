@@ -22,6 +22,7 @@ import { Workflows } from "./pages/workflows/index.js";
 import { WorkflowDetail } from "./pages/workflows/detail.js";
 import { CreateWorkflow } from "./pages/workflows/create.js";
 import { AdminRecords } from "./pages/records/index.js";
+import { WorkflowRecords } from "./pages/records/workflow-records.js";
 import { Settings } from "./pages/settings.js";
 import { CustomerRecordList } from "./pages/customer/record-list.js";
 import { CustomerRecordCreate } from "./pages/customer/record-create.js";
@@ -88,7 +89,14 @@ export function App(): React.ReactElement {
             {/* Workflows */}
             <Route path="/workflows" element={<Workflows />} />
             <Route path="/workflows/new" element={<CreateWorkflow />} />
-            <Route path="/workflows/:id" element={<WorkflowDetail />} />
+            <Route
+              path="/workflows/:workflowSlug"
+              element={<WorkflowDetail />}
+            />
+            <Route
+              path="/workflows/:workflowSlug/records"
+              element={<WorkflowRecords />}
+            />
 
             <Route path="/settings" element={<Settings />} />
 

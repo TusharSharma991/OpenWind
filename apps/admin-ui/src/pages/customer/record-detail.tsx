@@ -12,6 +12,7 @@ type EntityField = {
   isRequired: boolean;
   config: {
     options?: Array<string | { label: string; value: string; color?: string }>;
+    allowedCurrencies?: string[];
   };
 };
 type EntityInstance = {
@@ -73,6 +74,17 @@ function FieldValue({
       <span>{isNaN(d.getTime()) ? String(value) : d.toLocaleString()}</span>
     );
   }
+  if (fieldType === "currency" && typeof value === "object") {
+    const cv = value as { amount?: unknown; currency?: unknown };
+    return (
+      <span>
+        {String(cv.currency ?? "")}{" "}
+        {cv.amount !== null && cv.amount !== undefined
+          ? String(cv.amount)
+          : "—"}
+      </span>
+    );
+  }
   if ((fieldType === "enum" || fieldType === "multi_enum") && field) {
     const strVal = String(value);
     const opts = field.config.options ?? [];
@@ -129,7 +141,6 @@ function FieldInput({
         </label>
       );
     case "number":
-    case "currency":
       return (
         <input
           className="portal-input"
@@ -140,6 +151,57 @@ function FieldInput({
           }
         />
       );
+    case "currency": {
+      const currVal =
+        value !== null && typeof value === "object"
+          ? (value as { amount?: unknown; currency?: unknown })
+          : { amount: "", currency: "" };
+      const amountStr =
+        currVal.amount === null || currVal.amount === undefined
+          ? ""
+          : String(currVal.amount);
+      const currencyStr =
+        currVal.currency === null || currVal.currency === undefined
+          ? ""
+          : String(currVal.currency);
+      const allowed = field.config.allowedCurrencies ?? [];
+      const currencies =
+        allowed.length > 0 ? allowed : ["USD", "EUR", "GBP", "INR", "AED"];
+      return (
+        <div style={{ display: "flex", gap: "8px" }}>
+          <input
+            className="portal-input"
+            type="number"
+            placeholder="0.00"
+            value={amountStr}
+            style={{ flex: 1 }}
+            onChange={(e) =>
+              onChange({
+                amount: e.target.value === "" ? null : Number(e.target.value),
+                currency: currencyStr || currencies[0],
+              })
+            }
+          />
+          <select
+            className="portal-input"
+            value={currencyStr || currencies[0]}
+            style={{ width: "90px" }}
+            onChange={(e) =>
+              onChange({
+                amount: amountStr === "" ? null : Number(amountStr),
+                currency: e.target.value,
+              })
+            }
+          >
+            {currencies.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </div>
+      );
+    }
     case "date":
       return (
         <input

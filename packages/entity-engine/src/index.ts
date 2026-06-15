@@ -22,6 +22,14 @@ export {
   bulkSetState,
 } from "./engine.js";
 export {
+  registerEntityAuditHook,
+  isEntityAuditHookRegistered,
+  type EntityAuditHookFn,
+  type EntityAuditHookParams,
+  type EntityAuditAction,
+  type EntityAuditActorType,
+} from "./audit-hook.js";
+export {
   createEntityType,
   getEntityType,
   listEntityTypes,

@@ -2,6 +2,13 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { fetchWithAuth, API_URL } from "../../lib/api.js";
 
+function toWorkflowSlug(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "");
+}
+
 function toSnake(s: string): string {
   return s
     .trim()
@@ -47,16 +54,16 @@ export function CreateWorkflow(): React.ReactElement {
       const entityTypeId = etRes.data.id;
 
       // Create workflow with a sensible default initial state
-      const wfRes = (await fetchWithAuth(`${API_URL}/workflows`, {
+      await fetchWithAuth(`${API_URL}/workflows`, {
         method: "POST",
         body: JSON.stringify({
           name: name.trim(),
           entityTypeId,
           initialState: toSnake(name.trim()) || "new",
         }),
-      })) as { data: { id: string } };
+      });
 
-      navigate(`/workflows/${wfRes.data.id}`);
+      navigate(`/workflows/${toWorkflowSlug(name.trim())}`);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Failed to create workflow",

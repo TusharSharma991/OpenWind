@@ -76,28 +76,70 @@
       "idx": 10,
       "version": "7",
       "when": 1778749338309,
-      "tag": "0008_modules",
+      "tag": "0008_entity_fields_sensitivity",
       "breakpoints": false
     },
     {
       "idx": 11,
       "version": "7",
       "when": 1778749338310,
-      "tag": "0009_view_configs",
+      "tag": "0009_analytics_user_grants",
       "breakpoints": false
     },
     {
       "idx": 12,
       "version": "7",
       "when": 1778749338311,
-      "tag": "0010_tenant_users_profile",
+      "tag": "0010_files",
       "breakpoints": false
     },
     {
       "idx": 13,
       "version": "7",
       "when": 1778749338312,
-      "tag": "0011_workflow_is_active",
+      "tag": "0011_admin_audit_log",
+      "breakpoints": false
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1778749338313,
+      "tag": "0012_view_configs",
+      "breakpoints": false
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1778749338314,
+      "tag": "0013_tenant_lifecycle",
+      "breakpoints": false
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1778749338315,
+      "tag": "0014_modules",
+      "breakpoints": false
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1778749338316,
+      "tag": "0015_tenant_users_profile",
+      "breakpoints": false
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1778749338317,
+      "tag": "0016_workflow_is_active",
+      "breakpoints": false
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1778749338318,
+      "tag": "0017_workflow_events_actor_id_text",
       "breakpoints": false
     }
   ]

@@ -57,4 +57,5 @@ coverage/
 
 # Internal team reference (never publish)
 INTERNAL.md
+INTEGRATION.md
 logs.md

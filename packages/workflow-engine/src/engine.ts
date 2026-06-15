@@ -1,13 +1,15 @@
-import { eq, and, isNotNull, isNull, sql } from "drizzle-orm";
+import { eq, and, or, isNotNull, isNull, sql } from "drizzle-orm";
 import type { DbOrTx } from "@platform/db";
 import {
   entityInstances,
+  entityFields,
   workflows,
   workflowTransitions,
   workflowStates,
   workflowEvents,
   outboxEvents,
 } from "@platform/db";
+import { redactMetadata, buildSensitivityMap } from "./redact.js";
 import { logger } from "@platform/logger";
 import { WorkflowError } from "./errors.js";
 import { evaluateConditionTree } from "./condition-evaluator.js";
@@ -195,6 +197,54 @@ export async function executeTransition(
       ),
     );
 
+  // Redact PII/financial field values from metadata before persisting.
+  // workflow_events is an immutable audit log — redaction must happen here,
+  // at INSERT time.  Retroactive masking is not permitted (append-only table).
+  //
+  // We load the field sensitivity map for this entity type.  On most
+  // transitions the map will be empty (no pii/financial fields), making the
+  // redactMetadata call a cheap no-op.  On sensitive entity types (HRMS,
+  // health records) the map will contain a small number of entries.
+  const rawMetadata = request.metadata ?? {};
+  let safeMetadata: Record<string, unknown> = rawMetadata;
+
+  if (Object.keys(rawMetadata).length > 0) {
+    const fieldRows = await db
+      .select({
+        name: entityFields.name,
+        sensitivity: entityFields.sensitivity,
+      })
+      .from(entityFields)
+      .where(
+        and(
+          eq(entityFields.entityTypeId, instance.entityTypeId),
+          // Explicit tenantId guard — consistent with all other tenant-scoped
+          // queries in this codebase; also safe in contexts where RLS is off.
+          // System fields (tenantId IS NULL) are included via the OR.
+          or(
+            isNull(entityFields.tenantId),
+            eq(entityFields.tenantId, tenantId),
+          ),
+        ),
+      );
+
+    const sensitivityMap = buildSensitivityMap(
+      fieldRows.map((r) => ({
+        name: r.name,
+        // Drizzle types text columns as string; the CHECK constraint on
+        // entity_fields.sensitivity guarantees the value is always one of
+        // the four valid FieldSensitivity literals at the DB level.
+        sensitivity: r.sensitivity as
+          | "public"
+          | "internal"
+          | "pii"
+          | "financial",
+      })),
+    );
+
+    safeMetadata = redactMetadata(rawMetadata, sensitivityMap);
+  }
+
   const [eventRow] = await db
     .insert(workflowEvents)
     .values({
@@ -207,7 +257,7 @@ export async function executeTransition(
       actorId: request.actorId ?? null,
       comment: request.comment ?? null,
       idempotencyKey: request.idempotencyKey ?? null,
-      metadata: request.metadata ?? {},
+      metadata: safeMetadata,
     })
     .returning();
 

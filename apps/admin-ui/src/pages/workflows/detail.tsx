@@ -2,7 +2,14 @@ import React, { useCallback, useEffect, useState } from "react";
 import { useOne } from "@refinedev/core";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { fetchWithAuth, API_URL } from "../../lib/api.js";
-import { useEntityTypes, toTypeSlug } from "../../entity-type-context.js";
+import { useEntityTypes } from "../../entity-type-context.js";
+
+function toWorkflowSlug(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "");
+}
 
 type WorkflowState = {
   id: string;
@@ -464,12 +471,30 @@ function SectionHeader({
 }
 
 export function WorkflowDetail(): React.ReactElement {
-  const { id } = useParams<{ id: string }>();
+  const { workflowSlug } = useParams<{ workflowSlug: string }>();
   const navigate = useNavigate();
-  const { entityTypes } = useEntityTypes();
+  useEntityTypes();
+
+  // Resolve slug → UUID once on mount
+  const [id, setId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!workflowSlug) return;
+    fetchWithAuth(`${API_URL}/workflows`)
+      .then((res) => {
+        const all =
+          (res as { data?: Array<{ id: string; name: string }> }).data ?? [];
+        const match = all.find((w) => toWorkflowSlug(w.name) === workflowSlug);
+        if (match) setId(match.id);
+      })
+      .catch(() => {
+        /* leave id null — useOne will show not-found */
+      });
+  }, [workflowSlug]);
+
   const { data, isLoading, refetch } = useOne<WorkflowFull>({
     resource: "workflows",
     id: id ?? "missing",
+    queryOptions: { enabled: !!id },
   });
 
   const [fields, setFields] = useState<EntityField[]>([]);
@@ -791,13 +816,6 @@ export function WorkflowDetail(): React.ReactElement {
 
   const workflow = data?.data;
 
-  const recordsSlug = (() => {
-    if (!workflow) return null;
-    const et = entityTypes.find((e) => e.id === workflow.entityTypeId);
-    if (!et) return null;
-    return toTypeSlug(et.plural || et.name);
-  })();
-
   if (isLoading) {
     return (
       <div className="loading-center">
@@ -1008,29 +1026,29 @@ export function WorkflowDetail(): React.ReactElement {
               flexWrap: "wrap",
             }}
           >
-            {recordsSlug && (
-              <button
-                className="btn-primary"
-                onClick={() => navigate(`/records/${recordsSlug}`)}
+            <button
+              className="btn-primary"
+              onClick={() =>
+                navigate(`/workflows/${toWorkflowSlug(workflow.name)}/records`)
+              }
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
               >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
-                  <polyline points="15 3 21 3 21 9" />
-                  <line x1="10" y1="14" x2="21" y2="3" />
-                </svg>
-                View Records
-              </button>
-            )}
+                <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+                <polyline points="15 3 21 3 21 9" />
+                <line x1="10" y1="14" x2="21" y2="3" />
+              </svg>
+              View Records
+            </button>
             <button
               className={
                 workflow.isActive ? "btn btn-secondary" : "btn-primary"
@@ -1855,15 +1873,17 @@ export function WorkflowDetail(): React.ReactElement {
               >
                 + Add Field
               </button>
-              {recordsSlug && (
-                <button
-                  className="btn-primary"
-                  style={{ width: "100%" }}
-                  onClick={() => navigate(`/records/${recordsSlug}`)}
-                >
-                  View Records →
-                </button>
-              )}
+              <button
+                className="btn-primary"
+                style={{ width: "100%" }}
+                onClick={() =>
+                  navigate(
+                    `/workflows/${toWorkflowSlug(workflow.name)}/records`,
+                  )
+                }
+              >
+                View Records →
+              </button>
             </div>
           </div>
         </div>

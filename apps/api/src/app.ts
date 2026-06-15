@@ -17,6 +17,27 @@ import { modulesRouter } from "./routes/modules/index.js";
 import { viewConfigsRouter } from "./routes/view-configs/index.js";
 import { rolesRouter } from "./routes/platform/roles.js";
 import { usersRouter } from "./routes/platform/users.js";
+import { filesRouter } from "./routes/files/index.js";
+import { adminRouter } from "./routes/admin/index.js";
+import { preferencesRouter } from "./routes/preferences/index.js";
+import { openApiSpec } from "./openapi.js";
+import { registerEntityAuditHook } from "@platform/entity-engine";
+import { writeAuditEntry } from "@platform/audit";
+
+// ── PII-aware entity audit hook ───────────────────────────────────────────────
+registerEntityAuditHook(async (p) => {
+  await writeAuditEntry(p.db, {
+    tenantId: p.tenantId,
+    actorId: p.actorId,
+    actorType: p.actorType,
+    resourceType: p.resourceType,
+    resourceId: p.resourceId,
+    action: p.action,
+    beforeSnapshot: p.beforeSnapshot,
+    afterSnapshot: p.afterSnapshot,
+    entityFields: p.entityFields,
+  });
+});
 
 type AppVars = { Variables: { auth: AuthContext; requestId: string } };
 
@@ -40,17 +61,19 @@ export function createApp(): Hono<AppVars> {
   );
   // 2. Correlation ID — must be early so all downstream logs carry the request ID
   app.use("*", correlationId());
-  // 2. Hono request logger
+  // 3. Hono request logger
   app.use("*", honoLogger());
-  // 3. Rate limiter — before auth so unauthenticated flood is blocked cheaply
+  // 4. Rate limiter — before auth so unauthenticated flood is blocked cheaply
   app.use("*", rateLimit());
-  // 4. Error handler — app.onError is the correct Hono v4 API for route errors
+  // 5. Error handler — app.onError is the correct Hono v4 API for route errors
   app.onError(handleError);
 
   app.get("/health", (c) => c.json({ status: "ok", env: env.NODE_ENV }));
 
+  // OpenAPI spec — unauthenticated, served from generated static object
+  app.get("/openapi.json", (c) => c.json(openApiSpec));
+
   // Temporary debug route — shows the parsed auth context for the current token.
-  // Remove once role assignment issues are resolved.
   if (env.NODE_ENV !== "production") {
     app.get("/auth/debug", requireAuth(db), (c) => {
       const auth = c.get("auth") as AuthContext;
@@ -67,6 +90,9 @@ export function createApp(): Hono<AppVars> {
   app.route("/admin/view-configs", viewConfigsRouter);
   app.route("/roles", rolesRouter);
   app.route("/users", usersRouter);
+  app.route("/files", filesRouter);
+  app.route("/admin", adminRouter);
+  app.route("/preferences", preferencesRouter);
 
   return app;
 }

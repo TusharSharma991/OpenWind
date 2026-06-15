@@ -23,6 +23,12 @@ export default defineConfig({
       "@platform/auth": path.join(packages, "auth/src/index.ts"),
       "@platform/db": path.join(packages, "db/src/index.ts"),
       "@platform/config": path.join(packages, "config/src/index.ts"),
+      "@platform/files": path.join(packages, "files/src/index.ts"),
+      "@platform/audit": path.join(packages, "audit/src/index.ts"),
+      "@platform/notifications": path.join(
+        packages,
+        "notifications/src/index.ts",
+      ),
     },
   },
   test: {

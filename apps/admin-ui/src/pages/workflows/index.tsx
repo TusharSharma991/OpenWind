@@ -2,6 +2,13 @@ import React, { useState } from "react";
 import { useList } from "@refinedev/core";
 import { useNavigate } from "react-router-dom";
 
+function toWorkflowSlug(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "");
+}
+
 type WorkflowState = {
   name: string;
   label: string;
@@ -227,12 +234,14 @@ export function Workflows(): React.ReactElement {
                 key={wf.id}
                 className="wfl-row"
                 style={{ "--row-accent": accent } as React.CSSProperties}
-                onClick={() => navigate(`/workflows/${wf.id}`)}
+                onClick={() =>
+                  navigate(`/workflows/${toWorkflowSlug(wf.name)}`)
+                }
                 role="button"
                 tabIndex={0}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ")
-                    navigate(`/workflows/${wf.id}`);
+                    navigate(`/workflows/${toWorkflowSlug(wf.name)}`);
                 }}
               >
                 {/* 3px left accent */}

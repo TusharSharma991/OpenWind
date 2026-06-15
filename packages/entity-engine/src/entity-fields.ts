@@ -2,7 +2,7 @@ import { eq, and, asc, or, isNull } from "drizzle-orm";
 import type { DbOrTx } from "@platform/db";
 import { entityFields } from "@platform/db";
 import { logger } from "@platform/logger";
-import type { EntityField } from "./types.js";
+import type { EntityField, FieldSensitivity } from "./types.js";
 import { EntityError, ValidationError } from "./errors.js";
 import { invalidateSchemaCache, isSafeRegex } from "./validation/index.js";
 
@@ -11,6 +11,7 @@ export type UpdateEntityFieldInput = {
   config?: Record<string, unknown> | undefined;
   isRequired?: boolean | undefined;
   sortOrder?: number | undefined;
+  sensitivity?: FieldSensitivity | undefined;
 };
 
 // Fields per entity type are bounded in size, so we return all sorted by
@@ -84,6 +85,7 @@ export async function updateEntityField(
   if (input.config !== undefined) updates.config = input.config;
   if (input.isRequired !== undefined) updates.isRequired = input.isRequired;
   if (input.sortOrder !== undefined) updates.sortOrder = input.sortOrder;
+  if (input.sensitivity !== undefined) updates.sensitivity = input.sensitivity;
 
   if (Object.keys(updates).length === 0) return rowToEntityField(existing);
 
@@ -152,6 +154,9 @@ function rowToEntityField(row: typeof entityFields.$inferSelect): EntityField {
     isIndexed: row.isIndexed,
     isSystem: row.isSystem,
     sortOrder: row.sortOrder,
+    // Drizzle types text columns as string; the CHECK constraint guarantees the
+    // value is one of the four valid sensitivity levels.
+    sensitivity: row.sensitivity as FieldSensitivity,
     createdAt: row.createdAt,
   };
 }

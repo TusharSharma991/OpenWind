@@ -69,9 +69,8 @@ export type UpdateEntityInput = {
   fields?: Record<string, unknown> | undefined;
   assignedTo?: string | null | undefined;
   currentState?: string | null | undefined;
-  updatedBy?: string | undefined;
-  actorId?: string | undefined;
   /** Actor performing the update — used by the audit hook. */
+  actorId?: string | undefined;
   actorType?: "user" | "api_key" | "system" | undefined;
 };
 

@@ -408,7 +408,7 @@ export async function updateEntity(
           fromState: existing.currentState,
           toState: row.currentState,
           triggeredBy: "user",
-          actorId: input.actorId ?? input.updatedBy ?? null,
+          actorId: input.actorId ?? null,
           comment:
             existing.currentState !== row.currentState
               ? `State changed to ${row.currentState}`
@@ -508,7 +508,7 @@ export async function updateEntity(
           fromState: existing.currentState,
           toState: row.currentState,
           triggeredBy: "user",
-          actorId: input.actorId ?? input.updatedBy ?? null,
+          actorId: input.actorId ?? null,
           comment:
             existing.currentState !== row.currentState
               ? `State changed to ${row.currentState}`

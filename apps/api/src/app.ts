@@ -2,7 +2,6 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger as honoLogger } from "hono/logger";
 import { env } from "@platform/config";
-import { db } from "@platform/db";
 import { requireAuth, requireRole } from "@platform/auth";
 import type { AuthContext } from "@platform/auth";
 import { correlationId } from "./middleware/correlation-id.js";
@@ -25,6 +24,9 @@ import { registerEntityAuditHook } from "@platform/entity-engine";
 import { writeAuditEntry } from "@platform/audit";
 
 // ── PII-aware entity audit hook ───────────────────────────────────────────────
+// Registered once at module load so it is active for every entity mutation.
+// The hook receives the same db/tx as the mutation — audit is in the same
+// connection and, when the caller uses withTenantContext, the same transaction.
 registerEntityAuditHook(async (p) => {
   await writeAuditEntry(p.db, {
     tenantId: p.tenantId,
@@ -89,7 +91,7 @@ export function createApp(): Hono<AppVars> {
   // Temporary debug route — shows the parsed auth context for the current token.
   // Restricted to superadmin to prevent any authenticated user from probing their own context.
   if (env.NODE_ENV !== "production") {
-    app.get("/auth/debug", requireAuth(db), requireRole("superadmin"), (c) => {
+    app.get("/auth/debug", requireAuth(), requireRole("superadmin"), (c) => {
       const auth = c.get("auth");
       return c.json({ data: auth });
     });

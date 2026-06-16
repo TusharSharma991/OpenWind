@@ -99,8 +99,8 @@ vi.mock("@platform/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-vi.mock("@platform/config", () => ({
-  env: { REDIS_URL: "redis://localhost:6379" },
+vi.mock("@platform/redis", () => ({
+  getRedis: vi.fn(() => ({ status: "close" })),
 }));
 
 // ── Import engine AFTER mocks ─────────────────────────────────────────────────
@@ -316,9 +316,10 @@ describe("deleteEntity", () => {
   });
 
   it("soft-deletes by setting deleted_at rather than removing the row", async () => {
-    dbMock.select.mockReturnValue(
-      makeQueryBuilder(() => [{ id: INSTANCE_ID }]),
-    );
+    // UPDATE...RETURNING returns the pre-deletion row; SELECT is only used for
+    // loadEntityType / loadEntityFields after the update.
+    mockUpdateReturning.mockResolvedValue([fakeInstance]);
+    dbMock.select.mockReturnValue(makeQueryBuilder(() => [fakeEntityType]));
     await expect(
       deleteEntity(dbMock as never, TENANT_ID, INSTANCE_ID),
     ).resolves.toBeUndefined();
@@ -327,16 +328,17 @@ describe("deleteEntity", () => {
   });
 
   it("throws EntityError when entity not found", async () => {
-    dbMock.select.mockReturnValue(makeQueryBuilder(() => []));
+    // UPDATE...RETURNING returns [] when the WHERE clause matches no rows
+    mockUpdateReturning.mockResolvedValue([]);
     await expect(
       deleteEntity(dbMock as never, TENANT_ID, "missing"),
     ).rejects.toBeInstanceOf(EntityError);
-    expect(dbMock.update).not.toHaveBeenCalled();
+    expect(dbMock.update).toHaveBeenCalledTimes(1);
   });
 
   it("throws EntityError when entity is already soft-deleted", async () => {
-    // isNull(deletedAt) filter causes already-deleted rows to return empty
-    dbMock.select.mockReturnValue(makeQueryBuilder(() => []));
+    // isNull(deletedAt) in the WHERE clause means already-deleted rows return []
+    mockUpdateReturning.mockResolvedValue([]);
     await expect(
       deleteEntity(dbMock as never, TENANT_ID, INSTANCE_ID),
     ).rejects.toBeInstanceOf(EntityError);

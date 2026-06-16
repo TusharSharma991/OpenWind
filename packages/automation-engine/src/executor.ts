@@ -13,10 +13,7 @@ import type { ActionConfig } from "./types.js";
 import { executeNotifyAction } from "./actions/notify.js";
 import { executeSetFieldAction } from "./actions/set-field.js";
 import { executeTransitionAction } from "./actions/transition.js";
-import {
-  executeWebhookAction,
-  type WebhookActionConfig,
-} from "./actions/webhook.js";
+import { executeWebhookAction } from "./actions/webhook.js";
 import { isOpen, recordFailure, reset } from "./circuit-breaker.js";
 
 const MAX_DEPTH = 10;
@@ -175,8 +172,6 @@ async function runAction(
   depth: number,
   redis?: Redis,
 ): Promise<boolean> {
-  const config = action.config;
-
   if (redis && (await isOpen(redis, tenantId, action.type))) {
     logger.warn(
       { tenantId, actionType: action.type },
@@ -188,38 +183,24 @@ async function runAction(
   try {
     switch (action.type) {
       case "notify":
-        await executeNotifyAction(
-          db,
-          tenantId,
-          event,
-          config as Parameters<typeof executeNotifyAction>[3],
-        );
+        executeNotifyAction(db, tenantId, event, action.config);
         break;
       case "set_field":
-        await executeSetFieldAction(
-          db,
-          tenantId,
-          event,
-          config as unknown as Parameters<typeof executeSetFieldAction>[3],
-        );
+        await executeSetFieldAction(db, tenantId, event, action.config);
         break;
       case "transition":
         await executeTransitionAction(
           db,
           tenantId,
           event,
-          config as unknown as Parameters<typeof executeTransitionAction>[3],
+          action.config,
           depth,
         );
         break;
       case "webhook":
-        await executeWebhookAction(
-          tenantId,
-          ruleId,
-          event,
-          config as unknown as WebhookActionConfig,
-          { extraBlockCidrs: env.SSRF_BLOCK_CIDRS },
-        );
+        await executeWebhookAction(tenantId, ruleId, event, action.config, {
+          extraBlockCidrs: env.SSRF_BLOCK_CIDRS,
+        });
         break;
       default:
         logger.warn(

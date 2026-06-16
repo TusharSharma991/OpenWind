@@ -1,4 +1,5 @@
 import { logger } from "@platform/logger";
+import { closeRedis } from "@platform/redis";
 import { startOutboxPoller, stopOutboxPoller } from "./outbox-poller.js";
 import { stopAutomationWorker } from "./automation-worker.js";
 import { startSlaScheduler, stopSlaScheduler } from "./sla-scheduler.js";
@@ -29,6 +30,7 @@ async function shutdown(): Promise<void> {
     stopAvScanWorker(),
     stopFileCleanupWorker(),
     stopTenantPurgeWorker(),
+    closeRedis(),
   ]);
   process.exit(0);
 }

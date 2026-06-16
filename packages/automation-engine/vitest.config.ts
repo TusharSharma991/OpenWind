@@ -4,5 +4,14 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts"],
+    server: {
+      deps: {
+        inline: [
+          "@platform/redis",
+          "@platform/db",
+          "@platform/automation-engine",
+        ],
+      },
+    },
   },
 });

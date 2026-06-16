@@ -10,6 +10,9 @@ ALTER TABLE "entity_instances"
 CREATE INDEX "entity_instances_search_idx"
   ON "entity_instances" USING gin(search_vector);
 
+-- Note: 'english' dictionary is hardcoded for stemming. Non-English text still
+-- gets indexed but stemming quality is reduced. Tracked as future improvement
+-- (configurable per-tenant dictionary before GA).
 CREATE OR REPLACE FUNCTION entity_instances_search_vector_update()
 RETURNS trigger AS $$
 BEGIN
@@ -32,7 +35,8 @@ CREATE TRIGGER entity_instances_search_vector_trig
   BEFORE INSERT OR UPDATE OF fields ON entity_instances
   FOR EACH ROW EXECUTE FUNCTION entity_instances_search_vector_update();
 
--- Backfill existing rows
+-- Backfill existing rows (locks are row-level; no table lock expected at pilot scale).
+-- On large tenants this may be slow — run during a maintenance window pre-GA.
 UPDATE entity_instances
 SET search_vector = to_tsvector(
   'english',

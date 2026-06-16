@@ -1,20 +1,18 @@
 import type { DbOrTx } from "@platform/db";
 import { logger } from "@platform/logger";
 import type { TriggerEvent } from "../event-schemas.js";
+import type { NotifyConfig } from "../types.js";
 
-export interface NotifyConfig {
-  recipientId?: string;
-  workflowId?: string;
-  channel?: string[];
-  payload?: Record<string, unknown>;
-}
+export type { NotifyConfig };
 
-export async function executeNotifyAction(
+// TODO: make async and re-add `await` in executor once @platform/notifications
+// is wired to a real provider (currently a stub — returns void synchronously).
+export function executeNotifyAction(
   _db: DbOrTx,
   tenantId: string,
   _event: TriggerEvent,
   config: NotifyConfig,
-): Promise<void> {
+): void {
   // @platform/notifications is not wired to a provider yet — log and continue.
   logger.info(
     {

@@ -1,26 +1,12 @@
-import { createClient } from "redis";
 import { and, eq, isNull, or } from "drizzle-orm";
-import { env } from "@platform/config";
 import type { DbOrTx } from "@platform/db";
 import { entityFields } from "@platform/db";
+import { getRedis } from "@platform/redis";
 import type { EntityField } from "../types.js";
 import { buildZodSchema } from "./schema-builder.js";
 import type { z } from "zod";
 
 const CACHE_TTL_SECONDS = 60;
-
-type RedisClient = ReturnType<typeof createClient>;
-let _redis: RedisClient | null = null;
-
-function getRedis(): RedisClient {
-  if (!_redis) {
-    _redis = createClient({ url: env.REDIS_URL });
-    void _redis.connect().catch(() => {
-      // Connection failures are surfaced on first use
-    });
-  }
-  return _redis;
-}
 
 function cacheKey(
   entityTypeId: string,
@@ -36,11 +22,11 @@ export async function getValidationSchema(
   tenantId: string,
   mode: "create" | "update",
 ): Promise<z.ZodObject<Record<string, z.ZodTypeAny>>> {
-  const redis = getRedis();
   const key = cacheKey(entityTypeId, tenantId, mode);
+  const redis = getRedis();
 
   try {
-    if (redis.isReady) {
+    if (redis.status === "ready") {
       const cached = await redis.get(key);
       if (cached) {
         const fields = JSON.parse(cached) as EntityField[];
@@ -70,8 +56,8 @@ export async function getValidationSchema(
   }));
 
   try {
-    if (redis.isReady) {
-      await redis.set(key, JSON.stringify(fields), { EX: CACHE_TTL_SECONDS });
+    if (redis.status === "ready") {
+      await redis.set(key, JSON.stringify(fields), "EX", CACHE_TTL_SECONDS);
     }
   } catch {
     // Non-fatal: proceed without caching
@@ -84,21 +70,27 @@ export async function invalidateSchemaCache(
   entityTypeId: string,
   tenantId?: string,
 ): Promise<void> {
-  const redis = getRedis();
   const pattern = tenantId
     ? `schema:${entityTypeId}:${tenantId}:*`
     : `schema:${entityTypeId}:*`;
 
   try {
-    if (redis.isReady) {
+    const redis = getRedis();
+    if (redis.status === "ready") {
       const keysToDelete: string[] = [];
-      let cursor = 0;
+      let cursor = "0";
       do {
-        const result = await redis.scan(cursor, { MATCH: pattern, COUNT: 100 });
-        cursor = result.cursor;
-        keysToDelete.push(...result.keys);
-      } while (cursor !== 0);
-      if (keysToDelete.length > 0) await redis.del(keysToDelete);
+        const [nextCursor, keys] = await redis.scan(
+          cursor,
+          "MATCH",
+          pattern,
+          "COUNT",
+          "100",
+        );
+        cursor = nextCursor;
+        keysToDelete.push(...keys);
+      } while (cursor !== "0");
+      if (keysToDelete.length > 0) await redis.del(...keysToDelete);
     }
   } catch {
     // Non-fatal

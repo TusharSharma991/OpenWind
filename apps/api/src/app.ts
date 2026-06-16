@@ -83,7 +83,7 @@ export function createApp(): Hono<AppVars> {
   // 5. Error handler — app.onError is the correct Hono v4 API for route errors
   app.onError(handleError);
 
-  app.get("/health", (c) => c.json({ status: "ok", env: env.NODE_ENV }));
+  app.get("/health", (c) => c.json({ status: "ok" }));
 
   // OpenAPI spec — unauthenticated, served from generated static object
   app.get("/openapi.json", (c) => c.json(openApiSpec));

@@ -346,25 +346,12 @@ async function generateAndSaveKeyJson(token: string): Promise<void> {
 // When MACHINEKEY_KEYPATH is not used (or not supported by the version), Zitadel
 // logs the key JSON directly to its stdout. We scrape it from container logs.
 function readZitadelMachineKey(): ZitadelKeyJson | null {
-  // When running inside Docker, Zitadel writes the key to a shared volume.
-  if (IN_DOCKER) {
-    try {
-      const keyPath = "/machinekey/sa.json";
-      if (existsSync(keyPath)) {
-        return JSON.parse(readFileSync(keyPath, "utf8")) as ZitadelKeyJson;
-      }
-    } catch {
-      /* fall through */
-    }
-    return null;
-  }
-
-  // Host path: scrape from docker compose logs
+  // Read key from Zitadel container logs (works both in Docker via socket mount and on host)
+  const logCmd = IN_DOCKER
+    ? `docker logs ow-zita`
+    : `docker compose logs zitadel`;
   try {
-    const logs = execSync(`docker compose logs zitadel`, {
-      encoding: "utf8",
-      cwd: ROOT,
-    });
+    const logs = execSync(logCmd, { encoding: "utf8", cwd: ROOT });
     for (const line of logs.split("\n")) {
       const idx = line.indexOf('{"type":"serviceaccount"');
       if (idx !== -1) {

@@ -2,13 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { fetchWithAuth, API_URL } from "../../auth.js";
 import { useEntityTypes } from "../../entity-type-context.js";
-
-type SavedView = {
-  id: string;
-  name: string;
-  filterConfig: { search?: string } | null;
-  isDefault: boolean;
-};
+import type { SavedView } from "../../lib/types.js";
 
 type EntityField = {
   id: string;
@@ -89,7 +83,6 @@ export function RecordList(): React.ReactElement {
   // T21: Export
   const [exportLoading, setExportLoading] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
-  const exportLinkRef = useRef<HTMLAnchorElement>(null);
 
   useEffect(() => {
     if (!entityTypeId) return;
@@ -195,12 +188,12 @@ export function RecordList(): React.ReactElement {
         setExportError(err.message ?? err.error);
         return;
       }
-      const link = exportLinkRef.current;
-      if (link) {
-        link.href = res as string;
-        link.download = `export.${format}`;
-        link.click();
-      }
+      const a = document.createElement("a");
+      a.href = res as string;
+      a.download = `export.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
     } catch (err) {
       setExportError(err instanceof Error ? err.message : "Export failed");
     } finally {
@@ -288,9 +281,6 @@ export function RecordList(): React.ReactElement {
         </Link>
       </div>
 
-      {/* Hidden download anchor */}
-      <a ref={exportLinkRef} style={{ display: "none" }} />
-
       {/* ── Toolbar ── */}
       <div className="rl-toolbar">
         <div className="rl-search-wrap">
@@ -351,7 +341,7 @@ export function RecordList(): React.ReactElement {
                 }}
               >
                 <span
-                  style={{ fontStyle: "italic", color: "var(--muted, #888)" }}
+                  style={{ fontStyle: "italic", color: "var(--text-muted)" }}
                 >
                   Default (no filter)
                 </span>
@@ -372,7 +362,7 @@ export function RecordList(): React.ReactElement {
                       style={{
                         fontSize: "9px",
                         marginLeft: "4px",
-                        color: "var(--accent, #6366f1)",
+                        color: "var(--accent-primary)",
                       }}
                     >
                       default
@@ -383,7 +373,7 @@ export function RecordList(): React.ReactElement {
               <div
                 style={{
                   height: "1px",
-                  background: "#e5e7eb",
+                  background: "var(--border-color)",
                   margin: "2px 0",
                 }}
               />
@@ -428,9 +418,9 @@ export function RecordList(): React.ReactElement {
           style={{
             margin: "0 0 12px",
             padding: "10px 14px",
-            background: "#fef2f2",
-            color: "#dc2626",
-            border: "1px solid #fca5a5",
+            background: "var(--danger-light)",
+            color: "var(--danger)",
+            border: "1px solid hsla(350,80%,60%,.25)",
             borderRadius: "6px",
             fontSize: "13px",
             display: "flex",
@@ -583,13 +573,13 @@ export function RecordList(): React.ReactElement {
         >
           <div
             style={{
-              background: "#fff",
-              border: "1px solid #e5e7eb",
+              background: "var(--bg-primary)",
+              border: "1px solid var(--border-color)",
               borderRadius: "14px",
               padding: "24px 28px",
               width: "100%",
               maxWidth: "360px",
-              boxShadow: "0 20px 60px rgba(0,0,0,.18)",
+              boxShadow: "var(--shadow-lg)",
             }}
           >
             <p
@@ -604,7 +594,7 @@ export function RecordList(): React.ReactElement {
                   fontSize: "12px",
                   fontWeight: 500,
                   marginBottom: "5px",
-                  color: "#6b7280",
+                  color: "var(--text-muted)",
                 }}
               >
                 View name *
@@ -613,10 +603,12 @@ export function RecordList(): React.ReactElement {
                 style={{
                   width: "100%",
                   padding: "8px 10px",
-                  border: "1px solid #d1d5db",
+                  border: "1px solid var(--border-color)",
                   borderRadius: "6px",
                   fontSize: "13px",
                   boxSizing: "border-box",
+                  background: "var(--bg-secondary)",
+                  color: "var(--text-primary)",
                 }}
                 placeholder="e.g. My open tickets"
                 value={newViewName}
@@ -644,7 +636,7 @@ export function RecordList(): React.ReactElement {
             {viewSaveError && (
               <p
                 style={{
-                  color: "#dc2626",
+                  color: "var(--danger)",
                   fontSize: "12px",
                   marginBottom: "12px",
                 }}
@@ -663,8 +655,9 @@ export function RecordList(): React.ReactElement {
                 style={{
                   padding: "7px 14px",
                   borderRadius: "6px",
-                  border: "1px solid #d1d5db",
-                  background: "#f9fafb",
+                  border: "1px solid var(--border-color)",
+                  background: "var(--bg-secondary)",
+                  color: "var(--text-secondary)",
                   cursor: "pointer",
                   fontSize: "13px",
                 }}
@@ -681,7 +674,7 @@ export function RecordList(): React.ReactElement {
                   padding: "7px 16px",
                   borderRadius: "6px",
                   border: "none",
-                  background: "#6366f1",
+                  background: "var(--accent-primary)",
                   color: "#fff",
                   cursor: "pointer",
                   fontSize: "13px",
@@ -701,37 +694,37 @@ export function RecordList(): React.ReactElement {
         .rl-views-btn {
           display: inline-flex; align-items: center; font-size: 12px;
           font-weight: 500; padding: 6px 10px; border-radius: 6px;
-          background: #f3f4f6; color: #374151;
-          border: 1px solid #d1d5db; cursor: pointer;
+          background: var(--bg-secondary); color: var(--text-secondary);
+          border: 1px solid var(--border-color); cursor: pointer;
           white-space: nowrap;
         }
-        .rl-views-btn:hover { background: #e5e7eb; }
+        .rl-views-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); }
         .rl-views-dropdown {
           position: absolute; top: calc(100% + 4px); right: 0;
-          width: 200px; background: #fff;
-          border: 1px solid #d1d5db; border-radius: 10px;
-          box-shadow: 0 10px 40px rgba(0,0,0,.12); z-index: 300; overflow: hidden;
+          width: 200px; background: var(--bg-primary);
+          border: 1px solid var(--border-color); border-radius: 10px;
+          box-shadow: var(--shadow-lg); z-index: 300; overflow: hidden;
         }
         .rl-views-item {
-          padding: 9px 14px; font-size: 13px; cursor: pointer; color: #374151;
+          padding: 9px 14px; font-size: 13px; cursor: pointer; color: var(--text-primary);
           transition: background 0.1s;
         }
-        .rl-views-item:hover { background: #f3f4f6; }
-        .rl-views-item--active { color: #6366f1; font-weight: 600; }
-        .rl-views-item--action { color: #6366f1; font-weight: 500; }
+        .rl-views-item:hover { background: var(--bg-secondary); }
+        .rl-views-item--active { color: var(--accent-primary); font-weight: 600; }
+        .rl-views-item--action { color: var(--accent-primary); font-weight: 500; }
         .rl-export-btn {
           font-size: 12px; font-weight: 500; padding: 6px 10px;
-          border-radius: 6px 0 0 6px; background: #f3f4f6; color: #374151;
-          border: 1px solid #d1d5db; cursor: pointer; white-space: nowrap;
+          border-radius: 6px 0 0 6px; background: var(--bg-secondary); color: var(--text-secondary);
+          border: 1px solid var(--border-color); cursor: pointer; white-space: nowrap;
         }
-        .rl-export-btn:hover:not(:disabled) { background: #e5e7eb; }
+        .rl-export-btn:hover:not(:disabled) { background: var(--bg-tertiary); color: var(--text-primary); }
         .rl-export-btn:disabled { opacity: .5; cursor: not-allowed; }
         .rl-export-btn-arrow {
           font-size: 11px; font-weight: 500; padding: 6px 7px;
-          border-radius: 0 6px 6px 0; background: #f3f4f6; color: #9ca3af;
-          border: 1px solid #d1d5db; border-left: none; cursor: pointer;
+          border-radius: 0 6px 6px 0; background: var(--bg-secondary); color: var(--text-muted);
+          border: 1px solid var(--border-color); border-left: none; cursor: pointer;
         }
-        .rl-export-btn-arrow:hover:not(:disabled) { background: #e5e7eb; color: #374151; }
+        .rl-export-btn-arrow:hover:not(:disabled) { background: var(--bg-tertiary); color: var(--text-primary); }
         .rl-export-btn-arrow:disabled { opacity: .5; cursor: not-allowed; }
       `}</style>
     </div>

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { fetchWithAuth, API_URL } from "../../lib/api.js";
 import { useEntityTypes } from "../../entity-type-context.js";
+import type { SavedView } from "../../lib/types.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -35,14 +36,6 @@ type Transition = {
   label: string;
   requiresComment: boolean;
   requiresFields: string[];
-};
-
-// ── Saved view type (T19) ──────────────────────────────────────────────────────
-type SavedView = {
-  id: string;
-  name: string;
-  filterConfig: { search?: string } | null;
-  isDefault: boolean;
 };
 
 // ── Module-level drag state ────────────────────────────────────────────────────
@@ -545,7 +538,6 @@ export function CustomerRecordList(): React.ReactElement {
   // T20: Export
   const [exportLoading, setExportLoading] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
-  const exportLinkRef = useRef<HTMLAnchorElement>(null);
 
   // Local column order — allows drag-reorder without a backend call
   const [colOrder, setColOrder] = useState<string[]>([]);
@@ -695,12 +687,12 @@ export function CustomerRecordList(): React.ReactElement {
         return;
       }
       // Otherwise res is a blob URL string from fetchWithAuth — trigger download
-      const link = exportLinkRef.current;
-      if (link) {
-        link.href = res as string;
-        link.download = `export.${format}`;
-        link.click();
-      }
+      const a = document.createElement("a");
+      a.href = res as string;
+      a.download = `export.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
     } catch (err) {
       setExportError(err instanceof Error ? err.message : "Export failed");
     } finally {
@@ -911,9 +903,6 @@ export function CustomerRecordList(): React.ReactElement {
           onCancel={() => setPendingDrop(null)}
         />
       )}
-
-      {/* Hidden download anchor for export */}
-      <a ref={exportLinkRef} style={{ display: "none" }} />
 
       {/* Top bar */}
       <div className="kb-topbar">

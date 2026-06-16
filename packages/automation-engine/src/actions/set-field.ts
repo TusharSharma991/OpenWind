@@ -1,12 +1,9 @@
 import type { DbOrTx } from "@platform/db";
 import { updateEntity } from "@platform/entity-engine";
 import type { TriggerEvent } from "../event-schemas.js";
+import type { SetFieldConfig } from "../types.js";
 
-export interface SetFieldConfig {
-  instanceId?: string;
-  field: string;
-  value: unknown;
-}
+export type { SetFieldConfig };
 
 export async function executeSetFieldAction(
   db: DbOrTx,

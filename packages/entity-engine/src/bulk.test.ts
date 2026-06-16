@@ -100,8 +100,8 @@ vi.mock("@platform/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-vi.mock("@platform/config", () => ({
-  env: { REDIS_URL: "redis://localhost:6379" },
+vi.mock("@platform/redis", () => ({
+  getRedis: vi.fn(() => ({ status: "close" })),
 }));
 
 // ── Import after mocks ────────────────────────────────────────────────────────

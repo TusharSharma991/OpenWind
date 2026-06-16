@@ -530,10 +530,12 @@ export async function deleteEntity(
   instanceId: string,
   actorId?: string,
 ): Promise<void> {
-  // Load the full row so we can capture the before-snapshot for the audit log.
+  // Single UPDATE...RETURNING: soft-deletes the row and captures the pre-deletion
+  // fields snapshot for the audit log in one round trip. The isNull guard ensures
+  // idempotency — a second delete attempt returns no rows → ENTITY_NOT_FOUND.
   const [row] = await db
-    .select()
-    .from(entityInstances)
+    .update(entityInstances)
+    .set({ deletedAt: new Date() })
     .where(
       and(
         eq(entityInstances.id, instanceId),
@@ -541,19 +543,9 @@ export async function deleteEntity(
         isNull(entityInstances.deletedAt),
       ),
     )
-    .limit(1);
+    .returning();
 
   if (!row) throw new EntityError("ENTITY_NOT_FOUND", { instanceId });
-
-  await db
-    .update(entityInstances)
-    .set({ deletedAt: new Date() })
-    .where(
-      and(
-        eq(entityInstances.id, instanceId),
-        eq(entityInstances.tenantId, tenantId),
-      ),
-    );
 
   logger.info({ tenantId, instanceId }, "Entity soft-deleted");
 
@@ -806,6 +798,28 @@ export async function bulkCreateEntities(
     entityFields: Array<{ name: string; sensitivity: AuditFieldSensitivity }>;
   }> = [];
 
+  // Per-type cache: avoids O(N) DB calls for entityType + allFields when many
+  // rows share the same type. Schema validation happens first (it already has
+  // its own Redis cache), so this cache is only populated for types that have
+  // at least one valid item — avoiding wasteful loads on items that fail validation.
+  type TypeMeta = {
+    entityType: Awaited<ReturnType<typeof loadEntityType>>;
+    allFields: Awaited<ReturnType<typeof loadEntityFields>>;
+  };
+  const typeMetaCache = new Map<string, TypeMeta>();
+
+  async function getTypeMeta(entityTypeId: string): Promise<TypeMeta> {
+    const cached = typeMetaCache.get(entityTypeId);
+    if (cached) return cached;
+    const [entityType, allFields] = await Promise.all([
+      loadEntityType(db, entityTypeId),
+      loadEntityFields(db, entityTypeId, tenantId),
+    ]);
+    const meta: TypeMeta = { entityType, allFields };
+    typeMetaCache.set(entityTypeId, meta);
+    return meta;
+  }
+
   for (const [i, input] of inputs.entries()) {
     const schema = await getValidationSchema(
       db,
@@ -820,7 +834,7 @@ export async function bulkCreateEntities(
       continue;
     }
 
-    const entityType = await loadEntityType(db, input.entityTypeId);
+    const { entityType, allFields } = await getTypeMeta(input.entityTypeId);
     const crossErrors = runCrossFieldValidators(
       entityType.name,
       result.data as Record<string, unknown>,
@@ -830,8 +844,6 @@ export async function bulkCreateEntities(
       errors.push({ index: i, fields: crossErrors });
       continue;
     }
-
-    const allFields = await loadEntityFields(db, input.entityTypeId, tenantId);
     const fieldsWithFormulas = await applyFormulaFields(
       allFields,
       result.data as Record<string, unknown>,

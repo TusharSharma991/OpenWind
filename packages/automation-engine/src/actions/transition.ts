@@ -2,12 +2,9 @@ import type { DbOrTx } from "@platform/db";
 import { executeTransition } from "@platform/workflow-engine";
 import type { TriggerEvent } from "../event-schemas.js";
 import { executeAutomationRules } from "../executor.js";
+import type { TransitionConfig } from "../types.js";
 
-export interface TransitionConfig {
-  instanceId?: string;
-  transitionId: string;
-  comment?: string;
-}
+export type { TransitionConfig };
 
 export async function executeTransitionAction(
   db: DbOrTx,

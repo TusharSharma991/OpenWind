@@ -26,7 +26,38 @@ export async function executeTransition(
   tenantId: string,
   request: TransitionRequest,
 ): Promise<WorkflowEvent> {
-  // 1. Load entity instance with a pessimistic write lock.
+  // 1a. Idempotency check (read-only) — short-circuit before acquiring the write lock.
+  // Most duplicate submissions hit this path and never contend on the row lock.
+  if (request.idempotencyKey) {
+    const [existing] = await db
+      .select()
+      .from(workflowEvents)
+      .where(
+        and(
+          eq(workflowEvents.instanceId, request.instanceId),
+          eq(workflowEvents.idempotencyKey, request.idempotencyKey),
+          isNotNull(workflowEvents.idempotencyKey),
+        ),
+      )
+      .limit(1);
+
+    if (existing) {
+      return {
+        id: existing.id,
+        instanceId: existing.instanceId,
+        workflowId: existing.workflowId,
+        fromState: existing.fromState ?? null,
+        toState: existing.toState,
+        triggeredBy: existing.triggeredBy as WorkflowEvent["triggeredBy"],
+        actorId: existing.actorId ?? null,
+        comment: existing.comment ?? null,
+        metadata: (existing.metadata ?? {}) as Record<string, unknown>,
+        createdAt: existing.createdAt,
+      };
+    }
+  }
+
+  // 1b. Load entity instance with a pessimistic write lock.
   // FOR UPDATE NOWAIT throws Postgres error 55P03 immediately if another transaction
   // already holds the lock — the caller gets TRANSITION_LOCKED and retries after the
   // Retry-After header interval.
@@ -72,36 +103,6 @@ export async function executeTransition(
       instanceId: request.instanceId,
       reason: "no workflow attached",
     });
-  }
-
-  // 1d. Idempotency check — return existing event if key already used
-  if (request.idempotencyKey) {
-    const [existing] = await db
-      .select()
-      .from(workflowEvents)
-      .where(
-        and(
-          eq(workflowEvents.instanceId, request.instanceId),
-          eq(workflowEvents.idempotencyKey, request.idempotencyKey),
-          isNotNull(workflowEvents.idempotencyKey),
-        ),
-      )
-      .limit(1);
-
-    if (existing) {
-      return {
-        id: existing.id,
-        instanceId: existing.instanceId,
-        workflowId: existing.workflowId,
-        fromState: existing.fromState ?? null,
-        toState: existing.toState,
-        triggeredBy: existing.triggeredBy as WorkflowEvent["triggeredBy"],
-        actorId: existing.actorId ?? null,
-        comment: existing.comment ?? null,
-        metadata: (existing.metadata ?? {}) as Record<string, unknown>,
-        createdAt: existing.createdAt,
-      };
-    }
   }
 
   // 2. Load workflow definition

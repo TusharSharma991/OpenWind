@@ -424,8 +424,8 @@ describe("executeTransition", () => {
       id: "event-existing",
       idempotencyKey: "key-abc",
     };
-    // Selects: instance, then idempotency check finds the event
-    selectResults = [() => [fakeInstance], () => [existingEvent]];
+    // Idempotency check runs BEFORE the write lock — early return, no lock needed
+    selectResults = [() => [existingEvent]];
 
     const event = await executeTransition(dbMock as never, TENANT_ID, {
       instanceId: INSTANCE_ID,
@@ -440,10 +440,10 @@ describe("executeTransition", () => {
   });
 
   it("executes normally when idempotency key is new", async () => {
-    // Selects: instance, idempotency check (empty), workflow, transition, SLA state
+    // Idempotency check runs BEFORE the write lock (miss), then instance/workflow/transition/SLA
     selectResults = [
+      () => [], // idempotency check — no prior event with this key
       () => [fakeInstance],
-      () => [], // no prior event with this key
       () => [fakeWorkflow],
       () => [fakeTransition],
       () => [], // no SLA

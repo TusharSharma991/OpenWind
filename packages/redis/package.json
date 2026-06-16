@@ -1,5 +1,5 @@
 {
-  "name": "@platform/entity-engine",
+  "name": "@platform/redis",
   "version": "0.0.1",
   "private": true,
   "main": "./dist/index.js",
@@ -8,23 +8,16 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest",
     "clean": "rm -rf dist"
   },
   "dependencies": {
     "@platform/config": "workspace:*",
-    "@platform/db": "workspace:*",
     "@platform/logger": "workspace:*",
-    "@platform/redis": "workspace:*",
-    "drizzle-orm": "^0.45.2",
-    "recheck": "^4.4.5",
-    "zod": "^3.23.0"
+    "ioredis": "^5.0.0"
   },
   "devDependencies": {
     "@platform/tsconfig": "workspace:*",
     "@types/node": "^25.7.0",
-    "typescript": "^5.5.0",
-    "vitest": "^4.1.0"
+    "typescript": "^5.5.0"
   }
 }

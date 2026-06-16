@@ -34,10 +34,44 @@ export interface AutomationRule {
   updatedAt: Date;
 }
 
-export interface ActionConfig {
-  type: ActionType;
-  config: Record<string, unknown>;
+// Action config shapes — one per ActionType variant
+export interface NotifyConfig {
+  recipientId?: string;
+  workflowId?: string;
+  channel?: string[];
+  payload?: Record<string, unknown>;
 }
+
+export interface SetFieldConfig {
+  instanceId?: string;
+  field: string;
+  value: unknown;
+}
+
+export interface TransitionConfig {
+  instanceId?: string;
+  transitionId: string;
+  comment?: string;
+}
+
+export type WebhookActionConfig = {
+  url: string;
+  method?: "POST" | "PUT" | "PATCH";
+  headers?: Record<string, string>;
+  /** If true, include the full trigger event payload in the request body */
+  includePayload?: boolean;
+  timeoutMs?: number;
+};
+
+export type ActionConfig =
+  | { type: "notify"; config: NotifyConfig }
+  | { type: "set_field"; config: SetFieldConfig }
+  | { type: "transition"; config: TransitionConfig }
+  | { type: "webhook"; config: WebhookActionConfig }
+  | { type: "assign"; config: Record<string, unknown> }
+  | { type: "create_entity"; config: Record<string, unknown> }
+  | { type: "connector.action"; config: Record<string, unknown> }
+  | { type: "script"; config: Record<string, unknown> };
 
 export type CreateAutomationRuleInput = {
   name: string;

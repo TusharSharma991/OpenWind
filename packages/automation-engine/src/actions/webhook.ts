@@ -22,16 +22,10 @@ import http from "node:http";
 import type { TriggerEvent } from "../event-schemas.js";
 import { validateWebhookUrl } from "../ssrf-guard.js";
 import { AutomationError } from "../types.js";
+import type { WebhookActionConfig } from "../types.js";
 import { logger } from "@platform/logger";
 
-export type WebhookActionConfig = {
-  url: string;
-  method?: "POST" | "PUT" | "PATCH";
-  headers?: Record<string, string>;
-  /** If true, include the full trigger event payload in the request body */
-  includePayload?: boolean;
-  timeoutMs?: number;
-};
+export type { WebhookActionConfig };
 
 export type WebhookActionOptions = {
   /** Extra CIDRs to block, sourced from SSRF_BLOCK_CIDRS env var.

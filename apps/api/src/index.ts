@@ -18,7 +18,9 @@ const server = serve({ fetch: app.fetch, port }, () => {
 
 async function shutdown(): Promise<void> {
   logger.info("API server shutting down");
-  server.close();
+  await new Promise<void>((resolve, reject) =>
+    server.close((err) => (err ? reject(err) : resolve())),
+  );
   await closeRedis();
   process.exit(0);
 }

@@ -29,9 +29,14 @@ function stepIndex(key: StepKey): number {
   return STEPS.findIndex((s) => s.key === key);
 }
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export function AutomationWizard(): React.ReactElement {
   const navigate = useNavigate();
-  const { id } = useParams<{ id: string }>();
+  const { id: rawId } = useParams<{ id: string }>();
+  // Validate the URL param before using it in fetch URLs — rawId is user-controlled
+  const id = rawId && UUID_RE.test(rawId) ? rawId : undefined;
   const isEdit = Boolean(id);
 
   const [step, setStep] = useState<StepKey>("trigger");

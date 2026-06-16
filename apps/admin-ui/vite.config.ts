@@ -26,12 +26,21 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react(), envJsPlugin(env)],
     build: { target: "es2022" },
+    optimizeDeps: { esbuildOptions: { target: "es2022" } },
     server: {
       port: 3001,
       host: "0.0.0.0",
+      allowedHosts: ["openwind.rokkalabs.com"],
       watch: {
         usePolling: true,
         interval: 300,
+      },
+      proxy: {
+        "/api": {
+          target: "http://api:3000",
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/api/, ""),
+        },
       },
     },
   };

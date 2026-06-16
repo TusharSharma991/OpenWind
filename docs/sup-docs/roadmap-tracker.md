@@ -1,6 +1,6 @@
 # Platform Roadmap Tracker
 
-**Last updated:** 2026-06-10
+**Last updated:** 2026-06-16
 **Team model:** AI-first (Claude Code as primary engineering partner)
 **Tracking:** Update `% done` and `Status` each session. Log milestones in [week-log.md](week-log.md).
 
@@ -11,7 +11,7 @@
 | Phase                           | Tracks              | Done           | % Complete | Gate                        |
 | ------------------------------- | ------------------- | -------------- | ---------- | --------------------------- |
 | Phase 1 — Foundation            | 5 tracks + security | 5/5 + security | **100%**   | All phase:1 issues closed   |
-| Phase 2 — First Customer Apps   | 4 tracks            | 1/4            | **25%**    | Pilot customer onboarding   |
+| Phase 2 — First Customer Apps   | 4 tracks            | 3/4            | **75%**    | Pilot customer onboarding   |
 | Phase 3 — Scale & Extensibility | 5 tracks            | 0/5            | **0%**     | Public launch / marketplace |
 
 ---
@@ -51,24 +51,24 @@
 **Target:** Week 9–16 from project start (~2026-06-02 to 2026-06-27)
 **Exit test:** Penetration test (tenant isolation) passes before any pilot is onboarded.
 
-| ID  | Feature / Track                            | GH Issue(s)            | Owner       | Status         | %   | Notes                                                                                                            |
-| --- | ------------------------------------------ | ---------------------- | ----------- | -------------- | --- | ---------------------------------------------------------------------------------------------------------------- |
-| 2A  | Platform Services — Novu, files, audit log | [#12](../../issues/12) | PrabhuVijit | ✅ Done        | 100 | All phases complete. Tenant lifecycle (PR #86) merged and CI green. Docker build fixed (local driver).           |
-| 2B  | Module system + standard module configs    | [#13](../../issues/13) | —           | 🔴 Not started | 0   | Module registry, seed runner, 7 module seed files (helpdesk, CRM, reimb, projects, HRMS, invoicing, procurement) |
-| 2C  | Customer portal + agent UI                 | [#14](../../issues/14) | —           | 🔴 Not started | 0   | Config-driven generic views, Refine, entity list/detail/form from view_configs                                   |
-| 2D  | No-code builders + reporting               | [#15](../../issues/15) | —           | 🔴 Not started | 0   | Automation builder UI, workflow editor UI, Metabase embed                                                        |
+| ID  | Feature / Track                            | GH Issue(s)            | Owner       | Status         | %   | Notes                                                                                                               |
+| --- | ------------------------------------------ | ---------------------- | ----------- | -------------- | --- | ------------------------------------------------------------------------------------------------------------------- |
+| 2A  | Platform Services — Novu, files, audit log | [#12](../../issues/12) | PrabhuVijit | ✅ Done        | 100 | All phases complete. Tenant lifecycle (PR #86) merged and CI green. Docker build fixed (local driver).              |
+| 2B  | Module system + standard module configs    | [#13](../../issues/13) | PrabhuVijit | ✅ Done        | 100 | Module registry, seed runner, installModule/uninstallModule API, all 7 module seeds, admin modules UI, view_configs |
+| 2C  | Customer portal + agent UI                 | [#14](../../issues/14) | PrabhuVijit | ✅ Done        | 100 | Generic entity list/detail/form in admin-ui + portal, workflow action buttons, view_configs driven field order      |
+| 2D  | No-code builders + reporting               | [#15](../../issues/15) | —           | 🔴 Not started | 0   | Automation builder UI, workflow editor UI, Metabase embed                                                           |
 
 ### Phase 2 sub-items (2B module seeds)
 
-| Module                  | Entity types                        | Workflow                                        | Seed SQL | Status         |
-| ----------------------- | ----------------------------------- | ----------------------------------------------- | -------- | -------------- |
-| @modules/helpdesk       | Ticket, Comment, Article            | Open → In Progress → Pending → Resolved + SLA   | —        | 🔴 Not started |
-| @modules/reimbursements | Expense Claim, Receipt              | Draft → Submitted → Mgr Review → Finance → Paid | —        | 🔴 Not started |
-| @modules/crm            | Contact, Company, Deal, Activity    | Lead → Qualified → Proposal → Won/Lost          | —        | 🔴 Not started |
-| @modules/projects       | Project, Task, Milestone            | Backlog → In Progress → In Review → Done        | —        | 🔴 Not started |
-| @modules/hrms           | Employee, Department, Leave Request | Draft → Submitted → Approved/Rejected           | —        | 🔴 Not started |
-| @modules/invoicing      | Invoice, Quote, Payment             | Draft → Sent → Paid/Overdue/Cancelled           | —        | 🔴 Not started |
-| @modules/procurement    | Purchase Order, Vendor, RFQ         | Draft → Approved → Sent → Fulfilled             | —        | 🔴 Not started |
+| Module                  | Entity types                        | Workflow                                        | Seed SQL    | Status  |
+| ----------------------- | ----------------------------------- | ----------------------------------------------- | ----------- | ------- |
+| @modules/helpdesk       | Ticket, Comment, Article            | Open → In Progress → Pending → Resolved + SLA   | 001–004.sql | ✅ Done |
+| @modules/reimbursements | Expense Claim, Receipt              | Draft → Submitted → Mgr Review → Finance → Paid | 001.sql     | ✅ Done |
+| @modules/crm            | Contact, Company, Deal, Activity    | Lead → Qualified → Proposal → Won/Lost          | 001.sql     | ✅ Done |
+| @modules/projects       | Project, Task, Milestone            | Backlog → In Progress → In Review → Done        | 001.sql     | ✅ Done |
+| @modules/hrms           | Employee, Department, Leave Request | Draft → Submitted → Approved/Rejected           | 001.sql     | ✅ Done |
+| @modules/invoicing      | Invoice, Quote, Payment             | Draft → Sent → Paid/Overdue/Cancelled           | 001.sql     | ✅ Done |
+| @modules/procurement    | Purchase Order, Vendor, RFQ         | Draft → Approved → Sent → Fulfilled             | 001.sql     | ✅ Done |
 
 ---
 

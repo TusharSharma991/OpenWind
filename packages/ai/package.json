@@ -11,7 +11,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.27.0",
+    "@anthropic-ai/sdk": "^0.104.2",
     "@platform/config": "workspace:*",
     "@platform/logger": "workspace:*"
   },

@@ -32,7 +32,10 @@ import { createSign } from "node:crypto";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const ENV_FILE = join(ROOT, ".env.local");
 const ENV_EXAMPLE = join(ROOT, ".env.example");
-const ZITADEL_BASE = "http://localhost:8080";
+const IN_DOCKER = process.env["RUNNING_IN_DOCKER"] === "true";
+const ZITADEL_BASE =
+  process.env["ZITADEL_BOOTSTRAP_URL"] ??
+  (IN_DOCKER ? "http://zitadel:8080" : "http://localhost:8080");
 const TOTAL_STEPS = 10;
 
 // Demo credentials (printed in summary, committed to docs — dev only)
@@ -412,7 +415,7 @@ async function getAdminToken(): Promise<string> {
   This is a one-time step — afterwards, a service account key is saved to
   .env.local and all future runs will be fully headless.
 
-  ${BOLD}1.${RESET} Open:  ${CYAN}http://localhost:8080${RESET}
+  ${BOLD}1.${RESET} Open:  ${CYAN}${ZITADEL_BASE}${RESET}
   ${BOLD}2.${RESET} Log in: ${DIM}admin@platform.local  /  Admin1234!${RESET}
   ${BOLD}3.${RESET} Click your avatar (top-right) → "Personal Access Tokens"
   ${BOLD}4.${RESET} Click "${BOLD}+ New${RESET}" → set no expiry → click "Add" → ${BOLD}copy the token${RESET}
@@ -771,28 +774,36 @@ async function main(): Promise<void> {
 
   step(1, "Checking prerequisites");
 
-  const nodeMajor = parseInt(process.versions.node.split(".")[0] ?? "0", 10);
-  if (nodeMajor < 22) {
-    fail(
-      `Node.js 22+ required. Current: v${process.versions.node}.\nDownload from https://nodejs.org`,
+  if (IN_DOCKER) {
+    ok("Running inside Docker — skipping host prerequisite checks");
+  } else {
+    const nodeMajor = parseInt(process.versions.node.split(".")[0] ?? "0", 10);
+    if (nodeMajor < 22) {
+      fail(
+        `Node.js 22+ required. Current: v${process.versions.node}.\nDownload from https://nodejs.org`,
+      );
+    }
+    ok(`Node.js v${process.versions.node}`);
+
+    const pnpmVer = runCapture("pnpm --version");
+    if (!pnpmVer) fail("pnpm not found. Install: npm install -g pnpm");
+    ok(`pnpm ${pnpmVer}`);
+
+    const dockerRunning = runCapture(
+      "docker info --format '{{.ServerVersion}}'",
     );
+    if (!dockerRunning)
+      fail("Docker is not running. Start Docker Desktop and re-run.");
+    ok(`Docker ${dockerRunning}`);
   }
-  ok(`Node.js v${process.versions.node}`);
-
-  const pnpmVer = runCapture("pnpm --version");
-  if (!pnpmVer) fail("pnpm not found. Install: npm install -g pnpm");
-  ok(`pnpm ${pnpmVer}`);
-
-  const dockerRunning = runCapture("docker info --format '{{.ServerVersion}}'");
-  if (!dockerRunning)
-    fail("Docker is not running. Start Docker Desktop and re-run.");
-  ok(`Docker ${dockerRunning}`);
 
   // ── 2. Environment ────────────────────────────────────────────────────────────
 
   step(2, "Setting up environment");
 
-  if (!existsSync(ENV_FILE)) {
+  if (IN_DOCKER) {
+    ok("Running inside Docker — .env.local is mounted from host");
+  } else if (!existsSync(ENV_FILE)) {
     if (!existsSync(ENV_EXAMPLE)) {
       fail(".env.example not found — are you in the OpenWind repository root?");
     }
@@ -806,9 +817,14 @@ async function main(): Promise<void> {
 
   step(3, "Starting Docker services");
 
-  run("docker compose up -d");
-  ok("Docker services started");
-  info("Postgres, PgBouncer, Redis, Zitadel, API, Frontend");
+  if (IN_DOCKER) {
+    ok("Running inside Docker — services are already up");
+    info("Postgres, PgBouncer, Redis, Zitadel, API, Frontend");
+  } else {
+    run("docker compose up -d");
+    ok("Docker services started");
+    info("Postgres, PgBouncer, Redis, Zitadel, API, Frontend");
+  }
 
   // ── 4. Health checks ──────────────────────────────────────────────────────────
 
@@ -819,6 +835,8 @@ async function main(): Promise<void> {
   await waitForPostgres();
   await waitForHttp(`${ZITADEL_BASE}/healthz`, "Zitadel", 80, 3000);
 
+  info(`Zitadel bootstrap URL: ${ZITADEL_BASE}`);
+
   // Extra buffer for Zitadel internal startup (database migrations, admin user creation)
   info("Giving Zitadel 10s to complete internal setup...");
   await sleep(10_000);
@@ -826,8 +844,12 @@ async function main(): Promise<void> {
   // ── 5. Dependencies ───────────────────────────────────────────────────────────
 
   step(5, "Installing Node.js dependencies");
-  run("pnpm install --frozen-lockfile");
-  ok("All workspace packages installed");
+  if (IN_DOCKER) {
+    ok("Running inside Docker — dependencies already installed in image");
+  } else {
+    run("pnpm install --frozen-lockfile");
+    ok("All workspace packages installed");
+  }
 
   // ── 6. Database ───────────────────────────────────────────────────────────────
 

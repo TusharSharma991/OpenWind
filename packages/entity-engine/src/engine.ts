@@ -837,6 +837,26 @@ export async function bulkCreateEntities(
       result.data as Record<string, unknown>,
     );
 
+    const [refErrors, userRefErrors] = await Promise.all([
+      validateEntityRefs(
+        db,
+        tenantId,
+        result.data as Record<string, unknown>,
+        allFields,
+      ),
+      validateUserRefs(
+        db,
+        tenantId,
+        result.data as Record<string, unknown>,
+        allFields,
+      ),
+    ]);
+    const allRefErrors = [...refErrors, ...userRefErrors];
+    if (allRefErrors.length > 0) {
+      errors.push({ index: i, fields: allRefErrors });
+      continue;
+    }
+
     const initialState = await resolveInitialState(db, input.workflowId);
 
     toInsert.push({

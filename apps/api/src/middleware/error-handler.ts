@@ -43,6 +43,25 @@ const WORKFLOW_STATUS: Record<string, number> = {
   WORKFLOW_STATE_IN_USE: 409,
 };
 
+const WORKFLOW_MESSAGES: Record<string, string> = {
+  INSTANCE_NOT_FOUND: "Entity instance not found",
+  TRANSITION_NOT_AVAILABLE:
+    "The requested transition is not available from the current state",
+  TRANSITION_FORBIDDEN: "You do not have permission to perform this transition",
+  TRANSITION_LOCKED:
+    "Another transition is in progress — retry after 5 seconds",
+  CONDITION_NOT_MET: "Transition conditions were not met",
+  REQUIRED_FIELDS_MISSING: "Required fields are missing for this transition",
+  SLA_TIMER_FAILED: "An unexpected error occurred while scheduling the SLA",
+  WORKFLOW_NOT_FOUND: "Workflow not found",
+  WORKFLOW_STATE_NOT_FOUND: "Workflow state not found",
+  WORKFLOW_TRANSITION_NOT_FOUND: "Workflow transition not found",
+  WORKFLOW_HAS_ACTIVE_INSTANCES:
+    "Cannot delete a workflow that has active instances",
+  WORKFLOW_STATE_IN_USE:
+    "Cannot delete a state that is referenced by existing transitions or instances",
+};
+
 const ENTITY_STATUS: Record<string, number> = {
   ENTITY_TYPE_NOT_FOUND: 404,
   ENTITY_NOT_FOUND: 404,
@@ -51,6 +70,17 @@ const ENTITY_STATUS: Record<string, number> = {
   FIELD_NAME_CONFLICT: 409,
   RELATION_TARGET_NOT_FOUND: 422,
   FORMULA_EVALUATION_FAILED: 422,
+};
+
+const ENTITY_MESSAGES: Record<string, string> = {
+  ENTITY_TYPE_NOT_FOUND: "Entity type not found",
+  ENTITY_NOT_FOUND: "Entity not found",
+  FIELD_VALIDATION_FAILED: "One or more field values are invalid",
+  CUSTOM_FIELDS_NOT_ALLOWED:
+    "Custom fields are not allowed for this entity type",
+  FIELD_NAME_CONFLICT: "A field with this name already exists",
+  RELATION_TARGET_NOT_FOUND: "The referenced entity does not exist",
+  FORMULA_EVALUATION_FAILED: "A formula field could not be evaluated",
 };
 
 type StatusCode = 403 | 404 | 409 | 422 | 500;
@@ -92,28 +122,25 @@ export function handleError(err: unknown, c: Context): Response {
   }
 
   if (isWorkflowError(err)) {
-    // TRANSITION_LOCKED gets a Retry-After header so clients know when to retry.
+    const message =
+      WORKFLOW_MESSAGES[err.code] ?? `Workflow error: ${err.code}`;
+    // TRANSITION_LOCKED needs a Retry-After header in addition to the JSON body.
     if (err.code === "TRANSITION_LOCKED") {
-      return new Response(
-        JSON.stringify({
-          error: err.code,
-          message: "Another transition is in progress — retry after 5 seconds",
-        }),
-        {
-          status: 409,
-          headers: { "Content-Type": "application/json", "Retry-After": "5" },
-        },
-      );
+      return new Response(JSON.stringify({ error: err.code, message }), {
+        status: 409,
+        headers: { "Content-Type": "application/json", "Retry-After": "5" },
+      });
     }
     return c.json(
-      { error: err.code, message: err.code },
+      { error: err.code, message },
       toStatus(WORKFLOW_STATUS, err.code),
     );
   }
 
   if (isEntityError(err)) {
+    const message = ENTITY_MESSAGES[err.code] ?? `Entity error: ${err.code}`;
     return c.json(
-      { error: err.code, message: err.code },
+      { error: err.code, message },
       toStatus(ENTITY_STATUS, err.code),
     );
   }

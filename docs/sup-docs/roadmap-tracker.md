@@ -1,6 +1,6 @@
 # Platform Roadmap Tracker
 
-**Last updated:** 2026-06-16
+**Last updated:** 2026-06-16 (post PR #89 merge)
 **Team model:** AI-first (Claude Code as primary engineering partner)
 **Tracking:** Update `% done` and `Status` each session. Log milestones in [week-log.md](week-log.md).
 
@@ -51,12 +51,13 @@
 **Target:** Week 9–16 from project start (~2026-06-02 to 2026-06-27)
 **Exit test:** Penetration test (tenant isolation) passes before any pilot is onboarded.
 
-| ID  | Feature / Track                            | GH Issue(s)            | Owner       | Status         | %   | Notes                                                                                                               |
-| --- | ------------------------------------------ | ---------------------- | ----------- | -------------- | --- | ------------------------------------------------------------------------------------------------------------------- |
-| 2A  | Platform Services — Novu, files, audit log | [#12](../../issues/12) | PrabhuVijit | ✅ Done        | 100 | All phases complete. Tenant lifecycle (PR #86) merged and CI green. Docker build fixed (local driver).              |
-| 2B  | Module system + standard module configs    | [#13](../../issues/13) | PrabhuVijit | ✅ Done        | 100 | Module registry, seed runner, installModule/uninstallModule API, all 7 module seeds, admin modules UI, view_configs |
-| 2C  | Customer portal + agent UI                 | [#14](../../issues/14) | PrabhuVijit | ✅ Done        | 100 | Generic entity list/detail/form in admin-ui + portal, workflow action buttons, view_configs driven field order      |
-| 2D  | No-code builders + reporting               | [#15](../../issues/15) | —           | 🔴 Not started | 0   | Automation builder UI, workflow editor UI, Metabase embed                                                           |
+| ID    | Feature / Track                            | GH Issue(s)                                   | Owner       | Status         | %   | Notes                                                                                                                                                                     |
+| ----- | ------------------------------------------ | --------------------------------------------- | ----------- | -------------- | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2A    | Platform Services — Novu, files, audit log | [#12](../../issues/12)                        | PrabhuVijit | ✅ Done        | 100 | All phases complete. Tenant lifecycle (PR #86) merged and CI green. Docker build fixed (local driver).                                                                    |
+| 2B    | Module system + standard module configs    | [#13](../../issues/13)                        | PrabhuVijit | ✅ Done        | 100 | Module registry, seed runner, installModule/uninstallModule API, all 7 module seeds, admin modules UI, view_configs                                                       |
+| 2C    | Customer portal + agent UI                 | [#14](../../issues/14)                        | PrabhuVijit | ✅ Done        | 100 | Generic entity list/detail/form in admin-ui + portal, workflow action buttons, view_configs driven field order                                                            |
+| 2D    | No-code builders + reporting               | [#15](../../issues/15)                        | —           | 🔴 Not started | 0   | Automation builder UI, workflow editor UI, Metabase embed                                                                                                                 |
+| 2-PRE | Pre-pilot engine hardening                 | [#76](../../issues/76)–[#84](../../issues/84) | PrabhuVijit | ✅ Done        | 100 | ioredis migration, idempotency pre-lock, bulkCreate cache, deleteEntity round-trip, error messages, ActionConfig union, migration renumber, notify async, health endpoint |
 
 ### Phase 2 sub-items (2B module seeds)
 

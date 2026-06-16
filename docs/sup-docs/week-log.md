@@ -5,6 +5,43 @@
 
 ---
 
+## 2026-06-16 — Pre-pilot engine fixes (#76–#84); PR #89 merged
+
+**Session type:** Bug fix / pre-pilot hardening
+**Branch state:** `main`, clean (PR #89 merged — f51ac01)
+
+### Completed this session
+
+**9 issues closed (#74–#84 scope — #74/#75 were prior, #76–#84 this session)**
+
+- **#76 — ioredis migration**: created `@platform/redis` singleton package (`getRedis`, `closeRedis`); removed `node-redis` from `entity-engine`; schema-cache SCAN cursor fixed to string `"0"`, SET EX uses ioredis positional args, DEL spreads keys
+- **#77 — idempotency pre-lock**: moved idempotency read-only SELECT before `FOR UPDATE NOWAIT` in `executeTransition` to short-circuit without acquiring the write lock
+- **#78 — bulkCreateEntities O(N) DB calls**: request-scoped `Map` caches `entityType` + `allFields` per `typeId`; schema stays per-item (uses its own Redis cache)
+- **#79 — deleteEntity single round-trip**: collapsed SELECT + UPDATE into `UPDATE...RETURNING` with `isNull(deletedAt)` in WHERE
+- **#80 — error handler messages**: workflow and entity engine errors return human-readable `message` fields instead of raw codes
+- **#81 — ActionConfig discriminated union**: replaced `Record<string,unknown>` config + unsafe casts in executor with a typed discriminated union; all switch arms narrow cleanly
+- **#82 — duplicate migration prefixes**: renumbered `0001`/`0002` collisions to sequential `0002`/`0003`/`0004`; Drizzle journal updated
+- **#83 — automation-engine notify async**: removed spurious `async` from `executeNotifyAction` (no await); added TODO for re-wire
+- **#84 — /health NODE_ENV leak**: removed `env: env.NODE_ENV` from health response body
+
+**PR #89 review fixes (two rounds):**
+
+- Added `server.deps.inline` for `@platform/redis` + `@platform/db` to all three engine vitest configs
+- Wired `closeRedis()` into graceful shutdown for `apps/api` (new SIGTERM/SIGINT handler) and `apps/worker`
+- Fixed residual `isRedisReady()` call in `invalidateSchemaCache`
+- Added 6-test suite for `@platform/redis` (singleton, constructor args, error handler, quit, reset, no-op)
+- Fixed `tsconfig.json` to exclude test files from tsc build
+- `server.close()` wrapped in `Promise` so in-flight requests drain before `closeRedis()` on SIGTERM
+
+### Phase snapshot
+
+| Track                                | Status                        |
+| ------------------------------------ | ----------------------------- |
+| Issues #76–#84 (pre-pilot hardening) | ✅ All closed — PR #89 merged |
+| 2D (no-code builders + reporting)    | 🔴 Not started — next track   |
+
+---
+
 ## 2026-06-10 — Tenant lifecycle (issue #5 items 1+2); PR #86 open
 
 **Session type:** Implementation

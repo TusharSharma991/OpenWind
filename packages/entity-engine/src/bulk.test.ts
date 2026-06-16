@@ -63,6 +63,8 @@ const mockGetValidationSchema = vi.fn();
 const mockApplyFormulaFields = vi.fn(
   async (_fields: unknown[], values: Record<string, unknown>) => values,
 );
+const mockValidateEntityRefs = vi.fn(async () => []);
+const mockValidateUserRefs = vi.fn(async () => []);
 
 vi.mock("./validation/index.js", () => ({
   getValidationSchema: (...args: unknown[]) => mockGetValidationSchema(...args),
@@ -71,6 +73,8 @@ vi.mock("./validation/index.js", () => ({
   applyFormulaFields: (...args: unknown[]) => mockApplyFormulaFields(...args),
   buildZodSchema: vi.fn(),
   evaluateFormula: vi.fn(),
+  validateEntityRefs: (...args: unknown[]) => mockValidateEntityRefs(...args),
+  validateUserRefs: (...args: unknown[]) => mockValidateUserRefs(...args),
 }));
 
 vi.mock("./lookup-resolver.js", () => ({
@@ -227,6 +231,36 @@ describe("bulkCreateEntities", () => {
     const result = await bulkCreateEntities(dbMock as any, TENANT, []);
     expect(result.created).toHaveLength(0);
     expect(result.errors).toHaveLength(0);
+  });
+
+  it("rejects items whose entity_ref or user_ref fields point to another tenant", async () => {
+    mockGetValidationSchema.mockResolvedValue(passingSchema());
+    mockSelectResult.mockReturnValue([fakeEntityType]);
+    mockValidateEntityRefs.mockResolvedValueOnce([
+      {
+        field: "related_id",
+        code: "INVALID_REFERENCE",
+        message: "Cross-tenant reference",
+      },
+    ]);
+    mockValidateUserRefs.mockResolvedValue([]);
+    mockInsertReturning.mockResolvedValue([makeRow("inst-2")]);
+
+    const inputs = [
+      {
+        entityTypeId: TYPE_ID,
+        fields: { subject: "bad-ref", related_id: "other-tenant-id" },
+      },
+      { entityTypeId: TYPE_ID, fields: { subject: "B" } },
+    ];
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = await bulkCreateEntities(dbMock as any, TENANT, inputs);
+
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]?.index).toBe(0);
+    expect(result.created).toHaveLength(1);
+    expect(dbMock.insert).toHaveBeenCalledTimes(1);
   });
 });
 

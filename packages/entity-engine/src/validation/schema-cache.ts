@@ -91,8 +91,14 @@ export async function invalidateSchemaCache(
 
   try {
     if (redis.isReady) {
-      const keys = await redis.keys(pattern);
-      if (keys.length > 0) await redis.del(keys);
+      const keysToDelete: string[] = [];
+      let cursor = 0;
+      do {
+        const result = await redis.scan(cursor, { MATCH: pattern, COUNT: 100 });
+        cursor = result.cursor;
+        keysToDelete.push(...result.keys);
+      } while (cursor !== 0);
+      if (keysToDelete.length > 0) await redis.del(keysToDelete);
     }
   } catch {
     // Non-fatal

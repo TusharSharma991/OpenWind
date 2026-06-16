@@ -1,4 +1,4 @@
-import { requireAuth, requireRole, requireIntrospection } from "@platform/auth";
+import { requireAuth, requireRole } from "@platform/auth";
 import { db } from "@platform/db";
 import { deleteEntityType } from "@platform/entity-engine";
 import { factory } from "./factory.js";
@@ -7,7 +7,6 @@ import { handleEntityError } from "../../lib/handle-entity-error.js";
 export const deleteEntityTypeHandler = factory.createHandlers(
   requireAuth(),
   requireRole("admin"),
-  requireIntrospection(),
   async (c) => {
     const id = c.req.param("id") ?? "";
     const { tenantId } = c.get("auth");

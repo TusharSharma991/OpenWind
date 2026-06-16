@@ -59,13 +59,16 @@ export type CreateEntityInput = {
   entityTypeId: string;
   fields: Record<string, unknown>;
   createdBy?: string | undefined;
+  actorId?: string | undefined;
   assignedTo?: string | undefined;
   workflowId?: string | undefined;
+  currentState?: string | undefined;
 };
 
 export type UpdateEntityInput = {
   fields?: Record<string, unknown> | undefined;
   assignedTo?: string | null | undefined;
+  currentState?: string | null | undefined;
   /** Actor performing the update — used by the audit hook. */
   actorId?: string | undefined;
   actorType?: "user" | "api_key" | "system" | undefined;

@@ -1,5 +1,5 @@
 import { requireAuth } from "@platform/auth";
-import { db } from "@platform/db";
+import { withTenantContext } from "@platform/db";
 import { getAvailableTransitions } from "@platform/workflow-engine";
 import { factory } from "./factory.js";
 import { handleWorkflowError } from "../../lib/handle-workflow-error.js";
@@ -19,11 +19,8 @@ export const listTransitionsHandler = factory.createHandlers(
       : roles;
 
     try {
-      const transitions = await getAvailableTransitions(
-        db,
-        tenantId,
-        instanceId,
-        actorRoles,
+      const transitions = await withTenantContext(tenantId, (tx) =>
+        getAvailableTransitions(tx, tenantId, instanceId, actorRoles),
       );
       return c.json({ data: transitions });
     } catch (err) {

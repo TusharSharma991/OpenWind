@@ -1,9 +1,17 @@
 import type { Context } from "hono";
-import { EntityError, ValidationError } from "@platform/entity-engine";
+import type { EntityError, ValidationError } from "@platform/entity-engine";
 import { logger } from "@platform/logger";
 
+function isValidationError(err: unknown): err is ValidationError {
+  return err instanceof Error && err.name === "ValidationError";
+}
+
+function isEntityError(err: unknown): err is EntityError {
+  return err instanceof Error && err.name === "EntityError";
+}
+
 export function handleEntityError(c: Context, err: unknown): Response {
-  if (err instanceof ValidationError) {
+  if (isValidationError(err)) {
     return c.json(
       {
         error: "VALIDATION_ERROR",
@@ -14,7 +22,7 @@ export function handleEntityError(c: Context, err: unknown): Response {
     ) as Response;
   }
 
-  if (err instanceof EntityError) {
+  if (isEntityError(err)) {
     switch (err.code) {
       case "ENTITY_TYPE_NOT_FOUND":
       case "ENTITY_NOT_FOUND":

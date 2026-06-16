@@ -9,6 +9,7 @@ import { handleEntityError } from "../../lib/handle-entity-error.js";
 const UpdateEntitySchema = z.object({
   fields: z.record(z.unknown()).optional(),
   assignedTo: z.string().uuid().nullable().optional(),
+  currentState: z.string().optional(),
 });
 
 export const updateEntityHandler = factory.createHandlers(

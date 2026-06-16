@@ -1,0 +1,5 @@
+# Enforce LF line endings for shell scripts — CRLF breaks Docker entrypoints on Linux
+*.sh text eol=lf
+
+# Default: normalize line endings on commit, use platform native on checkout
+* text=auto

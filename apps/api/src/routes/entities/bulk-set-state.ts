@@ -1,7 +1,7 @@
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { requireAuth, requireRole } from "@platform/auth";
-import { db } from "@platform/db";
+import { withTenantContext } from "@platform/db";
 import { bulkSetState, BULK_MAX_ITEMS } from "@platform/entity-engine";
 import { factory } from "./factory.js";
 import { handleEntityError } from "../../lib/handle-entity-error.js";
@@ -27,7 +27,9 @@ export const bulkSetStateHandler = factory.createHandlers(
     const { items } = c.req.valid("json");
 
     try {
-      const result = await bulkSetState(db, tenantId, items);
+      const result = await withTenantContext(tenantId, (tx) =>
+        bulkSetState(tx, tenantId, items),
+      );
       return c.json({ data: result });
     } catch (err) {
       return handleEntityError(c, err);

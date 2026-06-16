@@ -10,3 +10,18 @@ const queryClient = postgres(env.DATABASE_URL, {
 
 export const db = drizzle(queryClient, { schema });
 export type Db = typeof db;
+
+/**
+ * Execute a raw SQL string inside a tenant-scoped transaction using the simple
+ * query protocol (postgres-js `unsafe()`). Required for data-modifying CTEs
+ * and multi-statement SQL that Drizzle's extended protocol cannot handle.
+ */
+export async function executeRawInTenantContext(
+  tenantId: string,
+  rawSql: string,
+): Promise<void> {
+  await queryClient.begin(async (tx) => {
+    await tx`SELECT set_config('app.tenant_id', ${tenantId}, true)`;
+    await tx.unsafe(rawSql);
+  });
+}

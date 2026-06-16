@@ -7,6 +7,7 @@ import {
   timestamp,
   index,
   unique,
+  boolean,
 } from "drizzle-orm/pg-core";
 
 export const tenants = pgTable("tenants", {
@@ -24,6 +25,22 @@ export const tenants = pgTable("tenants", {
   deletionScheduledAt: timestamp("deletion_scheduled_at", {
     withTimezone: true,
   }),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+export const modules = pgTable("modules", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  slug: text("slug").notNull().unique(),
+  name: text("name").notNull(),
+  description: text("description"),
+  version: text("version").notNull(),
+  isSystem: boolean("is_system").default(false).notNull(),
+  minPlan: text("min_plan").default("standard").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -66,6 +83,10 @@ export const tenantUsers = pgTable(
     tenantId: uuid("tenant_id").notNull(),
     /** External user ID — Zitadel JWT sub claim value */
     userId: text("user_id").notNull(),
+    /** Email from JWT — updated on each login */
+    email: text("email"),
+    /** Display name from JWT name/given_name claim — updated on each login */
+    displayName: text("display_name"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -156,38 +177,6 @@ export const adminAuditLog = pgTable(
     tenantCreatedIdx: index("audit_log_tenant_created_idx").on(
       t.tenantId,
       t.createdAt,
-    ),
-  }),
-);
-
-/**
- * viewConfigs — per-tenant UI configuration for entity list/detail/form.
- * Unique per (tenant, entity_type_slug). Module seeds use ON CONFLICT DO NOTHING
- * so tenant overrides are never clobbered by reinstalls.
- */
-export const viewConfigs = pgTable(
-  "view_configs",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    tenantId: uuid("tenant_id").notNull(),
-    entityTypeSlug: text("entity_type_slug").notNull(),
-    /** [{ field, label, width?, sortable? }] */
-    listColumns: jsonb("list_columns").default([]).notNull(),
-    /** [{ group, fields[] }] */
-    detailLayout: jsonb("detail_layout").default([]).notNull(),
-    /** [field_slug, ...] */
-    formFieldOrder: jsonb("form_field_order").default([]).notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .defaultNow()
-      .notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true })
-      .defaultNow()
-      .notNull(),
-  },
-  (t) => ({
-    tenantSlugUnique: unique("view_configs_tenant_slug_unique").on(
-      t.tenantId,
-      t.entityTypeSlug,
     ),
   }),
 );

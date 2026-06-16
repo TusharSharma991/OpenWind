@@ -3,12 +3,16 @@ export interface AuthContext {
   tenantId: string;
   roles: string[];
   email: string;
+  displayName: string;
 }
 
 // Zitadel JWT claim shapes
 export interface ZitadelClaims {
   sub: string;
   email?: string;
+  name?: string;
+  given_name?: string;
+  family_name?: string;
   // Zitadel sets organization context via this claim
   "urn:zitadel:iam:org:id"?: string;
   // Project-level roles: { [projectId]: { [roleName]: { [orgId]: string } } }

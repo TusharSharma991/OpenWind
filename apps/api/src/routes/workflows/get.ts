@@ -1,5 +1,5 @@
 import { requireAuth, requireRole } from "@platform/auth";
-import { db } from "@platform/db";
+import { withTenantContext } from "@platform/db";
 import { getWorkflow } from "@platform/workflow-engine";
 import { factory } from "./factory.js";
 import { handleWorkflowError } from "../../lib/handle-workflow-error.js";
@@ -11,7 +11,9 @@ export const getWorkflowHandler = factory.createHandlers(
     const id = c.req.param("id") ?? "";
     const { tenantId } = c.get("auth");
     try {
-      const workflow = await getWorkflow(db, tenantId, id);
+      const workflow = await withTenantContext(tenantId, (tx) =>
+        getWorkflow(tx, tenantId, id),
+      );
       return c.json({ data: workflow });
     } catch (err) {
       return handleWorkflowError(c, err);

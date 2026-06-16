@@ -21,21 +21,20 @@
  * Re-running is safe — it detects existing resources and skips creation.
  */
 
-import { writeFileSync, readFileSync } from "node:fs";
+import { writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { createSign } from "node:crypto";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
 const ZITADEL_BASE = process.env["ZITADEL_BASE_URL"] ?? "http://localhost:8080";
 const ADMIN_EMAIL =
   process.env["ZITADEL_ADMIN_EMAIL"] ?? "admin@platform.local";
-const ADMIN_PASSWORD = process.env["ZITADEL_ADMIN_PASSWORD"];
-if (!ADMIN_PASSWORD) {
-  console.error(
-    "[setup-auth] ERROR: ZITADEL_ADMIN_PASSWORD env var is required — set it in your shell or .env.local and retry.",
-  );
-  process.exit(1);
-}
+const ADMIN_PASSWORD = process.env["ZITADEL_ADMIN_PASSWORD"] ?? "Admin1234!";
+// Accept a pre-generated PAT directly (bypasses the auth flow entirely)
+const ADMIN_PAT = process.env["ZITADEL_ADMIN_PAT"];
+
+const ENV_FILE_PATH = join(process.cwd(), ".env.local");
 const PROJECT_NAME = "Platform";
 const APP_NAME = "platform-api";
 const INTROSPECTION_SA_NAME = "platform-introspection";
@@ -86,32 +85,110 @@ async function zitadelFetch(
   return res.json() as Promise<unknown>;
 }
 
-// ── Step 1: Authenticate ──────────────────────────────────────────────────────
+// ── JWT Profile Grant helpers (authNexus pattern) ────────────────────────────
 
-async function getAdminToken(): Promise<string> {
-  log("Authenticating as admin...");
+interface ZitadelKeyJson {
+  type: string;
+  keyId: string;
+  key: string; // RSA private key PEM
+  userId: string;
+}
 
+function signJwt(
+  payload: Record<string, unknown>,
+  privateKeyPem: string,
+  keyId: string,
+): string {
+  const b64url = (obj: unknown) =>
+    Buffer.from(JSON.stringify(obj)).toString("base64url");
+  const header = b64url({ alg: "RS256", typ: "JWT", kid: keyId });
+  const body = b64url(payload);
+  const signer = createSign("RSA-SHA256");
+  signer.update(`${header}.${body}`);
+  return `${header}.${body}.${signer.sign(privateKeyPem, "base64url")}`;
+}
+
+async function getTokenFromKeyJson(keyJson: ZitadelKeyJson): Promise<string> {
+  const now = Math.floor(Date.now() / 1000);
+  const jwt = signJwt(
+    {
+      iss: keyJson.userId,
+      sub: keyJson.userId,
+      aud: [ZITADEL_BASE],
+      iat: now,
+      exp: now + 60,
+    },
+    keyJson.key,
+    keyJson.keyId,
+  );
   const res = await fetch(`${ZITADEL_BASE}/oauth/v2/token`, {
     method: "POST",
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    signal: AbortSignal.timeout(15_000),
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
-      grant_type: "password",
-      username: ADMIN_EMAIL,
-      password: ADMIN_PASSWORD,
-      scope: "openid profile email urn:zitadel:iam:org:project:id:zitadel:aud",
-    }),
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      scope: "openid urn:zitadel:iam:org:project:id:zitadel:aud",
+      assertion: jwt,
+    }).toString(),
   });
-
   if (!res.ok) {
-    const body = await res.text();
-    fail(`Failed to authenticate: ${res.status} ${body}`);
+    const text = await res.text();
+    throw new Error(`JWT token exchange failed ${res.status}: ${text}`);
+  }
+  const data = (await res.json()) as { access_token: string };
+  return data.access_token;
+}
+
+function readKeyJsonFromEnvFile(): ZitadelKeyJson | null {
+  // Check process env first (set by docker or CI), then .env.local
+  const fromEnv = process.env["ZITADEL_KEY_JSON"];
+  const raw =
+    fromEnv ??
+    (() => {
+      if (!existsSync(ENV_FILE_PATH)) return undefined;
+      const line = readFileSync(ENV_FILE_PATH, "utf8")
+        .split("\n")
+        .find((l) => l.startsWith("ZITADEL_KEY_JSON="));
+      return line?.slice("ZITADEL_KEY_JSON=".length);
+    })();
+  if (!raw) return null;
+  try {
+    return JSON.parse(
+      Buffer.from(raw, "base64").toString("utf8"),
+    ) as ZitadelKeyJson;
+  } catch {
+    return null;
+  }
+}
+
+// ── Step 1: Authenticate ──────────────────────────────────────────────────────
+// Priority: ZITADEL_KEY_JSON (JWT Profile grant) → ZITADEL_ADMIN_PAT → fail
+
+async function getAdminToken(): Promise<string> {
+  // 1. JWT Profile grant — headless, works after first bootstrap
+  const keyJson = readKeyJsonFromEnvFile();
+  if (keyJson) {
+    log("Authenticating via ZITADEL_KEY_JSON (JWT Profile grant)...");
+    return getTokenFromKeyJson(keyJson);
   }
 
-  const data = (await res.json()) as { access_token?: string };
-  if (!data.access_token) fail("No access_token in auth response");
-  log("Admin token obtained.");
-  return data.access_token;
+  // 2. PAT — explicit override via env var
+  if (ADMIN_PAT) {
+    log("Using ZITADEL_ADMIN_PAT directly.");
+    return ADMIN_PAT;
+  }
+
+  // 3. Neither set — explain what's needed
+  fail(
+    `No Zitadel credentials found.\n\n` +
+      `  Option A (recommended): run \`pnpm bootstrap\` first — it sets up\n` +
+      `  ZITADEL_KEY_JSON in .env.local so future runs are fully headless.\n\n` +
+      `  Option B: generate a PAT manually:\n` +
+      `  1. Open http://localhost:8080\n` +
+      `  2. Log in as ${ADMIN_EMAIL} / ${ADMIN_PASSWORD}\n` +
+      `  3. Avatar → Personal Access Tokens → New (no expiry) → copy\n` +
+      `  4. Run: ZITADEL_ADMIN_PAT=<token> pnpm setup-auth\n`,
+  );
 }
 
 // ── Step 2: Create project (idempotent) ───────────────────────────────────────
@@ -185,9 +262,45 @@ async function ensureOidcApp(
 
   const existing = searchRes.result?.find((a) => a.name === APP_NAME);
   if (existing?.oidcConfig?.clientId) {
-    log(
-      `OIDC app "${APP_NAME}" already exists — skipping. NOTE: client secret cannot be recovered; regenerate if needed.`,
-    );
+    log(`OIDC app "${APP_NAME}" already exists — updating configuration.`);
+    try {
+      await zitadelFetch(
+        `/management/v1/projects/${projectId}/apps/${existing.id}/oidc`,
+        token,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            redirectUris: [
+              "http://localhost:3001/auth/callback",
+              "http://localhost:3000/auth/callback",
+            ],
+            responseTypes: ["OIDC_RESPONSE_TYPE_CODE"],
+            grantTypes: [
+              "OIDC_GRANT_TYPE_AUTHORIZATION_CODE",
+              "OIDC_GRANT_TYPE_REFRESH_TOKEN",
+            ],
+            appType: "OIDC_APP_TYPE_WEB",
+            authMethodType: "OIDC_AUTH_METHOD_TYPE_BASIC",
+            postLogoutRedirectUris: [
+              "http://localhost:3001",
+              "http://localhost:3001/login",
+              "http://localhost:3000",
+            ],
+            accessTokenType: "OIDC_TOKEN_TYPE_JWT",
+            accessTokenRoleAssertion: true,
+            idTokenRoleAssertion: true,
+            idTokenUserinfoAssertion: true,
+            accessTokenLifetime: `${TOKEN_EXPIRY_SECONDS}s`,
+            idTokenLifetime: `${TOKEN_EXPIRY_SECONDS}s`,
+          }),
+        },
+      );
+      log(`Successfully updated existing OIDC app settings.`);
+    } catch (err) {
+      log(
+        `Warning: could not update existing OIDC app configuration — ${String(err)}`,
+      );
+    }
     return {
       clientId: existing.oidcConfig.clientId,
       clientSecret: "<existing — regenerate if needed>",
@@ -201,7 +314,10 @@ async function ensureOidcApp(
       method: "POST",
       body: JSON.stringify({
         name: APP_NAME,
-        redirectUris: ["http://localhost:3000/auth/callback"],
+        redirectUris: [
+          "http://localhost:3001/auth/callback",
+          "http://localhost:3000/auth/callback",
+        ],
         responseTypes: ["OIDC_RESPONSE_TYPE_CODE"],
         grantTypes: [
           "OIDC_GRANT_TYPE_AUTHORIZATION_CODE",
@@ -209,7 +325,11 @@ async function ensureOidcApp(
         ],
         appType: "OIDC_APP_TYPE_WEB",
         authMethodType: "OIDC_AUTH_METHOD_TYPE_BASIC",
-        postLogoutRedirectUris: ["http://localhost:3000"],
+        postLogoutRedirectUris: [
+          "http://localhost:3001",
+          "http://localhost:3001/login",
+          "http://localhost:3000",
+        ],
         accessTokenType: "OIDC_TOKEN_TYPE_JWT",
         accessTokenRoleAssertion: true,
         idTokenRoleAssertion: true,
@@ -244,7 +364,84 @@ async function ensureOidcApp(
   return { clientId: created.clientId, clientSecret: created.clientSecret };
 }
 
-// ── Step 4: Create introspection service account ──────────────────────────────
+// ── Step 4: Create admin role + grant it to the initial admin user ────────────
+
+async function ensureAdminRoleAndGrant(
+  token: string,
+  projectId: string,
+): Promise<void> {
+  // 4a. Create the "admin" role in the project (idempotent)
+  log(`Ensuring "admin" role exists in project ${projectId}...`);
+  try {
+    await zitadelFetch(`/management/v1/projects/${projectId}/roles`, token, {
+      method: "POST",
+      body: JSON.stringify({
+        roleKey: "admin",
+        displayName: "Admin",
+        group: "platform",
+      }),
+    });
+    log(`Created "admin" role.`);
+  } catch (err) {
+    const msg = String(err);
+    // Zitadel returns 409 / "already exists" when the role is present
+    if (msg.includes("409") || msg.toLowerCase().includes("already exist")) {
+      log(`"admin" role already exists — skipping.`);
+    } else {
+      log(`Warning: could not create admin role — ${msg}`);
+    }
+  }
+
+  // 4b. Find the initial admin user so we can grant them the role
+  log(`Looking up admin user (${ADMIN_EMAIL})...`);
+  const searchRes = (await zitadelFetch("/management/v1/users/_search", token, {
+    method: "POST",
+    body: JSON.stringify({
+      queries: [
+        {
+          emailQuery: {
+            emailAddress: ADMIN_EMAIL,
+            method: "TEXT_QUERY_METHOD_EQUALS",
+          },
+        },
+      ],
+    }),
+  })) as { result?: Array<{ id: string; userName: string }> };
+
+  const adminUser = searchRes.result?.[0];
+  if (!adminUser) {
+    log(
+      `Warning: could not find user "${ADMIN_EMAIL}" — skipping role grant. ` +
+        `Create a user grant manually in Zitadel → Project → Authorizations.`,
+    );
+    return;
+  }
+
+  log(
+    `Found admin user (id=${adminUser.id}). Granting "admin" project role...`,
+  );
+
+  // 4c. Grant the admin project role to the user (idempotent via conflict ignore)
+  try {
+    await zitadelFetch(`/management/v1/users/${adminUser.id}/grants`, token, {
+      method: "POST",
+      body: JSON.stringify({
+        projectId,
+        roleKeys: ["admin"],
+      }),
+    });
+    log(`Granted "admin" role to ${ADMIN_EMAIL}.`);
+  } catch (err) {
+    const msg = String(err);
+    if (msg.includes("409") || msg.toLowerCase().includes("already exist")) {
+      log(`"admin" role already granted to ${ADMIN_EMAIL} — skipping.`);
+    } else {
+      log(`Warning: could not grant admin role — ${msg}`);
+    }
+  }
+}
+
+// ── Step 5: Create introspection service account ──────────────────────────────
 
 async function ensureIntrospectionAccount(token: string): Promise<string> {
   log(`Ensuring machine account "${INTROSPECTION_SA_NAME}"...`);
@@ -342,6 +539,10 @@ function writeEnvLocal(vars: Record<string, string>): void {
   );
 
   for (const [k, v] of Object.entries(vars)) {
+    if (v.includes("<existing") && updated.has(k)) {
+      // Keep existing value
+      continue;
+    }
     updated.set(k, v);
   }
 
@@ -369,6 +570,7 @@ async function main(): Promise<void> {
   const projectId = await ensureProject(adminToken);
   const { clientId: oidcClientId, clientSecret: oidcClientSecret } =
     await ensureOidcApp(adminToken, projectId);
+  await ensureAdminRoleAndGrant(adminToken, projectId);
   const saUserId = await ensureIntrospectionAccount(adminToken);
   const {
     clientId: introspectionClientId,
@@ -380,7 +582,8 @@ async function main(): Promise<void> {
 
   writeEnvLocal({
     ZITADEL_ISSUER: issuer,
-    ZITADEL_AUDIENCE: oidcClientId,
+    // Zitadel puts the PROJECT ID in the JWT aud claim, not the OIDC client ID.
+    ZITADEL_AUDIENCE: projectId,
     ZITADEL_INTROSPECTION_URL: introspectionUrl,
     ZITADEL_INTROSPECTION_CLIENT_ID: introspectionClientId,
     ZITADEL_INTROSPECTION_CLIENT_SECRET: introspectionClientSecret,

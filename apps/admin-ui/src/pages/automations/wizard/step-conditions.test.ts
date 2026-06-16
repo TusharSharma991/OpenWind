@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   isGroup,
   cloneNode,
+  ensureIds,
   updateNodeAt,
   removeNodeAt,
 } from "./step-conditions.js";
@@ -46,6 +47,58 @@ describe("cloneNode", () => {
     expect(copy).not.toBe(original);
     expect(copy.children[0]).not.toBe(original.children[0]);
     expect(copy.children[1]).not.toBe(original.children[1]);
+  });
+
+  it("preserves the id field when cloning a group", () => {
+    const original: ConditionGroup = {
+      id: "root-id",
+      op: "and",
+      children: [leaf()],
+    };
+    const copy = cloneNode(original) as ConditionGroup;
+    expect(copy.id).toBe("root-id");
+  });
+});
+
+describe("ensureIds", () => {
+  it("assigns an id to a leaf that has none", () => {
+    const result = ensureIds(leaf()) as ConditionLeaf;
+    expect(typeof result.id).toBe("string");
+    expect(result.id!.length).toBeGreaterThan(0);
+  });
+
+  it("preserves an existing id on a leaf", () => {
+    const node: ConditionLeaf = {
+      id: "existing",
+      op: "eq",
+      field: "x",
+      value: "y",
+    };
+    const result = ensureIds(node) as ConditionLeaf;
+    expect(result.id).toBe("existing");
+  });
+
+  it("assigns ids recursively to a group and all children", () => {
+    const root = group("and", [leaf("a"), group("or", [leaf("b")])]);
+    const result = ensureIds(root) as ConditionGroup;
+    expect(typeof result.id).toBe("string");
+    expect(typeof (result.children[0] as ConditionLeaf).id).toBe("string");
+    const inner = result.children[1] as ConditionGroup;
+    expect(typeof inner.id).toBe("string");
+    expect(typeof (inner.children[0] as ConditionLeaf).id).toBe("string");
+  });
+
+  it("generates unique ids for each node", () => {
+    const root = group("and", [leaf("a"), leaf("b"), leaf("c")]);
+    const result = ensureIds(root) as ConditionGroup;
+    const ids = result.children.map((c) => (c as ConditionLeaf).id);
+    expect(new Set(ids).size).toBe(3);
+  });
+
+  it("does not mutate the original node", () => {
+    const original = leaf("x");
+    ensureIds(original);
+    expect(original.id).toBeUndefined();
   });
 });
 

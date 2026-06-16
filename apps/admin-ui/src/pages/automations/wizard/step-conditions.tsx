@@ -5,6 +5,7 @@ import type {
   ConditionGroup,
   ConditionLeaf,
 } from "./types.js";
+import { genId } from "./types.js";
 
 type Props = {
   data: WizardData;
@@ -35,9 +36,22 @@ export function isGroup(node: ConditionNode): node is ConditionGroup {
 
 export function cloneNode(node: ConditionNode): ConditionNode {
   if (isGroup(node)) {
-    return { op: node.op, children: node.children.map(cloneNode) };
+    // spread preserves id (and any future fields); override children with deep copies
+    return { ...node, children: node.children.map(cloneNode) };
   }
   return { ...node };
+}
+
+/** Recursively assigns a stable id to any node missing one (e.g. rules loaded from server). */
+export function ensureIds(node: ConditionNode): ConditionNode {
+  if (isGroup(node)) {
+    return {
+      ...node,
+      id: node.id ?? genId(),
+      children: node.children.map(ensureIds),
+    };
+  }
+  return { ...node, id: node.id ?? genId() };
 }
 
 export function updateNodeAt(
@@ -87,7 +101,7 @@ function addLeafAt(root: ConditionGroup, path: number[]): ConditionGroup {
   for (const idx of path) {
     cursor = cursor.children[idx] as ConditionGroup;
   }
-  cursor.children.push({ op: "eq", field: "", value: "" });
+  cursor.children.push({ id: genId(), op: "eq", field: "", value: "" });
   return clone;
 }
 
@@ -98,8 +112,9 @@ function addGroupAt(root: ConditionGroup, path: number[]): ConditionGroup {
     cursor = cursor.children[idx] as ConditionGroup;
   }
   cursor.children.push({
+    id: genId(),
     op: "and",
-    children: [{ op: "eq", field: "", value: "" }],
+    children: [{ id: genId(), op: "eq", field: "", value: "" }],
   });
   return clone;
 }
@@ -180,7 +195,7 @@ function ConditionNodeEditor({
         {/* Children */}
         {node.children.map((child, i) => (
           <ConditionNodeEditor
-            key={i}
+            key={child.id ?? String(i)}
             node={child}
             path={[...path, i]}
             depth={depth + 1}
@@ -290,8 +305,9 @@ export function StepConditions({ data, onChange }: Props): React.ReactElement {
   function init(): void {
     onChange({
       conditions: {
+        id: genId(),
         op: "and",
-        children: [{ op: "eq", field: "", value: "" }],
+        children: [{ id: genId(), op: "eq", field: "", value: "" }],
       },
     });
   }

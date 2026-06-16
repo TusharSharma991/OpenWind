@@ -9,6 +9,7 @@ export type TriggerType =
   | "entity.assigned";
 
 export type ConditionLeaf = {
+  id?: string; // local only, for React keys — not validated by automation engine
   op:
     | "eq"
     | "neq"
@@ -25,9 +26,14 @@ export type ConditionLeaf = {
 };
 
 export type ConditionGroup = {
+  id?: string; // local only, for React keys — not validated by automation engine
   op: "and" | "or";
   children: ConditionNode[];
 };
+
+export function genId(): string {
+  return crypto.randomUUID();
+}
 
 export type ConditionNode = ConditionLeaf | ConditionGroup;
 

@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { fetchWithAuth, API_URL } from "../../../lib/api.js";
-import { EMPTY_WIZARD } from "./types.js";
-import type { WizardData, ActionItem } from "./types.js";
-import { genId } from "./step-actions.js";
+import { EMPTY_WIZARD, genId } from "./types.js";
+import type { WizardData, ActionItem, ConditionGroup } from "./types.js";
+import { ensureIds } from "./step-conditions.js";
 import { StepTrigger } from "./step-trigger.js";
 import { StepConditions } from "./step-conditions.js";
 import { StepActions } from "./step-actions.js";
@@ -57,8 +57,10 @@ export function AutomationWizard(): React.ReactElement {
             (rule.triggerType as WizardData["triggerType"] | undefined) ?? "",
           triggerConfig:
             (rule.triggerConfig as Record<string, unknown> | undefined) ?? {},
-          conditions:
-            (rule.conditions as WizardData["conditions"] | undefined) ?? null,
+          // Assign stable ids to nodes loaded from server — server stores the tree without ids
+          conditions: rule.conditions
+            ? (ensureIds(rule.conditions as ConditionGroup) as ConditionGroup)
+            : null,
           // Server strips the local `id` field — assign fresh IDs so React keys are stable
           actions: (
             (rule.actions as Array<Omit<ActionItem, "id">> | undefined) ?? []

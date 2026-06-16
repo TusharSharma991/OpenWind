@@ -61,17 +61,21 @@ export function StepTrigger({ data, onChange }: Props): React.ReactElement {
   const [loadingFields, setLoadingFields] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     const t = data.triggerType;
+
     if (
       t === "workflow.entered_state" ||
       t === "workflow.transitioned" ||
       t === "workflow.sla_breached"
     ) {
       setLoadingWorkflows(true);
+      // N+1: fetches each workflow individually for states — a future /workflows?includeStates=true
+      // param would collapse this into one request (requires API change, tracked separately)
       fetchWithAuth(`${API_URL}/workflows`)
         .then((res) => {
+          if (cancelled) return;
           const list = (res as { data?: WorkflowOption[] }).data ?? [];
-          // fetch states for each workflow
           return Promise.all(
             list.map((w) =>
               fetchWithAuth(`${API_URL}/workflows/${w.id}`).then(
@@ -80,9 +84,15 @@ export function StepTrigger({ data, onChange }: Props): React.ReactElement {
             ),
           );
         })
-        .then((wf) => setWorkflows(wf))
-        .catch(() => setWorkflows([]))
-        .finally(() => setLoadingWorkflows(false));
+        .then((wf) => {
+          if (!cancelled && wf) setWorkflows(wf);
+        })
+        .catch(() => {
+          if (!cancelled) setWorkflows([]);
+        })
+        .finally(() => {
+          if (!cancelled) setLoadingWorkflows(false);
+        });
     }
 
     if (
@@ -93,11 +103,20 @@ export function StepTrigger({ data, onChange }: Props): React.ReactElement {
       setLoadingEntityTypes(true);
       fetchWithAuth(`${API_URL}/entity-types`)
         .then((res) => {
-          setEntityTypes((res as { data: EntityTypeOption[] }).data);
+          if (!cancelled)
+            setEntityTypes((res as { data: EntityTypeOption[] }).data);
         })
-        .catch(() => setEntityTypes([]))
-        .finally(() => setLoadingEntityTypes(false));
+        .catch(() => {
+          if (!cancelled) setEntityTypes([]);
+        })
+        .finally(() => {
+          if (!cancelled) setLoadingEntityTypes(false);
+        });
     }
+
+    return () => {
+      cancelled = true;
+    };
   }, [data.triggerType]);
 
   // Load fields when entity type selected (for field.changed)
@@ -106,11 +125,21 @@ export function StepTrigger({ data, onChange }: Props): React.ReactElement {
     | undefined;
   useEffect(() => {
     if (data.triggerType !== "field.changed" || !selectedEntityTypeId) return;
+    let cancelled = false;
     setLoadingFields(true);
     fetchWithAuth(`${API_URL}/entity-types/${selectedEntityTypeId}/fields`)
-      .then((res) => setFields((res as { data: FieldOption[] }).data))
-      .catch(() => setFields([]))
-      .finally(() => setLoadingFields(false));
+      .then((res) => {
+        if (!cancelled) setFields((res as { data: FieldOption[] }).data);
+      })
+      .catch(() => {
+        if (!cancelled) setFields([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingFields(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [data.triggerType, selectedEntityTypeId]);
 
   function selectTrigger(type: TriggerType): void {

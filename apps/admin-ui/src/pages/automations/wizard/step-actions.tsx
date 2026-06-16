@@ -1,5 +1,6 @@
 import React from "react";
 import type { WizardData, ActionItem, ActionType } from "./types.js";
+import { genId } from "./types.js";
 
 type Props = {
   data: WizardData;
@@ -19,10 +20,6 @@ const ACTION_TYPE_DESCRIPTIONS: Record<ActionType, string> = {
   transition: "Move the record to another state",
   webhook: "HTTP POST to an external URL",
 };
-
-export function genId(): string {
-  return crypto.randomUUID();
-}
 
 function NotifyConfig({
   config,
@@ -289,6 +286,22 @@ function WebhookConfig({
         />
         Include record payload in request body
       </label>
+
+      <p
+        style={{
+          fontSize: "11px",
+          color: "var(--text-muted)",
+          marginTop: "6px",
+          padding: "8px 10px",
+          background: "var(--bg-secondary)",
+          borderRadius: "6px",
+          lineHeight: 1.5,
+        }}
+      >
+        <strong>Note:</strong> The automation engine validates webhook URLs
+        server-side before each call (DNS resolution + private IP blocklist).
+        Calls to private/internal addresses are blocked automatically.
+      </p>
     </div>
   );
 }

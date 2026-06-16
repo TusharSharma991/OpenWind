@@ -1,16 +1,18 @@
 {
   "name": "platform",
   "private": true,
-  "packageManager": "pnpm@9.0.0",
+  "packageManager": "pnpm@9.15.9",
   "engines": {
     "node": ">=22.0.0",
-    "pnpm": ">=9.0.0"
+    "pnpm": ">=9.15.9"
   },
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev --parallel",
     "test": "turbo run test",
+    "pretest:isolation": "node -e \"process.env.CI||require('child_process').execSync('tsx scripts/check-docker-services.ts postgres redis openbao',{stdio:'inherit'})\"",
     "test:isolation": "turbo run test:isolation",
+    "pretest:e2e": "node -e \"process.env.CI||require('child_process').execSync('tsx scripts/check-docker-services.ts postgres redis openbao minio zitadel',{stdio:'inherit'})\"",
     "test:e2e": "turbo run test:e2e",
     "typecheck": "turbo run typecheck",
     "lint": "turbo run lint",
@@ -46,8 +48,8 @@
     "husky": "^9.0.0",
     "lint-staged": "^15.0.0",
     "prettier": "^3.3.0",
-    "tsx": "^4.0.0",
     "turbo": "^2.0.0",
+    "tsx": "^4.22.4",
     "typescript": "^5.5.0"
   },
   "pnpm": {

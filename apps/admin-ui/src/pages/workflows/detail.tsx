@@ -1,4 +1,25 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  useSortable,
+  horizontalListSortingStrategy,
+  arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { useOne } from "@refinedev/core";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { fetchWithAuth, API_URL } from "../../lib/api.js";
@@ -216,153 +237,595 @@ function StateDot({ color }: { color: string | null }): React.ReactElement {
   );
 }
 
-/* ── UX4G Pipeline Flow ─────────────────────────────────────── */
+/* ── State Edit Popover (T16) ───────────────────────────────── */
+function StateEditPopover({
+  state,
+  workflowId,
+  anchorLeft,
+  onSave,
+  onClose,
+}: {
+  state: WorkflowState;
+  workflowId: string | null;
+  anchorLeft: number;
+  onSave: () => void;
+  onClose: () => void;
+}): React.ReactElement {
+  const [form, setForm] = useState({
+    label: state.label,
+    color: state.color ?? "#6366f1",
+    slaHours: state.slaHours !== null ? String(state.slaHours) : "",
+    isTerminal: state.isTerminal,
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent): void {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node))
+        onClose();
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [onClose]);
+
+  async function handleSave(): Promise<void> {
+    if (!workflowId) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await fetchWithAuth(
+        `${API_URL}/workflows/${workflowId}/states/${state.id}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            label: form.label.trim(),
+            color: form.color || undefined,
+            slaHours: form.slaHours ? parseInt(form.slaHours, 10) : null,
+            isTerminal: form.isTerminal,
+          }),
+        },
+      );
+      onSave();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div
+      ref={popoverRef}
+      style={{
+        position: "absolute",
+        top: "calc(100% + 8px)",
+        left: Math.max(0, anchorLeft),
+        width: "240px",
+        background: "var(--bg-primary)",
+        border: "1px solid var(--border-color)",
+        borderRadius: "12px",
+        boxShadow: "var(--shadow-lg)",
+        padding: "16px",
+        zIndex: 200,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: "12px",
+        }}
+      >
+        <span style={{ fontWeight: 600, fontSize: "13px" }}>
+          Edit: <code style={{ fontSize: "11px" }}>{state.name}</code>
+        </span>
+        <button
+          onClick={onClose}
+          style={{
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            fontSize: "16px",
+            color: "var(--text-muted)",
+            lineHeight: 1,
+            padding: "0 2px",
+          }}
+        >
+          ×
+        </button>
+      </div>
+
+      <div className="form-group" style={{ marginBottom: "10px" }}>
+        <label className="form-label">Label</label>
+        <input
+          className="form-input"
+          value={form.label}
+          onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
+          autoFocus
+        />
+      </div>
+
+      <div className="form-group" style={{ marginBottom: "10px" }}>
+        <label className="form-label">Color</label>
+        <div style={{ display: "flex", gap: "8px" }}>
+          <input
+            type="color"
+            value={form.color}
+            onChange={(e) => setForm((f) => ({ ...f, color: e.target.value }))}
+            style={{
+              width: "36px",
+              height: "32px",
+              border: "none",
+              borderRadius: "4px",
+              cursor: "pointer",
+            }}
+          />
+          <input
+            className="form-input"
+            value={form.color}
+            onChange={(e) => setForm((f) => ({ ...f, color: e.target.value }))}
+            style={{ flex: 1, fontSize: "12px" }}
+          />
+        </div>
+      </div>
+
+      <div className="form-group" style={{ marginBottom: "10px" }}>
+        <label className="form-label">SLA hours</label>
+        <input
+          type="number"
+          className="form-input"
+          min={1}
+          placeholder="e.g. 24"
+          value={form.slaHours}
+          onChange={(e) => setForm((f) => ({ ...f, slaHours: e.target.value }))}
+        />
+      </div>
+
+      <label
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "8px",
+          fontSize: "13px",
+          marginBottom: "14px",
+          cursor: "pointer",
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={form.isTerminal}
+          onChange={(e) =>
+            setForm((f) => ({ ...f, isTerminal: e.target.checked }))
+          }
+        />
+        Terminal state
+      </label>
+
+      {error && (
+        <div
+          className="alert alert-error"
+          style={{ marginBottom: "10px", fontSize: "12px" }}
+        >
+          {error}
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
+        <button
+          className="btn btn-secondary"
+          onClick={onClose}
+          disabled={saving}
+          style={{ fontSize: "12px" }}
+        >
+          Cancel
+        </button>
+        <button
+          className="btn btn-primary"
+          onClick={() => void handleSave()}
+          disabled={saving || !form.label.trim()}
+          style={{ fontSize: "12px" }}
+        >
+          {saving ? "Saving…" : "Save"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ── Sortable state node (T17) ──────────────────────────────── */
+function SortableStateNode({
+  state,
+  isInitial,
+  isLast,
+  onEdit,
+  setRef,
+}: {
+  state: WorkflowState;
+  isInitial: boolean;
+  isLast: boolean;
+  onEdit: () => void;
+  setRef: (el: HTMLDivElement | null) => void;
+}): React.ReactElement {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: state.id });
+  const accent = state.color ?? "var(--accent-primary)";
+
+  function handleRef(el: HTMLDivElement | null): void {
+    setNodeRef(el as unknown as HTMLElement);
+    setRef(el);
+  }
+
+  return (
+    <React.Fragment>
+      <div
+        ref={handleRef}
+        style={{
+          transform: CSS.Transform.toString(transform),
+          transition: transition ?? undefined,
+          opacity: isDragging ? 0.45 : 1,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: "6px",
+          minWidth: "90px",
+          cursor: "grab",
+        }}
+        {...attributes}
+        {...listeners}
+      >
+        <div
+          style={{
+            width: "36px",
+            height: "36px",
+            borderRadius: "50%",
+            background: `${accent}22`,
+            border: `2px solid ${accent}`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            position: "relative",
+            cursor: "pointer",
+            transition: "box-shadow 0.15s",
+          }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onEdit();
+          }}
+          title="Click to edit state"
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLDivElement).style.boxShadow =
+              `0 0 0 3px ${accent}44`;
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLDivElement).style.boxShadow = "none";
+          }}
+        >
+          <span
+            style={{
+              width: "10px",
+              height: "10px",
+              borderRadius: "50%",
+              background: accent,
+              display: "block",
+            }}
+          />
+          {isInitial && (
+            <span
+              style={{
+                position: "absolute",
+                top: "-8px",
+                left: "50%",
+                transform: "translateX(-50%)",
+                fontSize: "9px",
+                fontWeight: 700,
+                color: "var(--accent-primary)",
+                letterSpacing: "0.3px",
+                whiteSpace: "nowrap",
+              }}
+            >
+              START
+            </span>
+          )}
+          {state.isTerminal && (
+            <span
+              style={{
+                position: "absolute",
+                bottom: "-8px",
+                left: "50%",
+                transform: "translateX(-50%)",
+                fontSize: "9px",
+                fontWeight: 700,
+                color: "var(--text-muted)",
+                letterSpacing: "0.3px",
+                whiteSpace: "nowrap",
+              }}
+            >
+              END
+            </span>
+          )}
+        </div>
+        <div style={{ textAlign: "center" }}>
+          <div
+            style={{
+              fontSize: "12px",
+              fontWeight: 600,
+              color: "var(--text-primary)",
+              lineHeight: 1.2,
+            }}
+          >
+            {state.label}
+          </div>
+          {state.slaHours !== null && (
+            <div
+              style={{
+                fontSize: "10px",
+                color: "var(--warning)",
+                fontWeight: 600,
+                marginTop: "2px",
+              }}
+            >
+              SLA {state.slaHours}h
+            </div>
+          )}
+        </div>
+      </div>
+      {!isLast && (
+        <div
+          style={{
+            flex: 1,
+            minWidth: "24px",
+            height: "2px",
+            background: "var(--border-color)",
+            position: "relative",
+            top: "-12px",
+            margin: "0 4px",
+          }}
+        >
+          <span
+            style={{
+              position: "absolute",
+              right: "-4px",
+              top: "50%",
+              transform: "translateY(-50%)",
+              color: "var(--text-muted)",
+              fontSize: "14px",
+              lineHeight: 1,
+            }}
+          >
+            ›
+          </span>
+        </div>
+      )}
+    </React.Fragment>
+  );
+}
+
+/* ── UX4G Pipeline Flow (T16 + T17 + T18) ──────────────────── */
 function StateFlowDiagram({
   states,
+  transitions,
   initialState,
+  workflowId,
+  onStateUpdated,
 }: {
   states: WorkflowState[];
   transitions: WorkflowTransition[];
   initialState: string;
+  workflowId: string | null;
+  onStateUpdated: () => void;
 }): React.ReactElement {
-  const sorted = [...states].sort((a, b) => a.sortOrder - b.sortOrder);
+  const [localStates, setLocalStates] = useState(() =>
+    [...states].sort((a, b) => a.sortOrder - b.sortOrder),
+  );
+  const [popoverState, setPopoverState] = useState<WorkflowState | null>(null);
+  const [popoverLeft, setPopoverLeft] = useState(0);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const nodeRefs = useRef(new Map<string, HTMLDivElement>());
+  const [nodeCenters, setNodeCenters] = useState<Record<string, number>>({});
+  const [containerWidth, setContainerWidth] = useState(0);
+
+  // Sync when parent refetches
+  useEffect(() => {
+    setLocalStates([...states].sort((a, b) => a.sortOrder - b.sortOrder));
+  }, [states]);
+
+  // Measure node centers for SVG arcs (T18)
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const containerRect = container.getBoundingClientRect();
+    const centers: Record<string, number> = {};
+    for (const [sid, el] of nodeRefs.current) {
+      const rect = el.getBoundingClientRect();
+      centers[sid] = rect.left + rect.width / 2 - containerRect.left;
+    }
+    setNodeCenters(centers);
+    setContainerWidth(containerRect.width);
+  });
+
+  const sensors = useSensors(useSensor(PointerSensor));
+
+  async function handleDragEnd(event: DragEndEvent): Promise<void> {
+    const { active, over } = event;
+    if (!over || active.id === over.id || !workflowId) return;
+
+    const oldIndex = localStates.findIndex((s) => s.id === active.id);
+    const newIndex = localStates.findIndex((s) => s.id === over.id);
+    const reordered = arrayMove(localStates, oldIndex, newIndex).map(
+      (s, i) => ({
+        ...s,
+        sortOrder: i * 10,
+      }),
+    );
+
+    // Optimistic
+    setLocalStates(reordered);
+
+    const snapshot = localStates;
+    try {
+      await Promise.all(
+        reordered
+          .filter((s, i) => s.sortOrder !== (snapshot[i]?.sortOrder ?? -1))
+          .map((s) =>
+            fetchWithAuth(`${API_URL}/workflows/${workflowId}/states/${s.id}`, {
+              method: "PATCH",
+              body: JSON.stringify({ sortOrder: s.sortOrder }),
+            }),
+          ),
+      );
+      onStateUpdated();
+    } catch {
+      setLocalStates(snapshot);
+    }
+  }
+
+  function openPopover(state: WorkflowState): void {
+    setPopoverState(state);
+    const el = nodeRefs.current.get(state.id);
+    const container = containerRef.current;
+    if (el && container) {
+      const elRect = el.getBoundingClientRect();
+      const containerRect = container.getBoundingClientRect();
+      setPopoverLeft(elRect.left - containerRect.left + elRect.width / 2 - 120);
+    }
+  }
+
+  // T18: SVG arcs for non-adjacent transitions
+  const stateIndexMap = new Map(localStates.map((s, i) => [s.name, i]));
+  const nonAdjacentTransitions = transitions.filter((t) => {
+    const fromIdx = stateIndexMap.get(t.fromState) ?? -1;
+    const toIdx = stateIndexMap.get(t.toState) ?? -1;
+    return fromIdx >= 0 && toIdx >= 0 && Math.abs(fromIdx - toIdx) > 1;
+  });
+  const maxArcHeight =
+    nonAdjacentTransitions.length > 0
+      ? Math.max(
+          ...nonAdjacentTransitions.map((t) => {
+            const gap =
+              Math.abs(
+                (stateIndexMap.get(t.fromState) ?? 0) -
+                  (stateIndexMap.get(t.toState) ?? 0),
+              ) - 1;
+            return gap * 18 + 20;
+          }),
+        )
+      : 0;
+
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "0",
-        flexWrap: "wrap",
-        padding: "8px 0 4px",
-      }}
-    >
-      {sorted.map((state, i) => {
-        const isLast = i === sorted.length - 1;
-        const accent = state.color ?? "var(--accent-primary)";
-        const isInitial = state.name === initialState;
-        return (
-          <React.Fragment key={state.id}>
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: "6px",
-                minWidth: "90px",
-              }}
+    <div ref={containerRef} style={{ position: "relative" }}>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={(e) => void handleDragEnd(e)}
+      >
+        <SortableContext
+          items={localStates.map((s) => s.id)}
+          strategy={horizontalListSortingStrategy}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "0",
+              flexWrap: "wrap",
+              padding: "8px 0 4px",
+            }}
+          >
+            {localStates.map((state, i) => (
+              <SortableStateNode
+                key={state.id}
+                state={state}
+                isInitial={state.name === initialState}
+                isLast={i === localStates.length - 1}
+                onEdit={() => openPopover(state)}
+                setRef={(el) => {
+                  if (el) nodeRefs.current.set(state.id, el);
+                  else nodeRefs.current.delete(state.id);
+                }}
+              />
+            ))}
+          </div>
+        </SortableContext>
+      </DndContext>
+
+      {/* SVG arcs for non-adjacent transitions (T18) */}
+      {nonAdjacentTransitions.length > 0 && containerWidth > 0 && (
+        <svg
+          width={containerWidth}
+          height={maxArcHeight}
+          style={{
+            display: "block",
+            overflow: "visible",
+            pointerEvents: "none",
+          }}
+        >
+          <defs>
+            <marker
+              id="arc-arrow"
+              markerWidth="6"
+              markerHeight="6"
+              refX="5"
+              refY="3"
+              orient="auto"
             >
-              <div
-                style={{
-                  width: "36px",
-                  height: "36px",
-                  borderRadius: "50%",
-                  background: `${accent}22`,
-                  border: `2px solid ${accent}`,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  position: "relative",
-                }}
-              >
-                <span
-                  style={{
-                    width: "10px",
-                    height: "10px",
-                    borderRadius: "50%",
-                    background: accent,
-                    display: "block",
-                  }}
-                />
-                {isInitial && (
-                  <span
-                    style={{
-                      position: "absolute",
-                      top: "-8px",
-                      left: "50%",
-                      transform: "translateX(-50%)",
-                      fontSize: "9px",
-                      fontWeight: 700,
-                      color: "var(--accent-primary)",
-                      letterSpacing: "0.3px",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    START
-                  </span>
-                )}
-                {state.isTerminal && (
-                  <span
-                    style={{
-                      position: "absolute",
-                      bottom: "-8px",
-                      left: "50%",
-                      transform: "translateX(-50%)",
-                      fontSize: "9px",
-                      fontWeight: 700,
-                      color: "var(--text-muted)",
-                      letterSpacing: "0.3px",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    END
-                  </span>
-                )}
-              </div>
-              <div style={{ textAlign: "center" }}>
-                <div
-                  style={{
-                    fontSize: "12px",
-                    fontWeight: 600,
-                    color: "var(--text-primary)",
-                    lineHeight: 1.2,
-                  }}
-                >
-                  {state.label}
-                </div>
-                {state.slaHours !== null && (
-                  <div
-                    style={{
-                      fontSize: "10px",
-                      color: "var(--warning)",
-                      fontWeight: 600,
-                      marginTop: "2px",
-                    }}
-                  >
-                    SLA {state.slaHours}h
-                  </div>
-                )}
-              </div>
-            </div>
-            {!isLast && (
-              <div
-                style={{
-                  flex: 1,
-                  minWidth: "24px",
-                  height: "2px",
-                  background: "var(--border-color)",
-                  position: "relative",
-                  top: "-12px",
-                  margin: "0 4px",
-                }}
-              >
-                <span
-                  style={{
-                    position: "absolute",
-                    right: "-4px",
-                    top: "50%",
-                    transform: "translateY(-50%)",
-                    color: "var(--text-muted)",
-                    fontSize: "14px",
-                    lineHeight: 1,
-                  }}
-                >
-                  ›
-                </span>
-              </div>
-            )}
-          </React.Fragment>
-        );
-      })}
+              <path
+                d="M 0 0 L 6 3 L 0 6 Z"
+                fill="var(--accent-primary)"
+                opacity="0.55"
+              />
+            </marker>
+          </defs>
+          {nonAdjacentTransitions.map((t) => {
+            const fromState = localStates.find((s) => s.name === t.fromState);
+            const toState = localStates.find((s) => s.name === t.toState);
+            if (!fromState || !toState) return null;
+            const x1 = nodeCenters[fromState.id] ?? 0;
+            const x2 = nodeCenters[toState.id] ?? 0;
+            const gap =
+              Math.abs(
+                (stateIndexMap.get(t.fromState) ?? 0) -
+                  (stateIndexMap.get(t.toState) ?? 0),
+              ) - 1;
+            const arcH = gap * 18 + 20;
+            const cx = (x1 + x2) / 2;
+            return (
+              <path
+                key={t.id}
+                d={`M ${x1} 4 Q ${cx} ${arcH} ${x2} 4`}
+                fill="none"
+                stroke="var(--accent-primary)"
+                strokeWidth="1.5"
+                strokeDasharray="5 3"
+                opacity="0.55"
+                markerEnd="url(#arc-arrow)"
+              />
+            );
+          })}
+        </svg>
+      )}
+
+      {/* State inline edit popover (T16) */}
+      {popoverState && (
+        <StateEditPopover
+          state={popoverState}
+          workflowId={workflowId}
+          anchorLeft={popoverLeft}
+          onSave={() => {
+            setPopoverState(null);
+            onStateUpdated();
+          }}
+          onClose={() => setPopoverState(null)}
+        />
+      )}
     </div>
   );
 }
@@ -1171,6 +1634,8 @@ export function WorkflowDetail(): React.ReactElement {
               states={workflow.states}
               transitions={workflow.transitions}
               initialState={workflow.initialState}
+              workflowId={id}
+              onStateUpdated={() => void refetch()}
             />
           </div>
 

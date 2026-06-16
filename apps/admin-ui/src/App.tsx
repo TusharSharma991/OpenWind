@@ -28,6 +28,8 @@ import { Settings } from "./pages/settings.js";
 import { CustomerRecordList } from "./pages/customer/record-list.js";
 import { CustomerRecordCreate } from "./pages/customer/record-create.js";
 import { CustomerRecordDetail } from "./pages/customer/record-detail.js";
+import { Automations } from "./pages/automations/index.js";
+import { AutomationWizard } from "./pages/automations/wizard/wizard.js";
 import "./index.css";
 
 export function App(): React.ReactElement {
@@ -101,6 +103,14 @@ export function App(): React.ReactElement {
             <Route
               path="/workflows/:workflowSlug/records"
               element={<WorkflowRecords />}
+            />
+
+            {/* Automation rules */}
+            <Route path="/automations" element={<Automations />} />
+            <Route path="/automations/new" element={<AutomationWizard />} />
+            <Route
+              path="/automations/:id/edit"
+              element={<AutomationWizard />}
             />
 
             <Route path="/settings" element={<Settings />} />

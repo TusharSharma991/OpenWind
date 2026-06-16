@@ -37,6 +37,14 @@ type Transition = {
   requiresFields: string[];
 };
 
+// ── Saved view type (T19) ──────────────────────────────────────────────────────
+type SavedView = {
+  id: string;
+  name: string;
+  filterConfig: { search?: string } | null;
+  isDefault: boolean;
+};
+
 // ── Module-level drag state ────────────────────────────────────────────────────
 // These are set synchronously in dragstart and read synchronously in dragenter.
 // React state updates are async — they would be null when dragenter fires in the
@@ -522,6 +530,22 @@ export function CustomerRecordList(): React.ReactElement {
   const [transitioning, setTransitioning] = useState(false);
   const [transError, setTransError] = useState<string | null>(null);
 
+  // T19: Saved views
+  const [savedViews, setSavedViews] = useState<SavedView[]>([]);
+  const [activeViewId, setActiveViewId] = useState<string | null>(null);
+  const [filterText, setFilterText] = useState("");
+  const [showSaveViewModal, setShowSaveViewModal] = useState(false);
+  const [newViewName, setNewViewName] = useState("");
+  const [newViewDefault, setNewViewDefault] = useState(false);
+  const [savingView, setSavingView] = useState(false);
+  const [viewsOpen, setViewsOpen] = useState(false);
+  const viewsDropdownRef = useRef<HTMLDivElement>(null);
+
+  // T20: Export
+  const [exportLoading, setExportLoading] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const exportLinkRef = useRef<HTMLAnchorElement>(null);
+
   // Local column order — allows drag-reorder without a backend call
   const [colOrder, setColOrder] = useState<string[]>([]);
 
@@ -582,14 +606,116 @@ export function CustomerRecordList(): React.ReactElement {
       .finally(() => setLoading(false));
   }, [entityTypeId]);
 
+  // T19: Load saved views + auto-apply default
+  useEffect(() => {
+    if (!entityTypeId) return;
+    fetchWithAuth(`${API_URL}/saved-views?entityTypeId=${entityTypeId}`)
+      .then((res) => {
+        const views = (res as { data?: SavedView[] }).data ?? [];
+        setSavedViews(views);
+        const def = views.find((v) => v.isDefault);
+        if (def) {
+          setActiveViewId(def.id);
+          setFilterText(def.filterConfig?.search ?? "");
+        }
+      })
+      .catch(() => {
+        /* non-critical, ignore */
+      });
+  }, [entityTypeId]);
+
+  // Close views dropdown on outside click
+  useEffect(() => {
+    function handle(e: MouseEvent): void {
+      if (
+        viewsDropdownRef.current &&
+        !viewsDropdownRef.current.contains(e.target as Node)
+      )
+        setViewsOpen(false);
+    }
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, []);
+
+  async function handleSaveView(): Promise<void> {
+    if (!entityTypeId || !newViewName.trim()) return;
+    setSavingView(true);
+    try {
+      const res = await fetchWithAuth(`${API_URL}/saved-views`, {
+        method: "POST",
+        body: JSON.stringify({
+          entityTypeId,
+          name: newViewName.trim(),
+          filterConfig: { search: filterText },
+          sortConfig: {},
+          isDefault: newViewDefault,
+        }),
+      });
+      const created = (res as { data?: SavedView }).data;
+      if (created) setSavedViews((prev) => [...prev, created]);
+      setShowSaveViewModal(false);
+      setNewViewName("");
+      setNewViewDefault(false);
+    } catch {
+      /* ignore */
+    } finally {
+      setSavingView(false);
+    }
+  }
+
+  async function handleExport(format: "csv" | "xlsx"): Promise<void> {
+    if (!entityTypeId || exportLoading) return;
+    setExportLoading(true);
+    setExportError(null);
+    try {
+      const res = await fetchWithAuth(
+        `${API_URL}/entity-types/${entityTypeId}/export?format=${format}`,
+        { method: "GET" },
+      );
+      // If the server returned a JSON error (EXPORT_TOO_LARGE), show banner
+      if (
+        res &&
+        typeof res === "object" &&
+        "error" in (res as Record<string, unknown>)
+      ) {
+        const err = res as { error: string; message?: string };
+        setExportError(err.message ?? err.error);
+        return;
+      }
+      // Otherwise res is a blob URL string from fetchWithAuth — trigger download
+      const link = exportLinkRef.current;
+      if (link) {
+        link.href = res as string;
+        link.download = `export.${format}`;
+        link.click();
+      }
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : "Export failed");
+    } finally {
+      setExportLoading(false);
+    }
+  }
+
   // Build ordered columns
   const orderedStates: WorkflowState[] = colOrder
     .map((name) => states.find((s) => s.name === name))
     .filter(Boolean) as WorkflowState[];
 
+  // T19: filter records by search text
+  const filteredRecords = filterText.trim()
+    ? records.filter((rec) => {
+        const needle = filterText.toLowerCase();
+        return Object.values(rec.fields).some((v) =>
+          String(v ?? "")
+            .toLowerCase()
+            .includes(needle),
+        );
+      })
+    : records;
+
   const grouped: Record<string, EntityInstance[]> = {};
   const unassigned: EntityInstance[] = [];
-  for (const rec of records) {
+  for (const rec of filteredRecords) {
     if (rec.currentState && states.some((s) => s.name === rec.currentState)) {
       (grouped[rec.currentState] ??= []).push(rec);
     } else {
@@ -774,6 +900,9 @@ export function CustomerRecordList(): React.ReactElement {
         />
       )}
 
+      {/* Hidden download anchor for export */}
+      <a ref={exportLinkRef} style={{ display: "none" }} />
+
       {/* Top bar */}
       <div className="kb-topbar">
         <div className="kb-topbar-left">
@@ -783,7 +912,7 @@ export function CustomerRecordList(): React.ReactElement {
             )}
             {entityType?.plural ?? "Records"}
           </h1>
-          <span className="kb-record-count">{records.length}</span>
+          <span className="kb-record-count">{filteredRecords.length}</span>
         </div>
 
         <div className="kb-topbar-right">
@@ -802,6 +931,95 @@ export function CustomerRecordList(): React.ReactElement {
               ⚠ {transError}
             </span>
           )}
+
+          {/* T20: Export split-button */}
+          <div style={{ display: "flex", position: "relative" }}>
+            <button
+              className="kb-export-btn"
+              onClick={() => void handleExport("csv")}
+              disabled={exportLoading}
+              title="Download CSV"
+            >
+              {exportLoading ? "Exporting…" : "↓ Export"}
+            </button>
+            <button
+              className="kb-export-btn-arrow"
+              disabled={exportLoading}
+              title="Download Excel"
+              onClick={() => void handleExport("xlsx")}
+            >
+              xlsx
+            </button>
+          </div>
+
+          {/* T19: Saved views dropdown */}
+          <div ref={viewsDropdownRef} style={{ position: "relative" }}>
+            <button
+              className="kb-views-btn"
+              onClick={() => setViewsOpen((o) => !o)}
+            >
+              {activeViewId
+                ? (savedViews.find((v) => v.id === activeViewId)?.name ??
+                  "Views")
+                : "Views"}
+              <span style={{ fontSize: "9px", marginLeft: "4px" }}>▾</span>
+            </button>
+            {viewsOpen && (
+              <div className="kb-views-dropdown">
+                <div
+                  className="kb-views-item"
+                  onClick={() => {
+                    setActiveViewId(null);
+                    setFilterText("");
+                    setViewsOpen(false);
+                  }}
+                >
+                  <span
+                    style={{ fontStyle: "italic", color: "var(--text-muted)" }}
+                  >
+                    Default (no filter)
+                  </span>
+                </div>
+                {savedViews.map((v) => (
+                  <div
+                    key={v.id}
+                    className={`kb-views-item${activeViewId === v.id ? " kb-views-item--active" : ""}`}
+                    onClick={() => {
+                      setActiveViewId(v.id);
+                      setFilterText(v.filterConfig?.search ?? "");
+                      setViewsOpen(false);
+                    }}
+                  >
+                    {v.name}
+                    {v.isDefault && (
+                      <span
+                        style={{
+                          fontSize: "9px",
+                          color: "var(--accent-primary)",
+                          marginLeft: "4px",
+                        }}
+                      >
+                        default
+                      </span>
+                    )}
+                  </div>
+                ))}
+                <div className="kb-views-divider" />
+                <div
+                  className="kb-views-item kb-views-item--action"
+                  onClick={() => {
+                    setViewsOpen(false);
+                    setNewViewName("");
+                    setNewViewDefault(false);
+                    setShowSaveViewModal(true);
+                  }}
+                >
+                  + Save current view
+                </div>
+              </div>
+            )}
+          </div>
+
           <Link to={`/records/${slug}/new`} className="kb-new-btn">
             <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
               <path
@@ -816,10 +1034,200 @@ export function CustomerRecordList(): React.ReactElement {
         </div>
       </div>
 
+      {/* T19: Filter bar */}
+      <div
+        style={{
+          padding: "0 28px 12px",
+          display: "flex",
+          gap: "10px",
+          alignItems: "center",
+        }}
+      >
+        <div style={{ position: "relative", flex: 1, maxWidth: "320px" }}>
+          <svg
+            style={{
+              position: "absolute",
+              left: "10px",
+              top: "50%",
+              transform: "translateY(-50%)",
+              color: "var(--text-muted)",
+              pointerEvents: "none",
+            }}
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input
+            style={{
+              width: "100%",
+              paddingLeft: "30px",
+              height: "32px",
+              fontSize: "13px",
+              background: "var(--bg-secondary)",
+              border: "1px solid var(--border-color)",
+              borderRadius: "var(--radius-sm)",
+              color: "var(--text-primary)",
+              outline: "none",
+              boxSizing: "border-box",
+            }}
+            placeholder={`Search ${(entityType?.plural ?? "records").toLowerCase()}…`}
+            value={filterText}
+            onChange={(e) => {
+              setFilterText(e.target.value);
+              setActiveViewId(null);
+            }}
+          />
+        </div>
+        {filterText && (
+          <button
+            style={{
+              fontSize: "12px",
+              color: "var(--text-muted)",
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              padding: "4px 8px",
+              borderRadius: "4px",
+            }}
+            onClick={() => {
+              setFilterText("");
+              setActiveViewId(null);
+            }}
+          >
+            × Clear
+          </button>
+        )}
+      </div>
+
+      {/* T20: Export too large error banner */}
+      {exportError && (
+        <div
+          style={{
+            margin: "0 28px 12px",
+            padding: "10px 14px",
+            background: "var(--danger-light)",
+            color: "var(--danger)",
+            border: "1px solid hsla(350,80%,60%,.25)",
+            borderRadius: "var(--radius-sm)",
+            fontSize: "13px",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <span>⚠ Export failed: {exportError}</span>
+          <button
+            style={{
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              color: "inherit",
+              fontSize: "16px",
+            }}
+            onClick={() => setExportError(null)}
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       <div className="kb-divider" />
 
+      {/* T19: Save View modal */}
+      {showSaveViewModal && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1200,
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowSaveViewModal(false);
+          }}
+        >
+          <div
+            style={{
+              background: "var(--bg-primary)",
+              border: "1px solid var(--border-color)",
+              borderRadius: "14px",
+              padding: "24px 28px",
+              width: "100%",
+              maxWidth: "380px",
+              boxShadow: "var(--shadow-lg)",
+            }}
+          >
+            <p
+              style={{ margin: "0 0 16px", fontWeight: 600, fontSize: "15px" }}
+            >
+              Save view
+            </p>
+            <div className="form-group" style={{ marginBottom: "12px" }}>
+              <label className="form-label">View name *</label>
+              <input
+                className="form-input"
+                placeholder="e.g. My open tickets"
+                value={newViewName}
+                onChange={(e) => setNewViewName(e.target.value)}
+                autoFocus
+              />
+            </div>
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                fontSize: "13px",
+                marginBottom: "20px",
+                cursor: "pointer",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={newViewDefault}
+                onChange={(e) => setNewViewDefault(e.target.checked)}
+              />
+              Set as default view
+            </label>
+            <div
+              style={{
+                display: "flex",
+                gap: "10px",
+                justifyContent: "flex-end",
+              }}
+            >
+              <button
+                className="btn btn-secondary"
+                onClick={() => setShowSaveViewModal(false)}
+                disabled={savingView}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={() => void handleSaveView()}
+                disabled={savingView || !newViewName.trim()}
+              >
+                {savingView ? "Saving…" : "Save view"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Board */}
-      {records.length === 0 && states.length === 0 ? (
+      {filteredRecords.length === 0 && states.length === 0 ? (
         <div className="kb-empty-state">
           <div className="kb-empty-icon">📋</div>
           <p className="kb-empty-title">
@@ -848,6 +1256,30 @@ export function CustomerRecordList(): React.ReactElement {
               />
             ))}
           </div>
+        </div>
+      )}
+      {filteredRecords.length === 0 && records.length > 0 && (
+        <div
+          style={{
+            padding: "40px 28px",
+            textAlign: "center",
+            color: "var(--text-muted)",
+            fontSize: "13px",
+          }}
+        >
+          No records match &ldquo;{filterText}&rdquo;.{" "}
+          <button
+            style={{
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              color: "var(--accent-primary)",
+              fontSize: "13px",
+            }}
+            onClick={() => setFilterText("")}
+          >
+            Clear filter
+          </button>
         </div>
       )}
 
@@ -914,6 +1346,53 @@ export function CustomerRecordList(): React.ReactElement {
           animation: kb-pulse 1.4s ease-in-out infinite;
         }
         @keyframes kb-pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+        /* ── Export button (T20) ── */
+        .kb-export-btn {
+          display: inline-flex; align-items: center; gap: 5px;
+          font-size: 12px; font-weight: 500; padding: 6px 10px;
+          border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+          background: var(--bg-secondary); color: var(--text-secondary);
+          border: 1px solid var(--border-color); cursor: pointer;
+          transition: background 0.15s, color 0.15s;
+          white-space: nowrap;
+        }
+        .kb-export-btn:hover:not(:disabled) { background: var(--bg-tertiary); color: var(--text-primary); }
+        .kb-export-btn:disabled { opacity: .5; cursor: not-allowed; }
+        .kb-export-btn-arrow {
+          font-size: 11px; font-weight: 500; padding: 6px 7px;
+          border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+          background: var(--bg-secondary); color: var(--text-muted);
+          border: 1px solid var(--border-color); border-left: none;
+          cursor: pointer; transition: background 0.15s;
+        }
+        .kb-export-btn-arrow:hover:not(:disabled) { background: var(--bg-tertiary); color: var(--text-primary); }
+        .kb-export-btn-arrow:disabled { opacity: .5; cursor: not-allowed; }
+
+        /* ── Views dropdown (T19) ── */
+        .kb-views-btn {
+          display: inline-flex; align-items: center; gap: 4px;
+          font-size: 12px; font-weight: 500; padding: 6px 10px;
+          border-radius: var(--radius-sm); background: var(--bg-secondary);
+          color: var(--text-secondary); border: 1px solid var(--border-color);
+          cursor: pointer; white-space: nowrap; transition: background 0.15s;
+        }
+        .kb-views-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+        .kb-views-dropdown {
+          position: absolute; top: calc(100% + 4px); right: 0;
+          width: 200px; background: var(--bg-primary);
+          border: 1px solid var(--border-color); border-radius: 10px;
+          box-shadow: var(--shadow-lg); z-index: 300;
+          overflow: hidden;
+        }
+        .kb-views-item {
+          padding: 9px 14px; font-size: 13px; cursor: pointer;
+          color: var(--text-primary); transition: background 0.1s;
+        }
+        .kb-views-item:hover { background: var(--bg-secondary); }
+        .kb-views-item--active { color: var(--accent-primary); font-weight: 600; }
+        .kb-views-item--action { color: var(--accent-primary); font-weight: 500; }
+        .kb-views-divider { height: 1px; background: var(--border-color); margin: 2px 0; }
 
         .kb-new-btn {
           display: inline-flex; align-items: center; gap: 6px;

@@ -1,6 +1,6 @@
 # Platform Roadmap Tracker
 
-**Last updated:** 2026-06-09
+**Last updated:** 2026-06-16
 **Team model:** AI-first (Claude Code as primary engineering partner)
 **Tracking:** Update `% done` and `Status` each session. Log milestones in [week-log.md](week-log.md).
 
@@ -11,7 +11,7 @@
 | Phase                           | Tracks              | Done           | % Complete | Gate                        |
 | ------------------------------- | ------------------- | -------------- | ---------- | --------------------------- |
 | Phase 1 — Foundation            | 5 tracks + security | 5/5 + security | **100%**   | All phase:1 issues closed   |
-| Phase 2 — First Customer Apps   | 4 tracks            | 0/4            | **0%**     | Pilot customer onboarding   |
+| Phase 2 — First Customer Apps   | 4 tracks            | 3/4            | **75%**    | Pilot customer onboarding   |
 | Phase 3 — Scale & Extensibility | 5 tracks            | 0/5            | **0%**     | Public launch / marketplace |
 
 ---
@@ -32,15 +32,15 @@
 
 ### Phase 1 carry-overs — triaged 2026-05-22
 
-| Issue                  | Title                                           | Decision                                                                                           | Gate       |
-| ---------------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------- | ---------- |
-| [#3](../../issues/3)   | Workflow reliability gaps (tracker)             | ✅ **CLOSED** — items 1–3 done (#59–61), item 4 tracked in #62                                     | —          |
-| [#64](../../issues/64) | Transition rollback / undo policy               | ✅ **CLOSED** — Option A: irreversible by design, ADR-002 WE-02 resolved, engine.ts comment added  | —          |
-| [#2](../../issues/2)   | SSRF + PII leakage gaps                         | ✅ **CLOSED** — PR #85 merged; SSRF block + PII redaction + cross-tenant ref guard                 | —          |
-| [#5](../../issues/5)   | Tenant lifecycle + audit log + outbox retention | 🟡 **IN REVIEW** — PR #86 open; items 1+2 done (lifecycle service + purge worker); item 3 deferred | 2A         |
-| [#4](../../issues/4)   | Schema cache stampede + redis.keys()            | 🟡 **DEFER** — only bites at scale; fix before second pilot customer / load testing                | Pre-GA     |
-| [#62](../../issues/62) | Workflow version GC + stuck instance recovery   | 🟡 **DEFER** — gated on 2D (workflow editor); pilot uses fixed seed SQL                            | Before 2D  |
-| [#65](../../issues/65) | Parallel approval edge cases                    | 🟡 **DEFER (phase:3)** — parallel approval off-limits for pilot; sequential only                   | Post-pilot |
+| Issue                  | Title                                           | Decision                                                                                                      | Gate       |
+| ---------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ---------- |
+| [#3](../../issues/3)   | Workflow reliability gaps (tracker)             | ✅ **CLOSED** — items 1–3 done (#59–61), item 4 tracked in #62                                                | —          |
+| [#64](../../issues/64) | Transition rollback / undo policy               | ✅ **CLOSED** — Option A: irreversible by design, ADR-002 WE-02 resolved, engine.ts comment added             | —          |
+| [#2](../../issues/2)   | SSRF + PII leakage gaps                         | ✅ **CLOSED** — PR #85 merged; SSRF block + PII redaction + cross-tenant ref guard                            | —          |
+| [#5](../../issues/5)   | Tenant lifecycle + audit log + outbox retention | ✅ **CLOSED** — PR #86 merged; lifecycle service, purge worker, audit entries, abmish review fixes all landed | 2A         |
+| [#4](../../issues/4)   | Schema cache stampede + redis.keys()            | 🟡 **DEFER** — only bites at scale; fix before second pilot customer / load testing                           | Pre-GA     |
+| [#62](../../issues/62) | Workflow version GC + stuck instance recovery   | 🟡 **DEFER** — gated on 2D (workflow editor); pilot uses fixed seed SQL                                       | Before 2D  |
+| [#65](../../issues/65) | Parallel approval edge cases                    | 🟡 **DEFER (phase:3)** — parallel approval off-limits for pilot; sequential only                              | Post-pilot |
 
 ---
 
@@ -51,24 +51,24 @@
 **Target:** Week 9–16 from project start (~2026-06-02 to 2026-06-27)
 **Exit test:** Penetration test (tenant isolation) passes before any pilot is onboarded.
 
-| ID  | Feature / Track                            | GH Issue(s)            | Owner       | Status         | %   | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| --- | ------------------------------------------ | ---------------------- | ----------- | -------------- | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 2A  | Platform Services — Novu, files, audit log | [#12](../../issues/12) | PrabhuVijit | 🟡 In progress | 95  | Phase 1 (packages): notifications, files, audit packages complete. Phase 2 (API+worker): file routes, av-scan worker, file-cleanup worker, audit route, view-config routes, prefs routes, openapi spec. Phase 3 (T18–T23): PII-aware audit snapshots via entity engine hook, RLS isolation tests (files, audit_log, view_configs), upload flow + quarantine lifecycle integration tests — complete. Pending: CI green on full Docker test suite. |
-| 2B  | Module system + standard module configs    | [#13](../../issues/13) | —           | 🔴 Not started | 0   | Module registry, seed runner, 7 module seed files (helpdesk, CRM, reimb, projects, HRMS, invoicing, procurement)                                                                                                                                                                                                                                                                                                                                 |
-| 2C  | Customer portal + agent UI                 | [#14](../../issues/14) | —           | 🔴 Not started | 0   | Config-driven generic views, Refine, entity list/detail/form from view_configs                                                                                                                                                                                                                                                                                                                                                                   |
-| 2D  | No-code builders + reporting               | [#15](../../issues/15) | —           | 🔴 Not started | 0   | Automation builder UI, workflow editor UI, Metabase embed                                                                                                                                                                                                                                                                                                                                                                                        |
+| ID  | Feature / Track                            | GH Issue(s)            | Owner       | Status         | %   | Notes                                                                                                               |
+| --- | ------------------------------------------ | ---------------------- | ----------- | -------------- | --- | ------------------------------------------------------------------------------------------------------------------- |
+| 2A  | Platform Services — Novu, files, audit log | [#12](../../issues/12) | PrabhuVijit | ✅ Done        | 100 | All phases complete. Tenant lifecycle (PR #86) merged and CI green. Docker build fixed (local driver).              |
+| 2B  | Module system + standard module configs    | [#13](../../issues/13) | PrabhuVijit | ✅ Done        | 100 | Module registry, seed runner, installModule/uninstallModule API, all 7 module seeds, admin modules UI, view_configs |
+| 2C  | Customer portal + agent UI                 | [#14](../../issues/14) | PrabhuVijit | ✅ Done        | 100 | Generic entity list/detail/form in admin-ui + portal, workflow action buttons, view_configs driven field order      |
+| 2D  | No-code builders + reporting               | [#15](../../issues/15) | —           | 🔴 Not started | 0   | Automation builder UI, workflow editor UI, Metabase embed                                                           |
 
 ### Phase 2 sub-items (2B module seeds)
 
-| Module                  | Entity types                        | Workflow                                        | Seed SQL | Status         |
-| ----------------------- | ----------------------------------- | ----------------------------------------------- | -------- | -------------- |
-| @modules/helpdesk       | Ticket, Comment, Article            | Open → In Progress → Pending → Resolved + SLA   | —        | 🔴 Not started |
-| @modules/reimbursements | Expense Claim, Receipt              | Draft → Submitted → Mgr Review → Finance → Paid | —        | 🔴 Not started |
-| @modules/crm            | Contact, Company, Deal, Activity    | Lead → Qualified → Proposal → Won/Lost          | —        | 🔴 Not started |
-| @modules/projects       | Project, Task, Milestone            | Backlog → In Progress → In Review → Done        | —        | 🔴 Not started |
-| @modules/hrms           | Employee, Department, Leave Request | Draft → Submitted → Approved/Rejected           | —        | 🔴 Not started |
-| @modules/invoicing      | Invoice, Quote, Payment             | Draft → Sent → Paid/Overdue/Cancelled           | —        | 🔴 Not started |
-| @modules/procurement    | Purchase Order, Vendor, RFQ         | Draft → Approved → Sent → Fulfilled             | —        | 🔴 Not started |
+| Module                  | Entity types                        | Workflow                                        | Seed SQL    | Status  |
+| ----------------------- | ----------------------------------- | ----------------------------------------------- | ----------- | ------- |
+| @modules/helpdesk       | Ticket, Comment, Article            | Open → In Progress → Pending → Resolved + SLA   | 001–004.sql | ✅ Done |
+| @modules/reimbursements | Expense Claim, Receipt              | Draft → Submitted → Mgr Review → Finance → Paid | 001.sql     | ✅ Done |
+| @modules/crm            | Contact, Company, Deal, Activity    | Lead → Qualified → Proposal → Won/Lost          | 001.sql     | ✅ Done |
+| @modules/projects       | Project, Task, Milestone            | Backlog → In Progress → In Review → Done        | 001.sql     | ✅ Done |
+| @modules/hrms           | Employee, Department, Leave Request | Draft → Submitted → Approved/Rejected           | 001.sql     | ✅ Done |
+| @modules/invoicing      | Invoice, Quote, Payment             | Draft → Sent → Paid/Overdue/Cancelled           | 001.sql     | ✅ Done |
+| @modules/procurement    | Purchase Order, Vendor, RFQ         | Draft → Approved → Sent → Fulfilled             | 001.sql     | ✅ Done |
 
 ---
 

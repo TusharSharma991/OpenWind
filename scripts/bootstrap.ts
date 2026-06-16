@@ -832,7 +832,13 @@ async function main(): Promise<void> {
 
   info("This can take up to 60s on first boot while Zitadel initialises...");
 
-  await waitForPostgres();
+  if (IN_DOCKER) {
+    ok(
+      "Postgres is ready (pgbouncer healthcheck passed before bootstrap started)",
+    );
+  } else {
+    await waitForPostgres();
+  }
   await waitForHttp(`${ZITADEL_BASE}/healthz`, "Zitadel", 80, 3000);
 
   info(`Zitadel bootstrap URL: ${ZITADEL_BASE}`);

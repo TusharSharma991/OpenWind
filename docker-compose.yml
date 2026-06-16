@@ -224,7 +224,7 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz || exit 1"]
+      test: ["CMD", "/app/zitadel", "ready"]
       interval: 10s
       timeout: 5s
       retries: 30
@@ -387,7 +387,7 @@ services:
       pgbouncer:
         condition: service_healthy
       zitadel:
-        condition: service_healthy
+        condition: service_started
     restart: "no"
 
 # ─────────────────────────────────────────────────────────────────────────────

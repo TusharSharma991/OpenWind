@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { fetchWithAuth, API_URL } from "../../lib/api.js";
 
@@ -45,7 +45,7 @@ export function Automations(): React.ReactElement {
   );
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  function load(): void {
+  const load = useCallback((): void => {
     setLoading(true);
     setError(null);
     fetchWithAuth(`${API_URL}/automation-rules`)
@@ -57,11 +57,11 @@ export function Automations(): React.ReactElement {
         setError(err instanceof Error ? err.message : "Failed to load rules");
         setLoading(false);
       });
-  }
+  }, []);
 
   useEffect(() => {
     load();
-  }, []);
+  }, [load]);
 
   async function handleToggle(rule: AutomationRule): Promise<void> {
     setTogglingId(rule.id);

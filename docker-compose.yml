@@ -54,8 +54,6 @@ services:
         -c log_min_duration_statement=1000
         -c log_line_prefix='%t [%p] %u@%d '
         -c log_statement=ddl
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
@@ -145,8 +143,6 @@ services:
         --maxmemory-policy allkeys-lru
         --save 60 1000
         --loglevel notice
-    ports:
-      - "6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -208,8 +204,8 @@ services:
       ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD: platform_dev_password
       ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE: disable
       ZITADEL_EXTERNALSECURE: "false"
-      ZITADEL_EXTERNALPORT: 8080
-      ZITADEL_EXTERNALDOMAIN: localhost
+      ZITADEL_EXTERNALPORT: "${ZITADEL_HOST_PORT:-8080}"
+      ZITADEL_EXTERNALDOMAIN: "${ZITADEL_EXTERNAL_DOMAIN:-localhost}"
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: admin@platform.local
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: Admin1234!
       # Machine user with JSON key — Zitadel prints the key JSON to stdout on first boot.
@@ -223,7 +219,7 @@ services:
       # With this off, the console falls back to the built-in Login V1 HTML UI.
       ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_REQUIRED: "false"
     ports:
-      - "8080:8080" # Zitadel UI + API → http://localhost:8080
+      - "${ZITADEL_HOST_PORT:-8080}:8080" # Zitadel UI + API → http://localhost:8080
     depends_on:
       postgres:
         condition: service_healthy
@@ -342,11 +338,7 @@ services:
       ZITADEL_INTROSPECTION_URL: http://localhost:8080/oauth/v2/introspect
       # OPENBAO_ADDR: http://openbao:8200  # uncomment when openbao service is enabled
       # S3_ENDPOINT: http://minio:9000      # uncomment when minio service is enabled
-    ports:
-      - "3000:3000"
     restart: unless-stopped
-    extra_hosts:
-      - "localhost:host-gateway"
     depends_on:
       pgbouncer:
         condition: service_healthy
@@ -362,13 +354,41 @@ services:
       context: .
       dockerfile: apps/admin-ui/Dockerfile.dev
     ports:
-      - "3001:3001" # Vite dev server → http://localhost:3001
+      - "${ADMIN_UI_HOST_PORT:-3001}:3001" # Vite dev server → http://localhost:3001
     volumes:
       - ./apps/admin-ui/src:/app/apps/admin-ui/src
       - ./apps/admin-ui/index.html:/app/apps/admin-ui/index.html
       - ./apps/admin-ui/vite.config.ts:/app/apps/admin-ui/vite.config.ts
       - ./.env.local:/app/.env.local:ro
     restart: unless-stopped
+
+  # ── Bootstrap (one-time setup) — profile:bootstrap ───────────────────────────
+  # Runs migrations, seeds the DB, configures Zitadel, and creates demo users.
+  # Designed to be idempotent — safe to re-run.
+  #
+  # Usage:
+  #   docker compose --profile bootstrap run --rm bootstrap
+  bootstrap:
+    container_name: ow-bootstrap
+    profiles: [bootstrap]
+    build:
+      context: .
+      dockerfile: Dockerfile.bootstrap
+    env_file:
+      - path: .env.local
+        required: false
+    environment:
+      RUNNING_IN_DOCKER: "true"
+      ZITADEL_BOOTSTRAP_URL: "http://zitadel:8080"
+      DATABASE_URL: postgres://app_user:app_user_dev_password@pgbouncer:5432/platform
+      MIGRATION_DATABASE_URL: postgres://migration_user:migration_user_dev_password@postgres:5432/platform
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      zitadel:
+        condition: service_healthy
+    restart: "no"
 
 # ─────────────────────────────────────────────────────────────────────────────
 volumes:

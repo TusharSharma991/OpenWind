@@ -6,11 +6,13 @@ import { getEntityTypeHandler } from "./get.js";
 import { updateEntityTypeHandler } from "./update.js";
 import { deleteEntityTypeHandler } from "./delete.js";
 import { entityFieldsRouter } from "./fields/index.js";
+import { exportEntitiesHandler } from "./export.js";
 
 const router = new Hono<{ Variables: { auth: AuthContext } }>();
 
 router.post("/", ...createEntityTypeHandler);
 router.get("/", ...listEntityTypesHandler);
+router.get("/:id/export", ...exportEntitiesHandler);
 router.get("/:id", ...getEntityTypeHandler);
 router.patch("/:id", ...updateEntityTypeHandler);
 router.delete("/:id", ...deleteEntityTypeHandler);

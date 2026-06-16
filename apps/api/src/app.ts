@@ -19,6 +19,7 @@ import { usersRouter } from "./routes/platform/users.js";
 import { filesRouter } from "./routes/files/index.js";
 import { adminRouter } from "./routes/admin/index.js";
 import { preferencesRouter } from "./routes/preferences/index.js";
+import { savedViewsRouter } from "./routes/saved-views/index.js";
 import { openApiSpec } from "./openapi.js";
 import { registerEntityAuditHook } from "@platform/entity-engine";
 import { writeAuditEntry } from "@platform/audit";
@@ -109,6 +110,7 @@ export function createApp(): Hono<AppVars> {
   app.route("/files", filesRouter);
   app.route("/admin", adminRouter);
   app.route("/preferences", preferencesRouter);
+  app.route("/saved-views", savedViewsRouter);
 
   return app;
 }

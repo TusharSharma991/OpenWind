@@ -164,6 +164,8 @@ describe("updateEntity — cross-tenant write isolation", () => {
 
 // ── DELETE isolation ──────────────────────────────────────────────────────────
 
+// deleteEntity uses UPDATE...RETURNING with tenantId in the WHERE clause.
+// A cross-tenant instanceId matches no rows → empty RETURNING → EntityError.
 describe("deleteEntity — cross-tenant delete isolation", () => {
   it("throws EntityError when Tenant A soft-deletes Tenant B instance", async () => {
     await withTenantContext(TENANT_A, async (tx) => {

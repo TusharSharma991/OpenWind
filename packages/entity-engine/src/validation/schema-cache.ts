@@ -16,14 +16,6 @@ function cacheKey(
   return `schema:${entityTypeId}:${tenantId}:${mode}`;
 }
 
-function isRedisReady(): boolean {
-  try {
-    return getRedis().status === "ready";
-  } catch {
-    return false;
-  }
-}
-
 export async function getValidationSchema(
   db: DbOrTx,
   entityTypeId: string,
@@ -31,10 +23,11 @@ export async function getValidationSchema(
   mode: "create" | "update",
 ): Promise<z.ZodObject<Record<string, z.ZodTypeAny>>> {
   const key = cacheKey(entityTypeId, tenantId, mode);
+  const redis = getRedis();
 
   try {
-    if (isRedisReady()) {
-      const cached = await getRedis().get(key);
+    if (redis.status === "ready") {
+      const cached = await redis.get(key);
       if (cached) {
         const fields = JSON.parse(cached) as EntityField[];
         return buildZodSchema(fields, mode);
@@ -63,13 +56,8 @@ export async function getValidationSchema(
   }));
 
   try {
-    if (isRedisReady()) {
-      await getRedis().set(
-        key,
-        JSON.stringify(fields),
-        "EX",
-        CACHE_TTL_SECONDS,
-      );
+    if (redis.status === "ready") {
+      await redis.set(key, JSON.stringify(fields), "EX", CACHE_TTL_SECONDS);
     }
   } catch {
     // Non-fatal: proceed without caching
@@ -87,8 +75,8 @@ export async function invalidateSchemaCache(
     : `schema:${entityTypeId}:*`;
 
   try {
-    if (isRedisReady()) {
-      const redis = getRedis();
+    const redis = getRedis();
+    if (redis.status === "ready") {
       const keysToDelete: string[] = [];
       let cursor = "0";
       do {

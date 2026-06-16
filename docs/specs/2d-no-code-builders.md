@@ -28,7 +28,7 @@ All builders write to tables the existing engines already read — zero new engi
 | -------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | stack          | React + Refine (admin-ui), React (portal), Hono API, Drizzle, Postgres                                                                 |
 | canvas lib     | ReactFlow (MIT) — preferred; fall back to form-based if timeline at risk                                                               |
-| excel export   | SheetJS (xlsx community) streamed from API                                                                                             |
+| excel export   | SheetJS (xlsx community) streamed from API — **NOTE: SheetJS CE is SSPL v1; evaluate ExcelJS (MIT) as drop-in alternative before T4**  |
 | pdf export     | pdfkit, server-side, landscape for wide tables                                                                                         |
 | metabase       | OSS (free), add to docker-compose, signed JWT embedding tokens                                                                         |
 | export row cap | 10 000 rows hard limit; warning banner at 5 000                                                                                        |
@@ -54,7 +54,7 @@ isEnabled: bool
 ### Saved view shape (new `saved_views` table)
 
 ```
-id, tenant_id, entity_type_id, created_by (user_id),
+id, tenant_id, entity_type_id, created_by (user_id FK ON DELETE SET NULL),
 name, filters JSONB, sort JSONB,
 is_shared bool,
 created_at, updated_at

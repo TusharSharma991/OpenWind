@@ -204,7 +204,7 @@ async function runAction(
         break;
       default:
         logger.warn(
-          { tenantId, actionType: (action as { type: string }).type },
+          { tenantId, actionType: action.type },
           "Automation: unhandled action type",
         );
         return false;

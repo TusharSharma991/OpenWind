@@ -5,6 +5,8 @@ import type { NotifyConfig } from "../types.js";
 
 export type { NotifyConfig };
 
+// TODO: make async and re-add `await` in executor once @platform/notifications
+// is wired to a real provider (currently a stub — returns void synchronously).
 export function executeNotifyAction(
   _db: DbOrTx,
   tenantId: string,

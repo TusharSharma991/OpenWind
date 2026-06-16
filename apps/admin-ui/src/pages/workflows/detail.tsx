@@ -460,6 +460,8 @@ function SortableStateNode({
   const accent = state.color ?? "var(--accent-primary)";
 
   function handleRef(el: HTMLDivElement | null): void {
+    // useSortable.setNodeRef expects Element | null; our custom map stores HTMLDivElement.
+    // The double cast bridges the type gap — the runtime value is the same HTMLDivElement.
     setNodeRef(el as unknown as HTMLElement);
     setRef(el);
   }
@@ -638,7 +640,7 @@ function StateFlowDiagram({
     setLocalStates([...states].sort((a, b) => a.sortOrder - b.sortOrder));
   }, [states]);
 
-  // Measure node centers for SVG arcs (T18)
+  // intentional: no deps array — always re-measure after any layout change so SVG arcs stay accurate
   useLayoutEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -671,10 +673,13 @@ function StateFlowDiagram({
     setLocalStates(reordered);
 
     const snapshot = localStates;
+    // Build id→sortOrder map from snapshot so we compare by identity, not position.
+    // Comparing reordered[i] against snapshot[i] is wrong: after a drag they are different states.
+    const oldOrderMap = new Map(snapshot.map((s) => [s.id, s.sortOrder]));
     try {
       await Promise.all(
         reordered
-          .filter((s, i) => s.sortOrder !== (snapshot[i]?.sortOrder ?? -1))
+          .filter((s) => s.sortOrder !== (oldOrderMap.get(s.id) ?? -1))
           .map((s) =>
             fetchWithAuth(`${API_URL}/workflows/${workflowId}/states/${s.id}`, {
               method: "PATCH",

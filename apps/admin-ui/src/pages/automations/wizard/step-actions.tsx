@@ -20,9 +20,8 @@ const ACTION_TYPE_DESCRIPTIONS: Record<ActionType, string> = {
   webhook: "HTTP POST to an external URL",
 };
 
-let nextId = 1;
-function genId(): string {
-  return `action-${nextId++}`;
+export function genId(): string {
+  return crypto.randomUUID();
 }
 
 function NotifyConfig({
@@ -346,6 +345,7 @@ function ActionCard({
             value={action.type}
             onChange={(e) =>
               onUpdate(action.id, {
+                // select options are derived from ActionType keys — value is always a valid ActionType
                 type: e.target.value as ActionType,
                 config: {},
               })

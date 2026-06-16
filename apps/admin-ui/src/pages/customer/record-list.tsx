@@ -538,6 +538,7 @@ export function CustomerRecordList(): React.ReactElement {
   const [newViewName, setNewViewName] = useState("");
   const [newViewDefault, setNewViewDefault] = useState(false);
   const [savingView, setSavingView] = useState(false);
+  const [viewSaveError, setViewSaveError] = useState<string | null>(null);
   const [viewsOpen, setViewsOpen] = useState(false);
   const viewsDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -640,6 +641,7 @@ export function CustomerRecordList(): React.ReactElement {
   async function handleSaveView(): Promise<void> {
     if (!entityTypeId || !newViewName.trim()) return;
     setSavingView(true);
+    setViewSaveError(null);
     try {
       const res = await fetchWithAuth(`${API_URL}/saved-views`, {
         method: "POST",
@@ -652,12 +654,22 @@ export function CustomerRecordList(): React.ReactElement {
         }),
       });
       const created = (res as { data?: SavedView }).data;
-      if (created) setSavedViews((prev) => [...prev, created]);
+      if (created) {
+        setSavedViews((prev) => {
+          // If the new view is the default, clear the old default optimistically
+          const cleared = newViewDefault
+            ? prev.map((v) => ({ ...v, isDefault: false }))
+            : prev;
+          return [...cleared, created];
+        });
+      }
       setShowSaveViewModal(false);
       setNewViewName("");
       setNewViewDefault(false);
-    } catch {
-      /* ignore */
+    } catch (err) {
+      setViewSaveError(
+        err instanceof Error ? err.message : "Failed to save view",
+      );
     } finally {
       setSavingView(false);
     }
@@ -1154,7 +1166,10 @@ export function CustomerRecordList(): React.ReactElement {
             zIndex: 1200,
           }}
           onClick={(e) => {
-            if (e.target === e.currentTarget) setShowSaveViewModal(false);
+            if (e.target === e.currentTarget) {
+              setShowSaveViewModal(false);
+              setViewSaveError(null);
+            }
           }}
         >
           <div
@@ -1200,6 +1215,17 @@ export function CustomerRecordList(): React.ReactElement {
               />
               Set as default view
             </label>
+            {viewSaveError && (
+              <p
+                style={{
+                  color: "var(--color-error, #dc2626)",
+                  fontSize: "12px",
+                  marginBottom: "12px",
+                }}
+              >
+                {viewSaveError}
+              </p>
+            )}
             <div
               style={{
                 display: "flex",
@@ -1209,7 +1235,10 @@ export function CustomerRecordList(): React.ReactElement {
             >
               <button
                 className="btn btn-secondary"
-                onClick={() => setShowSaveViewModal(false)}
+                onClick={() => {
+                  setShowSaveViewModal(false);
+                  setViewSaveError(null);
+                }}
                 disabled={savingView}
               >
                 Cancel

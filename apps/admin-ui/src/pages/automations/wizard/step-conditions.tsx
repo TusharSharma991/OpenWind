@@ -28,41 +28,52 @@ const OPERATORS: Array<{
   { op: "not_empty", label: "is not empty", hasValue: false },
 ];
 
-function isGroup(node: ConditionNode): node is ConditionGroup {
+export function isGroup(node: ConditionNode): node is ConditionGroup {
+  // "children" in node is more structurally correct but op values never overlap — both are correct
   return node.op === "and" || node.op === "or";
 }
 
-function cloneNode(node: ConditionNode): ConditionNode {
+export function cloneNode(node: ConditionNode): ConditionNode {
   if (isGroup(node)) {
     return { op: node.op, children: node.children.map(cloneNode) };
   }
   return { ...node };
 }
 
-function updateNodeAt(
+export function updateNodeAt(
   root: ConditionGroup,
   path: number[],
   updater: (node: ConditionNode) => ConditionNode,
 ): ConditionGroup {
+  // cloneNode returns ConditionNode; root is always a ConditionGroup so the clone is too
   const clone = cloneNode(root) as ConditionGroup;
+  // updater(clone) returns ConditionNode; callers only pass group-returning updaters at root
   if (path.length === 0) return updater(clone) as ConditionGroup;
 
   let cursor: ConditionGroup = clone;
   for (let i = 0; i < path.length - 1; i++) {
+    // noUncheckedIndexedAccess — path is caller-validated against the tree depth
     const idx = path[i] as number;
+    // children at intermediate path positions are always groups (leaves have no children)
     cursor = cursor.children[idx] as ConditionGroup;
   }
   const lastIdx = path[path.length - 1] as number;
+  // noUncheckedIndexedAccess — same caller-validated path guarantee
   cursor.children[lastIdx] = updater(cursor.children[lastIdx] as ConditionNode);
   return clone;
 }
 
-function removeNodeAt(root: ConditionGroup, path: number[]): ConditionGroup {
+export function removeNodeAt(
+  root: ConditionGroup,
+  path: number[],
+): ConditionGroup {
+  // cloneNode returns ConditionNode; root is always a ConditionGroup so the clone is too
   const clone = cloneNode(root) as ConditionGroup;
   if (path.length === 0) return clone;
 
   let cursor: ConditionGroup = clone;
   for (let i = 0; i < path.length - 1; i++) {
+    // children at intermediate path positions are always groups
     cursor = cursor.children[path[i] as number] as ConditionGroup;
   }
   cursor.children.splice(path[path.length - 1] as number, 1);
@@ -70,6 +81,7 @@ function removeNodeAt(root: ConditionGroup, path: number[]): ConditionGroup {
 }
 
 function addLeafAt(root: ConditionGroup, path: number[]): ConditionGroup {
+  // cloneNode returns ConditionNode; root is always a ConditionGroup so the clone is too
   const clone = cloneNode(root) as ConditionGroup;
   let cursor: ConditionGroup = clone;
   for (const idx of path) {

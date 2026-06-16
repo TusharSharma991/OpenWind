@@ -2,7 +2,8 @@ import React, { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { fetchWithAuth, API_URL } from "../../../lib/api.js";
 import { EMPTY_WIZARD } from "./types.js";
-import type { WizardData } from "./types.js";
+import type { WizardData, ActionItem } from "./types.js";
+import { genId } from "./step-actions.js";
 import { StepTrigger } from "./step-trigger.js";
 import { StepConditions } from "./step-conditions.js";
 import { StepActions } from "./step-actions.js";
@@ -17,7 +18,7 @@ const STEPS = [
 
 type StepKey = (typeof STEPS)[number]["key"];
 
-function canAdvance(step: StepKey, data: WizardData): boolean {
+export function canAdvance(step: StepKey, data: WizardData): boolean {
   if (step === "trigger") return data.triggerType !== "";
   if (step === "actions") return data.actions.length > 0;
   if (step === "save") return data.name.trim() !== "";
@@ -45,6 +46,7 @@ export function AutomationWizard(): React.ReactElement {
     fetchWithAuth(`${API_URL}/automation-rules/${id}`)
       .then((res) => {
         const rule = (res as { data: Record<string, unknown> }).data;
+        // Server returns untyped Record — Zod schema is dynamic so TypeScript cannot narrow these
         setData({
           triggerType:
             (rule.triggerType as WizardData["triggerType"] | undefined) ?? "",
@@ -52,7 +54,10 @@ export function AutomationWizard(): React.ReactElement {
             (rule.triggerConfig as Record<string, unknown> | undefined) ?? {},
           conditions:
             (rule.conditions as WizardData["conditions"] | undefined) ?? null,
-          actions: (rule.actions as WizardData["actions"] | undefined) ?? [],
+          // Server strips the local `id` field — assign fresh IDs so React keys are stable
+          actions: (
+            (rule.actions as Array<Omit<ActionItem, "id">> | undefined) ?? []
+          ).map((a) => ({ ...a, id: genId() })),
           name: (rule.name as string | undefined) ?? "",
           priority: (rule.priority as number | undefined) ?? 0,
           isEnabled: (rule.isEnabled as boolean | undefined) ?? true,

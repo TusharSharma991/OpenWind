@@ -7,6 +7,7 @@ settings:
 overrides:
   typescript: ^5.5.0
   esbuild: '>=0.28.1'
+  hono: '>=4.12.25'
 
 importers:
 
@@ -123,10 +124,10 @@ importers:
     dependencies:
       '@hono/node-server':
         specifier: ^2.0.4
-        version: 2.0.4(hono@4.12.18)
+        version: 2.0.4(hono@4.12.25)
       '@hono/zod-validator':
         specifier: ^0.4.0
-        version: 0.4.3(hono@4.12.18)(zod@3.25.76)
+        version: 0.4.3(hono@4.12.25)(zod@3.25.76)
       '@platform/audit':
         specifier: workspace:*
         version: link:../../packages/audit
@@ -173,8 +174,8 @@ importers:
         specifier: ^4.4.0
         version: 4.4.0
       hono:
-        specifier: ^4.5.0
-        version: 4.12.18
+        specifier: '>=4.12.25'
+        version: 4.12.25
       ioredis:
         specifier: ^5.4.0
         version: 5.10.1
@@ -545,8 +546,8 @@ importers:
         specifier: ^0.45.2
         version: 0.45.2(postgres@3.4.9)
       hono:
-        specifier: ^4.5.0
-        version: 4.12.18
+        specifier: '>=4.12.25'
+        version: 4.12.25
       jose:
         specifier: ^5.0.0
         version: 5.10.0
@@ -1632,12 +1633,12 @@ packages:
     resolution: {integrity: sha512-Ut3y0dMMPWy6bZ2kVfx25EOVbZlm15dhF4mOsezMlhpNHy+4MkU1qN9Y6lnruYi4wPmFzimGX2X7LF/FwHli4A==}
     engines: {node: '>=20'}
     peerDependencies:
-      hono: ^4
+      hono: '>=4.12.25'
 
   '@hono/zod-validator@0.4.3':
     resolution: {integrity: sha512-xIgMYXDyJ4Hj6ekm9T9Y27s080Nl9NXHcJkOvkXPhubOLj8hZkOL8pDnnXfvCf5xEE8Q4oMFenQUZZREUY2gqQ==}
     peerDependencies:
-      hono: '>=3.9.0'
+      hono: '>=4.12.25'
       zod: ^3.19.1
 
   '@humanfs/core@0.19.2':
@@ -3187,8 +3188,8 @@ packages:
   help-me@5.0.0:
     resolution: {integrity: sha512-7xgomUX6ADmcYzFik0HzAxh/73YlKR9bmFzf51CZwR+b6YtzU2m0u49hQCqV6SvlqIqsaxovfwdvbnsw3b/zpg==}
 
-  hono@4.12.18:
-    resolution: {integrity: sha512-RWzP96k/yv0PQfyXnWjs6zot20TqfpfsNXhOnev8d1InAxubW93L11/oNUc3tQqn2G0bSdAOBpX+2uDFHV7kdQ==}
+  hono@4.12.25:
+    resolution: {integrity: sha512-2NFaIyNVgJmBs/ecmtGzlmluTFs5cHEWGTdu0t1HBwYzoGXOL5nUQBRMXsXWla5i4KkG//QMzVP88m1+I3fdAQ==}
     engines: {node: '>=16.9.0'}
 
   human-signals@5.0.0:
@@ -5562,13 +5563,13 @@ snapshots:
       lodash.isundefined: 3.0.1
       lodash.uniq: 4.5.0
 
-  '@hono/node-server@2.0.4(hono@4.12.18)':
+  '@hono/node-server@2.0.4(hono@4.12.25)':
     dependencies:
-      hono: 4.12.18
+      hono: 4.12.25
 
-  '@hono/zod-validator@0.4.3(hono@4.12.18)(zod@3.25.76)':
+  '@hono/zod-validator@0.4.3(hono@4.12.25)(zod@3.25.76)':
     dependencies:
-      hono: 4.12.18
+      hono: 4.12.25
       zod: 3.25.76
 
   '@humanfs/core@0.19.2':
@@ -7214,7 +7215,7 @@ snapshots:
 
   help-me@5.0.0: {}
 
-  hono@4.12.18: {}
+  hono@4.12.25: {}
 
   human-signals@5.0.0: {}
 

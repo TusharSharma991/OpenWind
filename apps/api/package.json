@@ -14,6 +14,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@hono/node-server": "^2.0.4",
     "@hono/zod-validator": "^0.4.0",
     "@platform/auth": "workspace:*",
     "@platform/automation-engine": "workspace:*",
@@ -28,6 +29,7 @@
     "@platform/workflow-engine": "workspace:*",
     "bullmq": "^5.0.0",
     "hono": "^4.5.0",
+    "jose": "^5.0.0",
     "ioredis": "^5.4.0",
     "zod": "^3.23.0"
   },

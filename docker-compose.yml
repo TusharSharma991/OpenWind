@@ -1,32 +1,41 @@
-name: platform
+name: openwind
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Local development environment.
 #
-# Services:
+# Core services (always started with docker compose up -d):
 #   postgres   — Primary database (RLS-enabled, multi-tenant)
 #   pgbouncer  — Connection pooler (transaction mode, required for RLS)
-#   openbao    — Secrets manager (OpenBao dev mode, auto-unsealed)
 #   redis      — Queue backend (BullMQ) + application cache
-#   minio      — S3-compatible object storage (local)
 #   zitadel    — Identity provider (OIDC/OAuth2/SAML)
-#   novu       — Notification infrastructure
-#   mailhog    — Local SMTP trap (catches all outbound email)
-#   bullboard  — BullMQ job queue dashboard
+#   api        — Hono API server (port 3000)
+#   admin-ui   — React app with Vite HMR (port 3001) — admin + portal in one app, RBAC-controlled
 #
-# Start everything:    docker compose up -d
-# Stop everything:     docker compose down
-# Reset all data:      docker compose down -v
-# View logs:           docker compose logs -f [service]
+# All users (admin, agent, customer) log in at http://localhost:3001.
+# The app reads the role from the JWT and renders the appropriate view.
 #
-# App connects to:     postgres://app_user:...@localhost:6432/platform  (PgBouncer)
-# OpenBao UI/API:      http://localhost:8200  (token: dev-root-token)
+# Commented out (not integrated yet — uncomment when needed):
+#   openbao    — Secrets manager (enable when packages/auth uses Transit encryption)
+#   minio      — S3-compatible object storage (enable when packages/files is wired in)
+#
+# Optional services (require explicit profile):
+#   --profile notifications  → novu-api, novu-worker, novu-web, novu-mongo
+#   --profile tools          → mailhog, bullboard
+#
+# Commands:
+#   Start infra:     docker compose up -d
+#   Stop:            docker compose down
+#   Wipe all data:   docker compose down -v
+#   Logs:            docker compose logs -f [service]
+#
+# App connects to:   postgres://app_user:...@localhost:6432/platform  (PgBouncer)
+# OpenBao UI/API:    http://localhost:8200  (token: dev-root-token)
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
-
   # ── PostgreSQL ─────────────────────────────────────────────────────────────
   postgres:
+    container_name: ow-database
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
@@ -61,71 +70,73 @@ services:
   # Transaction mode is required so SET LOCAL app.tenant_id scoping works
   # correctly — session mode would let the setting leak across pooled connections.
   pgbouncer:
-    image: bitnami/pgbouncer:latest
+    container_name: ow-pgbouncer
+    image: edoburu/pgbouncer:latest
     restart: unless-stopped
     environment:
-      POSTGRESQL_HOST: postgres
-      POSTGRESQL_PORT: 5432
-      POSTGRESQL_DATABASE: platform
-      POSTGRESQL_USERNAME: app_user
-      POSTGRESQL_PASSWORD: app_user_dev_password
-      PGBOUNCER_DATABASE: platform
-      PGBOUNCER_POOL_MODE: transaction
-      PGBOUNCER_MAX_CLIENT_CONN: 1000
-      PGBOUNCER_DEFAULT_POOL_SIZE: 20
-      PGBOUNCER_AUTH_TYPE: scram-sha-256
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: platform
+      DB_USER: app_user
+      DB_PASSWORD: app_user_dev_password
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 1000
+      DEFAULT_POOL_SIZE: 20
+      AUTH_TYPE: scram-sha-256
+      SERVER_TLS_SSLMODE: disable
     ports:
-      - "6432:6432"   # App connects here, not 5432
+      - "6432:5432" # App connects here, not 5432
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "pg_isready", "-h", "localhost", "-p", "6432", "-U", "app_user"]
+      test:
+        ["CMD-SHELL", "pg_isready -h localhost -p 5432 -U app_user || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 10
 
-  # ── OpenBao (secrets manager) ──────────────────────────────────────────────
-  # Dev mode: auto-unsealed, single static root token, data not persisted.
-  # The init container creates the Transit secrets engine and the
-  # platform-credentials key with derivation enabled.
-  openbao:
-    image: openbao/openbao:latest
-    restart: unless-stopped
-    command: server -dev -dev-root-token-id=dev-root-token
-    environment:
-      BAO_DEV_ROOT_TOKEN_ID: dev-root-token
-      BAO_ADDR: http://0.0.0.0:8200
-      BAO_LOG_LEVEL: warn
-    ports:
-      - "8200:8200"   # OpenBao API + UI → http://localhost:8200
-    cap_add:
-      - IPC_LOCK
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8200/v1/sys/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
-  # One-shot container that configures OpenBao after it starts
-  openbao-init:
-    image: openbao/openbao:latest
-    depends_on:
-      openbao:
-        condition: service_healthy
-    environment:
-      BAO_ADDR: http://openbao:8200
-      BAO_TOKEN: dev-root-token
-    entrypoint: >
-      /bin/sh -c "
-        bao secrets enable transit &&
-        bao write -f transit/keys/platform-credentials derived=true &&
-        echo 'OpenBao Transit key created with derivation enabled'
-      "
-    restart: "no"
+  # ── OpenBao (secrets manager) — NOT IN USE YET ────────────────────────────
+  # Uncomment when packages/auth or packages/files starts using OpenBao Transit.
+  # openbao:
+  #   container_name: ow-secrets
+  #   image: openbao/openbao:latest
+  #   restart: unless-stopped
+  #   command: server -dev -dev-root-token-id=dev-root-token
+  #   environment:
+  #     BAO_DEV_ROOT_TOKEN_ID: dev-root-token
+  #     BAO_ADDR: http://0.0.0.0:8200
+  #     BAO_LOG_LEVEL: warn
+  #   ports:
+  #     - "8200:8200"
+  #   cap_add:
+  #     - IPC_LOCK
+  #   healthcheck:
+  #     test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8200/v1/sys/health"]
+  #     interval: 5s
+  #     timeout: 3s
+  #     retries: 10
+  #
+  # openbao-init:
+  #   container_name: ow-secrets-init
+  #   image: openbao/openbao:latest
+  #   depends_on:
+  #     openbao:
+  #       condition: service_healthy
+  #   environment:
+  #     BAO_ADDR: http://openbao:8200
+  #     BAO_TOKEN: dev-root-token
+  #   entrypoint: >
+  #     /bin/sh -c "
+  #       bao secrets enable transit &&
+  #       bao write -f transit/keys/platform-credentials derived=true &&
+  #       echo 'OpenBao Transit key created with derivation enabled'
+  #     "
+  #   restart: "no"
 
   # ── Redis ──────────────────────────────────────────────────────────────────
   redis:
+    container_name: ow-cache
     image: redis:7-alpine
     restart: unless-stopped
     command: >
@@ -144,42 +155,45 @@ services:
       timeout: 3s
       retries: 10
 
-  # ── MinIO (local S3) ───────────────────────────────────────────────────────
-  minio:
-    image: minio/minio:latest
-    restart: unless-stopped
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: platform_access_key
-      MINIO_ROOT_PASSWORD: platform_secret_key_dev_only
-      MINIO_BROWSER_REDIRECT_URL: http://localhost:9001
-    ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # Web console → http://localhost:9001
-    volumes:
-      - minio_data:/data
-    healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # MinIO bucket initializer — creates the platform bucket on first run
-  minio-init:
-    image: minio/mc:latest
-    depends_on:
-      minio:
-        condition: service_healthy
-    entrypoint: >
-      /bin/sh -c "
-        mc alias set local http://minio:9000 platform_access_key platform_secret_key_dev_only &&
-        mc mb --ignore-existing local/platform-files &&
-        mc anonymous set none local/platform-files &&
-        echo 'MinIO bucket initialized'
-      "
+  # ── MinIO (local S3) — NOT IN USE YET ────────────────────────────────────
+  # Uncomment when packages/files (presigned URL service) is wired into the API.
+  # minio:
+  #   container_name: ow-storage
+  #   image: minio/minio:latest
+  #   restart: unless-stopped
+  #   command: server /data --console-address ":9001"
+  #   environment:
+  #     MINIO_ROOT_USER: platform_access_key
+  #     MINIO_ROOT_PASSWORD: platform_secret_key_dev_only
+  #     MINIO_BROWSER_REDIRECT_URL: http://localhost:9001
+  #   ports:
+  #     - "9000:9000"
+  #     - "9001:9001"
+  #   volumes:
+  #     - minio_data:/data
+  #   healthcheck:
+  #     test: ["CMD", "mc", "ready", "local"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #
+  # minio-init:
+  #   container_name: ow-storage-init
+  #   image: minio/mc:latest
+  #   depends_on:
+  #     minio:
+  #       condition: service_healthy
+  #   entrypoint: >
+  #     /bin/sh -c "
+  #       mc alias set local http://minio:9000 platform_access_key platform_secret_key_dev_only &&
+  #       mc mb --ignore-existing local/platform-files &&
+  #       mc anonymous set none local/platform-files &&
+  #       echo 'MinIO bucket initialized'
+  #     "
 
   # ── Zitadel (Identity provider) ────────────────────────────────────────────
   zitadel:
+    container_name: ow-identity
     image: ghcr.io/zitadel/zitadel:latest
     restart: unless-stopped
     command: start-from-init --masterkey "MasterkeyNeedsToHave32Characters" --tlsMode disabled
@@ -198,8 +212,18 @@ services:
       ZITADEL_EXTERNALDOMAIN: localhost
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: admin@platform.local
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: Admin1234!
+      # Machine user with JSON key — Zitadel prints the key JSON to stdout on first boot.
+      # bootstrap.ts reads it from container logs (docker compose logs zitadel).
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_USERNAME: setup-admin
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_NAME: Setup Admin
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINEKEY_TYPE: 1
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINEKEY_EXPIRATIONDATE: "2040-01-01T00:00:00Z"
+      # Disable Login V2 (the new SPA login) — it requires a separately hosted
+      # frontend that isn't bundled in the Docker image, causing 404 in dev.
+      # With this off, the console falls back to the built-in Login V1 HTML UI.
+      ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_REQUIRED: "false"
     ports:
-      - "8080:8080"   # Zitadel UI + API → http://localhost:8080
+      - "8080:8080" # Zitadel UI + API → http://localhost:8080
     depends_on:
       postgres:
         condition: service_healthy
@@ -207,15 +231,18 @@ services:
       test: ["CMD", "/app/zitadel", "ready"]
       interval: 10s
       timeout: 5s
-      retries: 20
-      start_period: 30s
+      retries: 30
+      start_period: 60s
 
-  # ── Novu (Notifications) ───────────────────────────────────────────────────
+  # ── Novu (Notifications) — profile:notifications ───────────────────────────
+  # Not started by default. Run with: docker compose --profile notifications up -d
   novu-api:
+    container_name: ow-notify-api
+    profiles: [notifications]
     image: ghcr.io/novuhq/novu/api:latest
     restart: unless-stopped
     environment:
-      NODE_ENV: development
+      NODE_ENV: local
       API_ROOT_URL: http://localhost:3010
       FRONT_BASE_URL: http://localhost:4200
       MONGO_URL: mongodb://novu-mongo:27017/novu
@@ -230,10 +257,12 @@ services:
       - redis
 
   novu-worker:
+    container_name: ow-notify-worker
+    profiles: [notifications]
     image: ghcr.io/novuhq/novu/worker:latest
     restart: unless-stopped
     environment:
-      NODE_ENV: development
+      NODE_ENV: local
       MONGO_URL: mongodb://novu-mongo:27017/novu
       REDIS_HOST: redis
       REDIS_PORT: 6379
@@ -244,34 +273,42 @@ services:
       - redis
 
   novu-web:
+    container_name: ow-notify-web
+    profiles: [notifications]
     image: ghcr.io/novuhq/novu/web:latest
     restart: unless-stopped
     environment:
       REACT_APP_API_URL: http://localhost:3010
     ports:
-      - "4200:4200"   # Novu dashboard → http://localhost:4200
+      - "4200:4200"
 
   novu-mongo:
+    container_name: ow-notify-db
+    profiles: [notifications]
     image: mongo:7
     restart: unless-stopped
     volumes:
       - novu_mongo_data:/data/db
 
-  # ── Mailhog (local email trap) ─────────────────────────────────────────────
+  # ── Mailhog (local email trap) — profile:tools ─────────────────────────────
   mailhog:
+    container_name: ow-mailhog
+    profiles: [tools]
     image: mailhog/mailhog:latest
     restart: unless-stopped
     ports:
-      - "1025:1025"   # SMTP
-      - "8025:8025"   # Web UI → http://localhost:8025
+      - "1025:1025"
+      - "8025:8025"
     environment:
       MH_STORAGE: maildir
       MH_MAILDIR_PATH: /mailhog-data
     volumes:
       - mailhog_data:/mailhog-data
 
-  # ── Bull Board (queue dashboard) ───────────────────────────────────────────
+  # ── Bull Board (queue dashboard) — profile:tools ───────────────────────────
   bullboard:
+    container_name: ow-bullboard
+    profiles: [tools]
     image: deadly0/bull-board:latest
     restart: unless-stopped
     environment:
@@ -279,15 +316,65 @@ services:
       REDIS_PORT: 6379
       REDIS_USE_TLS: "false"
     ports:
-      - "3099:3000"   # Bull Board UI → http://localhost:3099
+      - "3099:3000"
     depends_on:
       - redis
+
+  # ── API (Hono / Node) ─────────────────────────────────────────────────────
+  # Runs with tsx so source changes are picked up on container restart.
+  # env_file provides all secrets; environment overrides service URLs so
+  # container-to-container networking works (pgbouncer:5432 not localhost:6432).
+  api:
+    container_name: ow-backend
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    env_file:
+      - path: .env.local
+        required: false
+    environment:
+      DATABASE_URL: postgres://app_user:app_user_dev_password@pgbouncer:5432/platform
+      REDIS_URL: redis://redis:6379
+      # Zitadel routes by Host header — must match EXTERNALDOMAIN (localhost).
+      # extra_hosts maps localhost → Zitadel container so JWKS/introspection
+      # fetches from the API container hit the right service.
+      ZITADEL_JWKS_URL: http://localhost:8080/oauth/v2/keys
+      ZITADEL_INTROSPECTION_URL: http://localhost:8080/oauth/v2/introspect
+      # OPENBAO_ADDR: http://openbao:8200  # uncomment when openbao service is enabled
+      # S3_ENDPOINT: http://minio:9000      # uncomment when minio service is enabled
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    extra_hosts:
+      - "localhost:host-gateway"
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ── Admin UI (React + Refine) ──────────────────────────────────────────────
+  # Dev mode: Vite dev server with HMR. Source files are mounted as volumes so
+  # any change on the host is picked up instantly — no rebuild needed.
+  admin-ui:
+    container_name: ow-frontend
+    build:
+      context: .
+      dockerfile: apps/admin-ui/Dockerfile.dev
+    ports:
+      - "3001:3001" # Vite dev server → http://localhost:3001
+    volumes:
+      - ./apps/admin-ui/src:/app/apps/admin-ui/src
+      - ./apps/admin-ui/index.html:/app/apps/admin-ui/index.html
+      - ./apps/admin-ui/vite.config.ts:/app/apps/admin-ui/vite.config.ts
+      - ./.env.local:/app/.env.local:ro
+    restart: unless-stopped
 
 # ─────────────────────────────────────────────────────────────────────────────
 volumes:
   postgres_data:
   redis_data:
-  minio_data:
   novu_mongo_data:
   mailhog_data:
+  # minio_data:    # uncomment when minio service is enabled
   # OpenBao has no volume — dev mode data is ephemeral by design

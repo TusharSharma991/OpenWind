@@ -1,4 +1,4 @@
-import { eq, and, or, isNull, asc } from "drizzle-orm";
+import { eq, and, or, isNull, asc, inArray, count } from "drizzle-orm";
 import type { DbOrTx } from "@platform/db";
 import {
   workflows,
@@ -14,6 +14,7 @@ import type {
   WorkflowState,
   WorkflowTransition,
   CreateWorkflowInput,
+  UpdateWorkflowInput,
   CreateWorkflowStateInput,
   UpdateWorkflowStateInput,
   CreateWorkflowTransitionInput,
@@ -30,6 +31,7 @@ function rowToWorkflow(r: typeof workflows.$inferSelect): WorkflowDefinition {
     entityTypeId: r.entityTypeId,
     name: r.name,
     initialState: r.initialState,
+    isActive: r.isActive,
     createdAt: r.createdAt,
   };
 }
@@ -67,7 +69,7 @@ function rowToTransition(
 // Tenants can read system workflows (tenantId = null) and their own.
 // Writes (create/delete states/transitions) are restricted to tenant-owned rows.
 
-function visibleTo(tenantId: string) {
+function visibleTo(tenantId: string): ReturnType<typeof or> {
   return or(isNull(workflows.tenantId), eq(workflows.tenantId, tenantId));
 }
 
@@ -130,15 +132,107 @@ export async function getWorkflow(
 export async function listWorkflows(
   db: DbOrTx,
   tenantId: string,
-  entityTypeId: string,
-): Promise<WorkflowDefinition[]> {
+  entityTypeId?: string,
+  activeOnly?: boolean,
+): Promise<WorkflowFull[]> {
+  const baseFilter = entityTypeId
+    ? and(eq(workflows.entityTypeId, entityTypeId), visibleTo(tenantId))
+    : visibleTo(tenantId);
+  const filter = activeOnly
+    ? and(baseFilter, eq(workflows.isActive, true))
+    : baseFilter;
+
   const rows = await db
     .select()
     .from(workflows)
-    .where(and(eq(workflows.entityTypeId, entityTypeId), visibleTo(tenantId)))
+    .where(filter)
     .orderBy(asc(workflows.createdAt));
 
-  return rows.map(rowToWorkflow);
+  if (rows.length === 0) return [];
+
+  const workflowIds = rows.map((r) => r.id);
+
+  const [allStates, allTransitions, recordCounts] = await Promise.all([
+    db
+      .select()
+      .from(workflowStates)
+      .where(inArray(workflowStates.workflowId, workflowIds))
+      .orderBy(asc(workflowStates.sortOrder), asc(workflowStates.id)),
+    db
+      .select()
+      .from(workflowTransitions)
+      .where(inArray(workflowTransitions.workflowId, workflowIds))
+      .orderBy(asc(workflowTransitions.id)),
+    db
+      .select({ workflowId: entityInstances.workflowId, total: count() })
+      .from(entityInstances)
+      .where(inArray(entityInstances.workflowId, workflowIds))
+      .groupBy(entityInstances.workflowId),
+  ]);
+
+  const countByWorkflow = new Map(
+    recordCounts.map((r) => [r.workflowId, r.total]),
+  );
+
+  const statesByWorkflow = new Map<string, WorkflowState[]>();
+  for (const s of allStates) {
+    const mapped = rowToState(s);
+    if (!statesByWorkflow.has(mapped.workflowId)) {
+      statesByWorkflow.set(mapped.workflowId, []);
+    }
+    statesByWorkflow.get(mapped.workflowId)?.push(mapped);
+  }
+
+  const transitionsByWorkflow = new Map<string, WorkflowTransition[]>();
+  for (const t of allTransitions) {
+    const mapped = rowToTransition(t);
+    if (!transitionsByWorkflow.has(mapped.workflowId)) {
+      transitionsByWorkflow.set(mapped.workflowId, []);
+    }
+    transitionsByWorkflow.get(mapped.workflowId)?.push(mapped);
+  }
+
+  return rows.map((row) => ({
+    ...rowToWorkflow(row),
+    recordCount: countByWorkflow.get(row.id) ?? 0,
+    states: statesByWorkflow.get(row.id) ?? [],
+    transitions: transitionsByWorkflow.get(row.id) ?? [],
+  }));
+}
+
+export async function updateWorkflow(
+  db: DbOrTx,
+  tenantId: string,
+  workflowId: string,
+  input: UpdateWorkflowInput,
+): Promise<WorkflowDefinition> {
+  const [row] = await db
+    .select({ id: workflows.id, tenantId: workflows.tenantId })
+    .from(workflows)
+    .where(and(eq(workflows.id, workflowId), visibleTo(tenantId)))
+    .limit(1);
+
+  if (row === undefined)
+    throw new WorkflowError("WORKFLOW_NOT_FOUND", { workflowId });
+  if (row.tenantId === null)
+    throw new WorkflowError("WORKFLOW_NOT_FOUND", { workflowId });
+
+  const updates: Partial<typeof workflows.$inferInsert> = {};
+  if (input.isActive !== undefined) updates.isActive = input.isActive;
+
+  const [updated] = await db
+    .update(workflows)
+    .set(updates)
+    .where(eq(workflows.id, workflowId))
+    .returning();
+
+  if (!updated) throw new WorkflowError("WORKFLOW_NOT_FOUND", { workflowId });
+
+  logger.info(
+    { tenantId, workflowId, isActive: updated.isActive },
+    "Workflow updated",
+  );
+  return rowToWorkflow(updated);
 }
 
 export async function deleteWorkflow(
@@ -149,10 +243,14 @@ export async function deleteWorkflow(
   const [row] = await db
     .select({ id: workflows.id, tenantId: workflows.tenantId })
     .from(workflows)
-    .where(and(eq(workflows.id, workflowId), eq(workflows.tenantId, tenantId)))
+    .where(and(eq(workflows.id, workflowId), visibleTo(tenantId)))
     .limit(1);
 
-  if (!row) throw new WorkflowError("WORKFLOW_NOT_FOUND", { workflowId });
+  // Not found, or is a system workflow (tenant_id = null — read-only)
+  if (row === undefined)
+    throw new WorkflowError("WORKFLOW_NOT_FOUND", { workflowId });
+  if (row.tenantId === null)
+    throw new WorkflowError("WORKFLOW_NOT_FOUND", { workflowId });
 
   // Block deletion if any entity instances are still attached to this workflow
   const [instance] = await db

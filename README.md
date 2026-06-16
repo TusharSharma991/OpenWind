@@ -152,46 +152,86 @@ Full architecture documentation: [`docs/architecture-brief.md`](docs/architectur
 
 ### Prerequisites
 
-- Node.js 22+
-- pnpm 9+
-- Docker and Docker Compose
+- [Node.js 22+](https://nodejs.org/)
+- [pnpm 9+](https://pnpm.io/installation) (`npm install -g pnpm`)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (running)
 
-### Local setup
+### Quick start — one command
 
 ```bash
-# Clone the repo
 git clone https://github.com/TinyPhi/OpenWind.git
 cd OpenWind
-
-# Copy environment config
-cp .env.example .env.local
-
-# Start infrastructure (Postgres, Redis, MinIO, Zitadel, Novu, MailHog)
-docker compose up -d
-
-# Install dependencies
-pnpm install
-
-# Run database migrations
-pnpm db:migrate
-
-# Seed development data
-pnpm db:seed
-
-# Start all services (hot reload)
-pnpm dev
+pnpm install --frozen-lockfile
+pnpm bootstrap
 ```
 
-The admin UI will be available at `http://localhost:3001`.
-API docs (Scalar) at `http://localhost:3000/docs`.
-Zitadel console at `http://localhost:8080` (admin@platform.local / Admin1234!).
+The bootstrap script handles everything automatically:
 
-### First steps after setup
+| Step | What it does                                              |
+| ---- | --------------------------------------------------------- |
+| 1    | Checks Node.js, pnpm, and Docker versions                 |
+| 2    | Creates `.env.local` from `.env.example`                  |
+| 3    | Starts all Docker services (`docker compose up -d`)       |
+| 4    | Waits for Postgres and Zitadel to be healthy              |
+| 5    | Installs all workspace dependencies                       |
+| 6    | Runs database migrations and seeds base data              |
+| 7    | Configures Zitadel (OIDC app, roles, auth credentials)    |
+| 8    | Creates three demo users with different permission levels |
+| 9    | Seeds a complete Helpdesk demo with 5 sample tickets      |
+| 10   | Prints all URLs and credentials                           |
 
-1. Log in to the admin UI and create your first tenant
-2. Install the modules your tenant needs (CRM, Helpdesk, etc.)
-3. Open any module and explore the default workflow configurations
-4. Try creating a custom field on an entity type — no restart needed
+> **Fully automated** — Bootstrap reads the Zitadel setup token automatically from the container. No browser step, no copy-pasting. Every run is headless.
+
+After bootstrap finishes, everything is already running in Docker. Open `http://localhost:3001` and log in.
+
+To rebuild and restart all containers after code changes:
+
+```bash
+docker compose up -d --build
+```
+
+### What you get
+
+| URL                          | Service                                                  |
+| ---------------------------- | -------------------------------------------------------- |
+| `http://localhost:3001`      | App — admin, agent, and customer views (RBAC-controlled) |
+| `http://localhost:3000`      | API                                                      |
+| `http://localhost:3000/docs` | API docs (Scalar)                                        |
+| `http://localhost:8080`      | Zitadel console                                          |
+
+All user types log in at the same URL (`http://localhost:3001`). The app reads the role from the JWT and shows the appropriate view automatically.
+
+### Demo credentials
+
+| Username  | Password        | Role  | View shown after login |
+| --------- | --------------- | ----- | ---------------------- |
+| `owAdmin` | `OpenWind1234!` | Admin | Full admin panel       |
+| `owAgent` | `OpenWind1234!` | Agent | Agent / support view   |
+| `owUser`  | `OpenWind1234!` | User  | Customer / portal view |
+
+> You can also log in with the full email (`owAdmin@openwind.local`, etc.) — both work.
+
+| Username               | Password     | Role   | Access               |
+| ---------------------- | ------------ | ------ | -------------------- |
+| `admin@platform.local` | `Admin1234!` | System | Zitadel console only |
+
+### Seeded demo data
+
+The bootstrap seeds a fully configured **Helpdesk** module so you can explore the platform immediately:
+
+- **Support Ticket** entity type with 6 fields (subject, description, priority, category, customer name, email)
+- **Ticket Lifecycle** workflow: New → Open → In Progress → Waiting for Customer → Resolved → Closed
+- **5 sample tickets** across every workflow state (from high-priority bugs to feature requests)
+
+### Resetting everything
+
+```bash
+docker compose down -v   # removes all container data (volumes wiped)
+rm .env.local            # removes your local env + generated credentials
+pnpm bootstrap           # full setup from scratch (fully automated, no manual steps)
+```
+
+> **Important:** Always use `docker compose down -v` (not just `down`) before re-running bootstrap from scratch. Without `-v`, Docker preserves the Postgres volume and the old Zitadel data will mix with the new setup.
 
 Full setup guide: [`docs/local-setup.md`](docs/local-setup.md)
 

@@ -1,9 +1,124 @@
 import React from "react";
+import { Refine, Authenticated } from "@refinedev/core";
+import routerProvider from "@refinedev/react-router-v6";
+import {
+  BrowserRouter,
+  Routes,
+  Route,
+  Outlet,
+  Navigate,
+} from "react-router-dom";
+import { authProvider } from "./authProvider.js";
+import { dataProvider } from "./dataProvider.js";
+import { EntityTypeProvider } from "./entity-type-context.js";
+import { Layout } from "./components/layout.js";
+import { Login } from "./pages/login.js";
+import { AuthCallback } from "./pages/callback.js";
+import { Dashboard } from "./pages/dashboard.js";
+import { Modules } from "./pages/modules.js";
+import { EntityTypeDetail } from "./pages/entity-types/detail.js";
+import { EntityInstanceDetail } from "./pages/entity-types/instance-detail.js";
+import { EntityInstanceCreate } from "./pages/entity-types/instance-create.js";
+import { Workflows } from "./pages/workflows/index.js";
+import { WorkflowDetail } from "./pages/workflows/detail.js";
+import { CreateWorkflow } from "./pages/workflows/create.js";
+import { AdminRecords } from "./pages/records/index.js";
+import { WorkflowRecords } from "./pages/records/workflow-records.js";
+import { Settings } from "./pages/settings.js";
+import { CustomerRecordList } from "./pages/customer/record-list.js";
+import { CustomerRecordCreate } from "./pages/customer/record-create.js";
+import { CustomerRecordDetail } from "./pages/customer/record-detail.js";
+import "./index.css";
 
 export function App(): React.ReactElement {
   return (
-    <div>
-      <h1>OpenWind Admin</h1>
-    </div>
+    <BrowserRouter>
+      <Refine
+        authProvider={authProvider}
+        dataProvider={dataProvider}
+        routerProvider={routerProvider}
+        resources={[
+          { name: "dashboard", list: "/", meta: { label: "Dashboard" } },
+          { name: "modules", list: "/modules", meta: { label: "Templates" } },
+          {
+            name: "records",
+            list: "/records",
+            meta: { label: "Records" },
+          },
+          {
+            name: "workflows",
+            list: "/workflows",
+            show: "/workflows/:id",
+            meta: { label: "Workflows" },
+          },
+        ]}
+      >
+        <Routes>
+          {/* Auth routes */}
+          <Route path="/login" element={<Login />} />
+          <Route path="/auth/callback" element={<AuthCallback />} />
+
+          {/* Protected routes */}
+          <Route
+            element={
+              <Authenticated
+                key="protected"
+                fallback={<Navigate to="/login" />}
+              >
+                <EntityTypeProvider>
+                  <Layout>
+                    <Outlet />
+                  </Layout>
+                </EntityTypeProvider>
+              </Authenticated>
+            }
+          >
+            {/* Admin / Agent routes */}
+            <Route index element={<Dashboard />} />
+            <Route path="/modules" element={<Modules />} />
+
+            {/* Records — workflow cards; card click goes to /records/:typeSlug */}
+            <Route path="/records" element={<AdminRecords />} />
+
+            {/* Entity types — still accessible from workflow detail "Manage Fields" link */}
+            <Route path="/entity-types/:id" element={<EntityTypeDetail />} />
+            <Route
+              path="/entity-types/:id/records/new"
+              element={<EntityInstanceCreate />}
+            />
+            <Route
+              path="/entity-types/:id/records/:instanceId"
+              element={<EntityInstanceDetail />}
+            />
+
+            {/* Workflows */}
+            <Route path="/workflows" element={<Workflows />} />
+            <Route path="/workflows/new" element={<CreateWorkflow />} />
+            <Route
+              path="/workflows/:workflowSlug"
+              element={<WorkflowDetail />}
+            />
+            <Route
+              path="/workflows/:workflowSlug/records"
+              element={<WorkflowRecords />}
+            />
+
+            <Route path="/settings" element={<Settings />} />
+
+            {/* Customer routes */}
+            <Route path="/home" element={<Navigate to="/records" replace />} />
+            <Route path="/records/:typeSlug" element={<CustomerRecordList />} />
+            <Route
+              path="/records/:typeSlug/new"
+              element={<CustomerRecordCreate />}
+            />
+            <Route
+              path="/records/:typeSlug/:id"
+              element={<CustomerRecordDetail />}
+            />
+          </Route>
+        </Routes>
+      </Refine>
+    </BrowserRouter>
   );
 }

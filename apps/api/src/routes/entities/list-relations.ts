@@ -26,7 +26,7 @@ export const listRelationsHandler = factory.createHandlers(
   requireAuth(),
   zValidator("query", ListRelationsQuerySchema),
   async (c) => {
-    const instanceId = c.req.param("id")!;
+    const instanceId = c.req.param("id") ?? "";
     const query = c.req.valid("query");
     const { tenantId } = c.get("auth");
 

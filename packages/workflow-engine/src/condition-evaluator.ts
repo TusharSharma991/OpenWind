@@ -6,13 +6,12 @@ export function evaluateConditionTree(
 ): boolean {
   if (tree === null) return true;
 
-  if ("children" in tree && tree.op === "and") {
+  if ("children" in tree) {
+    if (tree.op === "or")
+      return tree.children.some((c) => evaluateConditionTree(c, fields));
     return tree.children.every((c) => evaluateConditionTree(c, fields));
   }
-  if ("children" in tree && tree.op === "or") {
-    return tree.children.some((c) => evaluateConditionTree(c, fields));
-  }
-  if ("child" in tree && tree.op === "not") {
+  if ("child" in tree) {
     return !evaluateConditionTree(tree.child, fields);
   }
 

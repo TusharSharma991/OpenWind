@@ -14,6 +14,17 @@ RUN pnpm exec turbo run build --filter=@platform/portal...
 FROM base AS runner
 WORKDIR /app
 RUN npm install -g serve
+
 COPY --from=builder /app/apps/portal/dist ./dist
+
+# Runtime env vars — written to dist/env.js by the entrypoint so the SPA
+# can read them from window.__CONFIG__ without a rebuild.
+ENV ZITADEL_ISSUER=http://localhost:8080
+ENV ZITADEL_OIDC_CLIENT_ID=
+ENV ZITADEL_OIDC_CLIENT_SECRET=
+
+COPY apps/portal/docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
 EXPOSE 3000
-CMD ["serve", "-s", "dist", "-l", "3000"]
+ENTRYPOINT ["/docker-entrypoint.sh"]

@@ -28,7 +28,10 @@ vi.mock("@platform/auth", () => ({
   },
 }));
 
-vi.mock("@platform/db", () => ({ db: {} }));
+vi.mock("@platform/db", () => ({
+  db: {},
+  withTenantContext: (tenantId, fn) => fn({}),
+}));
 
 vi.mock("@platform/workflow-engine", async (importOriginal) => {
   const real = await importOriginal<typeof WorkflowEngine>();
@@ -137,20 +140,21 @@ describe("GET /workflows", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("returns 200 with list of workflows", async () => {
-    mockList.mockResolvedValue([fakeWorkflow]);
+    mockList.mockResolvedValue([fakeWorkflowFull]);
 
     const res = await makeApp().request(`/?entityTypeId=${TYPE_ID}`);
 
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.data).toHaveLength(1);
-    expect(mockList).toHaveBeenCalledWith({}, "t-aaa", TYPE_ID);
+    expect(mockList).toHaveBeenCalledWith({}, "t-aaa", TYPE_ID, false);
   });
 
-  it("returns 400 when entityTypeId is missing", async () => {
+  it("allows missing entityTypeId and returns 200", async () => {
+    mockList.mockResolvedValue([fakeWorkflowFull]);
     const res = await makeApp().request("/");
-    expect(res.status).toBe(400);
-    expect(mockList).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    expect(mockList).toHaveBeenCalledWith({}, "t-aaa", undefined, false);
   });
 });
 

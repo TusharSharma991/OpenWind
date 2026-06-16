@@ -12,6 +12,7 @@ const CreateEntitySchema = z.object({
   createdBy: z.string().uuid().optional(),
   assignedTo: z.string().uuid().optional(),
   workflowId: z.string().uuid().optional(),
+  currentState: z.string().optional(),
 });
 
 export const createEntityHandler = factory.createHandlers(
@@ -25,6 +26,7 @@ export const createEntityHandler = factory.createHandlers(
     try {
       const instance = await createEntity(db, tenantId, {
         ...input,
+        actorId: userId,
         // Prefer createdBy from body if provided; fall back to authenticated user.
         createdBy: input.createdBy ?? userId,
       });

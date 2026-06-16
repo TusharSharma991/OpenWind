@@ -1,6 +1,6 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "ui": "tui",
+  "ui": "stream",
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
@@ -9,7 +9,32 @@
     },
     "dev": {
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      "env": [
+        "NODE_ENV",
+        "DATABASE_URL",
+        "DATABASE_POOL_MIN",
+        "DATABASE_POOL_MAX",
+        "REDIS_URL",
+        "ZITADEL_ISSUER",
+        "ZITADEL_AUDIENCE",
+        "ZITADEL_INTROSPECTION_URL",
+        "ZITADEL_INTROSPECTION_CLIENT_ID",
+        "ZITADEL_INTROSPECTION_CLIENT_SECRET",
+        "NOVU_API_KEY",
+        "S3_ENDPOINT",
+        "S3_BUCKET",
+        "S3_ACCESS_KEY",
+        "S3_SECRET_KEY",
+        "ANTHROPIC_API_KEY",
+        "OPENBAO_ADDR",
+        "OPENBAO_TRANSIT_KEY",
+        "OPENBAO_TOKEN",
+        "OPENBAO_ROLE_ID",
+        "OPENBAO_SECRET_ID",
+        "ZITADEL_OIDC_CLIENT_ID",
+        "ZITADEL_OIDC_CLIENT_SECRET"
+      ]
     },
     "typecheck": {
       "dependsOn": ["^build"],
@@ -52,7 +77,29 @@
     },
     "db:seed": {
       "cache": false,
-      "env": ["DATABASE_URL", "NODE_ENV"]
+      "env": [
+        "DATABASE_URL",
+        "NODE_ENV",
+        "DATABASE_POOL_MIN",
+        "DATABASE_POOL_MAX",
+        "REDIS_URL",
+        "ZITADEL_ISSUER",
+        "ZITADEL_AUDIENCE",
+        "ZITADEL_INTROSPECTION_URL",
+        "ZITADEL_INTROSPECTION_CLIENT_ID",
+        "ZITADEL_INTROSPECTION_CLIENT_SECRET",
+        "NOVU_API_KEY",
+        "S3_ENDPOINT",
+        "S3_BUCKET",
+        "S3_ACCESS_KEY",
+        "S3_SECRET_KEY",
+        "ANTHROPIC_API_KEY",
+        "OPENBAO_ADDR",
+        "OPENBAO_TRANSIT_KEY",
+        "OPENBAO_TOKEN",
+        "OPENBAO_ROLE_ID",
+        "OPENBAO_SECRET_ID"
+      ]
     },
     "db:studio": {
       "cache": false,

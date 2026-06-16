@@ -106,6 +106,13 @@ export const requireAuth = (db?: DbOrTx): MiddlewareHandler =>
 
       const auth = extractAuthContext(claims);
       if (!auth) {
+        logger.warn(
+          {
+            sub: claims.sub,
+            orgId: claims["urn:zitadel:iam:org:id"] ?? "(missing)",
+          },
+          "JWT missing required claims — sub or urn:zitadel:iam:org:id not present",
+        );
         return c.json(
           { error: "UNAUTHORIZED", message: "Missing required claims" },
           401,
@@ -147,8 +154,19 @@ export const requireAuth = (db?: DbOrTx): MiddlewareHandler =>
       await withTenantContext(auth.tenantId, (tx) =>
         tx
           .insert(tenantUsers)
-          .values({ tenantId: auth.tenantId, userId: auth.userId })
-          .onConflictDoNothing(),
+          .values({
+            tenantId: auth.tenantId,
+            userId: auth.userId,
+            email: auth.email || null,
+            displayName: auth.displayName || null,
+          })
+          .onConflictDoUpdate({
+            target: [tenantUsers.tenantId, tenantUsers.userId],
+            set: {
+              email: auth.email || null,
+              displayName: auth.displayName || null,
+            },
+          }),
       ).catch((err: unknown) => {
         logger.warn(
           { err, tenantId: auth.tenantId },
@@ -269,6 +287,7 @@ async function resolveApiKey(
     tenantId: row.tenantId,
     roles: row.scopes,
     email: "",
+    displayName: `API Key ${row.id.slice(0, 8)}`,
   };
 }
 

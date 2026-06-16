@@ -1,7 +1,7 @@
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { requireAuth } from "@platform/auth";
-import { db } from "@platform/db";
+import { withTenantContext } from "@platform/db";
 import { listEntities, MAX_PAGE_SIZE } from "@platform/entity-engine";
 import { factory } from "./factory.js";
 import { handleEntityError } from "../../lib/handle-entity-error.js";
@@ -55,10 +55,9 @@ export const listEntitiesHandler = factory.createHandlers(
 
     try {
       const { fields, ...rest } = query;
-      const page = await listEntities(db, tenantId, {
-        ...rest,
-        fieldFilters: fields,
-      });
+      const page = await withTenantContext(tenantId, (tx) =>
+        listEntities(tx, tenantId, { ...rest, fieldFilters: fields }),
+      );
       return c.json({ data: page.data, nextCursor: page.nextCursor });
     } catch (err) {
       return handleEntityError(c, err);

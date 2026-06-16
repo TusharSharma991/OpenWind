@@ -432,6 +432,7 @@ export async function getWorkflowEventLog(
     comment: e.comment ?? null,
     metadata: (e.metadata ?? {}) as Record<string, unknown>,
     createdAt: e.createdAt,
+    triggeredAt: e.createdAt.toISOString(),
   }));
 }
 

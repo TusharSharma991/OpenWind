@@ -1,6 +1,6 @@
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { requireAuth, requireRole } from "@platform/auth";
+import { requireAuth } from "@platform/auth";
 import { db } from "@platform/db";
 import { listEntityTypes, MAX_PAGE_SIZE } from "@platform/entity-engine";
 import { factory } from "./factory.js";
@@ -14,7 +14,6 @@ const ListEntityTypesQuerySchema = z.object({
 
 export const listEntityTypesHandler = factory.createHandlers(
   requireAuth(),
-  requireRole("admin"),
   zValidator("query", ListEntityTypesQuerySchema),
   async (c) => {
     const { moduleId, cursor, limit } = c.req.valid("query");

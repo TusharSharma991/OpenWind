@@ -113,6 +113,34 @@
       "when": 1778749338314,
       "tag": "0013_tenant_lifecycle",
       "breakpoints": false
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1778749338315,
+      "tag": "0014_modules",
+      "breakpoints": false
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1778749338316,
+      "tag": "0015_tenant_users_profile",
+      "breakpoints": false
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1778749338317,
+      "tag": "0016_workflow_is_active",
+      "breakpoints": false
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1778749338318,
+      "tag": "0017_workflow_events_actor_id_text",
+      "breakpoints": false
     }
   ]
 }

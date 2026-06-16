@@ -10,6 +10,7 @@ export { redactMetadata, buildSensitivityMap } from "./redact.js";
 export type { FieldSensitivity } from "@platform/entity-engine";
 export {
   createWorkflow,
+  updateWorkflow,
   getWorkflow,
   listWorkflows,
   deleteWorkflow,

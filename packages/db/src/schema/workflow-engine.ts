@@ -20,6 +20,7 @@ export const workflows = pgTable("workflows", {
     .references(() => entityTypes.id),
   name: text("name").notNull(),
   initialState: text("initial_state").notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),
@@ -66,7 +67,7 @@ export const workflowEvents = pgTable(
     fromState: text("from_state"),
     toState: text("to_state").notNull(),
     triggeredBy: text("triggered_by").notNull(),
-    actorId: uuid("actor_id"),
+    actorId: text("actor_id"),
     comment: text("comment"),
     idempotencyKey: text("idempotency_key"),
     metadata: jsonb("metadata").default({}).notNull(),

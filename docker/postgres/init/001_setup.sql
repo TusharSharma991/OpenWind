@@ -18,7 +18,7 @@ CREATE USER analytics_user WITH PASSWORD 'analytics_user_dev_password';
 
 -- ─── Grant connect ────────────────────────────────────────────────────────
 GRANT CONNECT ON DATABASE platform TO app_user;
-GRANT CONNECT ON DATABASE platform TO migration_user;
+GRANT CONNECT, CREATE ON DATABASE platform TO migration_user;
 GRANT CONNECT ON DATABASE platform TO analytics_user;
 
 -- ─── Extensions (run as superuser during init) ─────────────────────────────

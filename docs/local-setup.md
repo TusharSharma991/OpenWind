@@ -1,6 +1,8 @@
 # Local development setup
 
-This guide covers platform-specific notes, troubleshooting, and the details behind each service. For the quick-start commands see the [README](../README.md#getting-started) or [CONTRIBUTING.md](../CONTRIBUTING.md#local-setup).
+This guide covers platform-specific notes, troubleshooting, and the details
+behind each service. For the quick-start commands see the
+[README](../README.md#getting-started).
 
 ---
 
@@ -8,88 +10,95 @@ This guide covers platform-specific notes, troubleshooting, and the details behi
 
 `docker compose up -d` starts these services:
 
-| Service     | Port        | Purpose                                                     |
-| ----------- | ----------- | ----------------------------------------------------------- |
-| Postgres 16 | 5432        | Primary database (RLS, multi-tenant)                        |
-| Redis 7     | 6379        | BullMQ queue backend + application cache                    |
-| MinIO       | 9000 / 9001 | S3-compatible object storage. Console at :9001              |
-| Zitadel     | 8080        | Identity provider (OIDC/OAuth2/SAML)                        |
-| Novu        | 3003        | Notification infrastructure                                 |
-| MailHog     | 1025 / 8025 | SMTP trap — catches all outbound email. UI at :8025         |
-| BullBoard   | 3002        | BullMQ job queue dashboard                                  |
-| OpenBao     | 8200        | Secrets manager (OpenBao dev mode). Token: `dev-root-token` |
+| Service     | Port | Purpose                                                                               |
+| ----------- | ---- | ------------------------------------------------------------------------------------- |
+| Postgres 16 | 5432 | Primary database (RLS, multi-tenant). **Never connect here directly** — use PgBouncer |
+| PgBouncer   | 6432 | Connection pooler (transaction mode). App always connects here                        |
+| Redis 7     | 6379 | BullMQ queue backend + application cache                                              |
+| Zitadel     | 8080 | Identity provider (OIDC/OAuth2). Console at http://localhost:8080                     |
+| API         | 3000 | Hono API server                                                                       |
+| Admin UI    | 3001 | React app (Vite dev server with HMR)                                                  |
+
+**Commented out** (not yet integrated — uncomment in `docker-compose.yml` when needed):
+
+| Service | Port        | Purpose                                                          |
+| ------- | ----------- | ---------------------------------------------------------------- |
+| OpenBao | 8200        | Secrets manager (enable when Transit encryption is wired in)     |
+| MinIO   | 9000 / 9001 | S3-compatible storage (enable when `packages/files` is wired in) |
+
+**Optional profiles** (start with `--profile <name>`):
+
+| Profile         | Services added                          |
+| --------------- | --------------------------------------- |
+| `notifications` | Novu API, worker, web, MongoDB          |
+| `tools`         | MailHog (email trap), BullBoard (queue) |
 
 ### Useful docker compose commands
 
 ```bash
-docker compose up -d              # start all services in background
-docker compose down               # stop all services (data preserved)
-docker compose down -v            # stop all + delete all volumes (full reset)
-docker compose logs -f api        # tail logs for a specific service
-docker compose restart postgres   # restart one service
+docker compose up -d                        # start core services
+docker compose down                         # stop (data preserved)
+docker compose down -v                      # stop + wipe all volumes (full reset)
+docker compose logs -f api                  # tail logs for a service
+docker compose restart ow-frontend          # restart one container
+docker compose --profile tools up -d       # start with optional tools
 ```
 
 ---
 
 ## Platform-specific notes
 
-### macOS (Apple Silicon / M1, M2, M3)
+### macOS (Apple Silicon)
 
-All images in `docker-compose.yml` have `platform: linux/amd64` removed — they use `linux/arm64` variants where available. If you see `exec format error` on any container, check that Docker Desktop is set to use the Apple Silicon VM (not Rosetta emulation).
-
-Postgres performance on Apple Silicon is good. MinIO and Zitadel may take slightly longer on first start while Docker pulls multi-arch images.
+All images use multi-arch variants. If you see `exec format error` on any
+container, ensure Docker Desktop is set to use the Apple Silicon VM (not
+Rosetta emulation).
 
 ### Linux
 
-Ensure your user is in the `docker` group, otherwise all `docker compose` commands need `sudo`:
+Ensure your user is in the `docker` group:
 
 ```bash
 sudo usermod -aG docker $USER
 newgrp docker
 ```
 
-If Postgres fails to start with a permissions error on the data volume, run:
+If Postgres fails to start with a permissions error on the data volume:
 
 ```bash
-docker compose down -v && docker compose up -d postgres
+docker compose down -v && docker compose up -d
 ```
 
-### Windows (WSL2)
+### Windows
 
-Run everything inside WSL2, not in the Windows host shell. Clone the repo inside the WSL2 filesystem (e.g., `~/projects/`), not on a Windows-mounted path (`/mnt/c/...`). File system performance on mounted paths is poor enough to make the dev server unusable.
-
-Node.js and pnpm should be installed inside WSL2, not the Windows versions.
+Run `pnpm bootstrap` from either PowerShell or Git Bash — both work. Docker
+Desktop must be running. No WSL2 required; everything runs in Docker containers.
 
 ---
 
 ## Environment variables
 
-Copy `.env.example` to `.env.local` before running anything:
-
-```bash
-cp .env.example .env.local
-```
-
-The defaults in `.env.example` work with the docker-compose services above — no changes needed for local development. The application reads env vars exclusively from `@platform/config` (validated with Zod at startup). If a required variable is missing or malformed, the process will refuse to start with a clear error.
+`pnpm bootstrap` creates `.env.local` from `.env.example` automatically.
+The defaults work with the docker-compose services with no manual edits.
 
 ### Key variables
 
-| Variable              | Default                                                               | Notes                              |
-| --------------------- | --------------------------------------------------------------------- | ---------------------------------- |
-| `DATABASE_URL`        | `postgresql://platform:platform_dev_password@localhost:5432/platform` | Postgres connection                |
-| `REDIS_URL`           | `redis://localhost:6379`                                              | Redis connection                   |
-| `ZITADEL_ISSUER`      | `http://localhost:8080`                                               | Zitadel OIDC issuer                |
-| `ZITADEL_AUDIENCE`    | `platform-api`                                                        | JWT audience claim                 |
-| `S3_ENDPOINT`         | `http://localhost:9000`                                               | MinIO endpoint                     |
-| `S3_BUCKET`           | `platform-dev`                                                        | MinIO bucket                       |
-| `S3_ACCESS_KEY`       | `minioadmin`                                                          | MinIO access key                   |
-| `S3_SECRET_KEY`       | `minioadmin`                                                          | MinIO secret key                   |
-| `NOVU_API_KEY`        | _(see .env.example)_                                                  | Novu self-hosted API key           |
-| `OPENBAO_ADDR`        | `http://localhost:8200`                                               | OpenBao address                    |
-| `OPENBAO_TRANSIT_KEY` | `platform-dev`                                                        | Transit encryption key name        |
-| `ANTHROPIC_API_KEY`   | _(your key)_                                                          | Only needed if testing AI features |
+| Variable                 | Purpose                                                                       |
+| ------------------------ | ----------------------------------------------------------------------------- |
+| `DATABASE_URL`           | App connection (via PgBouncer port 6432, as `app_user`)                       |
+| `MIGRATION_DATABASE_URL` | Migration connection (direct Postgres port 5432, as `migration_user`)         |
+| `ZITADEL_ISSUER`         | Zitadel OIDC issuer URL                                                       |
+| `ZITADEL_OIDC_CLIENT_ID` | Written by `pnpm bootstrap` — do not set manually                             |
+| `ZITADEL_KEY_JSON`       | Service account key for headless M2M auth — written by bootstrap on first run |
+| `ANTHROPIC_API_KEY`      | Only needed for AI features — rest of platform works without it               |
 
-`ANTHROPIC_API_KEY` is the only variable that requires a real value not provided by docker-compose. AI features will simply not work without it — the rest of the platform runs fine.
+**Why two database URLs?**
+`app_user` connects via PgBouncer in transaction mode, which is required for
+`SET LOCAL` RLS scoping to work correctly. `migration_user` bypasses PgBouncer
+and connects directly to Postgres because DDL operations (CREATE TABLE, ALTER)
+cannot run inside PgBouncer transaction mode. The two users have different
+Postgres privileges: `app_user` is subject to RLS and has DML only;
+`migration_user` owns the schema and can bypass RLS.
 
 ---
 
@@ -98,164 +107,173 @@ The defaults in `.env.example` work with the docker-compose services above — n
 ### Running migrations
 
 ```bash
-pnpm db:migrate        # apply all pending migrations
-pnpm db:rollback       # roll back the last migration
+pnpm db:migrate        # apply all pending migrations (uses MIGRATION_DATABASE_URL)
 ```
 
-Migrations live in `packages/db/migrations/` as numbered SQL files (`0001_initial_schema.sql`, etc.). Each runs in a transaction — if any statement fails, the whole migration rolls back. A partial migration is a production incident; it's not possible in development by design.
+Migrations live in `packages/db/migrations/` as numbered SQL files. Each runs
+in a transaction. Adding a new migration file also requires updating
+`packages/db/migrations/meta/_journal.json` — Drizzle's migrator reads the
+journal to determine which files to apply.
 
-### Seeding development data
+### Seeding
 
 ```bash
-pnpm db:seed           # seed tenants, entity types, sample data
+pnpm db:seed           # seed base tenant (idempotent — safe to re-run)
+pnpm seed:demo         # seed Helpdesk demo data (entity type, workflow, 5 tickets)
 ```
 
-The seed script creates:
-
-- Two tenants: `demo-corp` (all modules installed) and `test-tenant` (blank)
-- Platform admin user (credentials printed to console on first run)
-- Default entity types for installed modules
+Both are run automatically by `pnpm bootstrap`. Re-running them after a reset
+is safe — inserts use `ON CONFLICT DO NOTHING`.
 
 ### Resetting the database
 
 ```bash
-docker compose down -v postgres   # deletes postgres volume
-docker compose up -d postgres
-pnpm db:migrate
-pnpm db:seed
+docker compose down -v          # wipes postgres volume
+rm .env.local                   # removes generated credentials
+pnpm bootstrap                  # full setup again (fully automated)
 ```
+
+> Always use `docker compose down -v` before re-bootstrapping. Without `-v`,
+> the old Postgres data persists and the new Zitadel setup collides with it.
 
 ### Direct database access
 
 ```bash
 docker compose exec postgres psql -U platform -d platform
+# or as the app user:
+docker compose exec postgres psql -U app_user -d platform
 ```
 
-Useful queries for development:
+Useful queries:
 
 ```sql
 -- See all tenants
 SELECT id, slug, status FROM tenants;
 
--- See entity types for a tenant
-SELECT name, slug FROM entity_types WHERE tenant_id = '<uuid>';
+-- See entity types for the dev tenant
+SELECT name, slug FROM entity_types
+WHERE tenant_id = '00000000-0000-0000-0000-000000000001';
 
--- See active automation rules
-SELECT name, trigger_type, is_active FROM automation_rules WHERE tenant_id = '<uuid>';
+-- Check which migrations have been applied
+SELECT * FROM drizzle.__drizzle_migrations ORDER BY created_at;
 
--- Check RLS is working (should return empty for wrong tenant)
-SET app.tenant_id = '<wrong-uuid>';
-SELECT count(*) FROM entity_instances;
+-- Verify is_active column on workflows (sanity check)
+SELECT column_name FROM information_schema.columns
+WHERE table_name = 'workflows';
 ```
 
 ---
 
 ## Zitadel (identity)
 
-Zitadel is the OIDC/OAuth2/SAML identity provider. In development it runs in insecure mode (no TLS).
+Zitadel is the OIDC/OAuth2 identity provider. In development it runs without TLS.
 
-**Console:** http://localhost:8080
-**Default admin:** `admin@platform.local` / `Admin1234!`
+**Console:** http://localhost:8080  
+**System admin:** `admin@platform.local` / `Admin1234!`
 
-On first boot, Zitadel seeds a `platform` organisation and an API application. The client ID and client secret are written to `.zitadel-init` (gitignored) and also set in `.env.local` by the setup script.
+`pnpm bootstrap` creates the `Platform` project, OIDC app, three demo users,
+and writes `ZITADEL_OIDC_CLIENT_ID` and `ZITADEL_KEY_JSON` to `.env.local`.
 
-To create a test user:
+Demo login usernames: `owAdmin`, `owAgent`, `owUser` — password `OpenWind1234!` for all.
+(Full emails also work: `owAdmin@openwind.local`, etc.)
 
-1. Open http://localhost:8080
-2. Log in as admin
-3. Go to Users → New User
-4. Assign the user to the `demo-corp` organisation
-5. Grant roles: `agent` or `admin`
+Bootstrap reads the Zitadel setup PAT automatically from the container — no
+manual browser step required. After bootstrap runs, the frontend and API
+containers are force-recreated so both pick up the new OIDC credentials.
 
----
-
-## OpenBao (secrets)
-
-OpenBao runs in dev mode locally — no persistence, root token is `dev-root-token`, no unsealing required.
-
-**UI:** http://localhost:8200 (token: `dev-root-token`)
-
-The Transit secrets engine is auto-mounted at `transit/` and a `platform-dev` key is created by the init script. This is the key that encrypts connector credentials at rest.
-
-In production, OpenBao runs in HA mode with auto-unseal via a cloud KMS. The dev setup intentionally does not replicate HA to keep local setup simple.
-
----
-
-## Running the platform
-
-```bash
-pnpm dev               # start all apps with hot reload (Turbo watch)
-```
-
-Or start individual apps:
-
-```bash
-pnpm --filter @platform/api dev       # API only (port 3000)
-pnpm --filter @platform/worker dev    # worker only
-pnpm --filter @platform/admin-ui dev  # admin UI only (port 3001)
-pnpm --filter @platform/portal dev    # portal only (port 3004)
-```
-
-### Port reference
-
-| App       | Port |
-| --------- | ---- |
-| API       | 3000 |
-| Admin UI  | 3001 |
-| BullBoard | 3002 |
-| Novu      | 3003 |
-| Portal    | 3004 |
+If you ever change Zitadel credentials manually, force-recreate the frontend:
+`docker compose up -d --force-recreate admin-ui`.
 
 ---
 
 ## Troubleshooting
 
-### `pnpm install` fails
+### Login fails with `client_id` error
 
-Ensure you're running Node.js 22+ and pnpm 9+:
+The frontend Vite server reads `.env.local` at startup. If `ZITADEL_OIDC_CLIENT_ID`
+was written to `.env.local` after the container started, force-recreate it:
 
 ```bash
-node --version   # should be 22.x
-pnpm --version   # should be 9.x
+docker compose up -d --force-recreate admin-ui
 ```
 
-If the lockfile is out of sync: `pnpm install --frozen-lockfile=false`
+Note: `docker restart` and plain `docker compose up -d` do NOT re-read `env_file`
+when the compose config itself hasn't changed. Always use `--force-recreate` to
+guarantee the container picks up new env values.
 
-### `pnpm dev` — "Cannot connect to database"
+### All API requests return 401 after login
 
-Postgres may not be ready yet. Wait a few seconds and retry, or check:
+The API container has a stale `ZITADEL_AUDIENCE` value from before bootstrap
+wrote the real project ID. Recreate it:
 
 ```bash
-docker compose ps postgres   # should show "healthy"
+docker compose up -d api
 ```
 
-### `pnpm dev` — Zitadel JWT validation fails
+Same root cause as above — `docker restart ow-backend` will not help.
 
-Zitadel takes ~15 seconds to fully start. The API retries JWKS fetching on startup, but if you start `pnpm dev` before Zitadel is ready you may need to restart the API:
+### Migration fails: `permission denied for database platform`
+
+The `DATABASE_URL` uses `app_user` which lacks DDL privileges. Migrations must
+use `MIGRATION_DATABASE_URL`. Check that `.env.local` has this line:
+
+```
+MIGRATION_DATABASE_URL=postgresql://migration_user:migration_user_dev_password@localhost:5432/platform
+```
+
+If missing, add it. It is present in `.env.example` and auto-copied by bootstrap.
+
+### Seed fails: `column "is_active" does not exist`
+
+Migration `0011_workflow_is_active.sql` was not applied. Check the journal:
 
 ```bash
-docker compose ps zitadel   # wait until healthy
-pnpm --filter @platform/api dev
+cat packages/db/migrations/meta/_journal.json
+```
+
+The journal must include entries for `0010_tenant_users_profile` and
+`0011_workflow_is_active`. If missing, pull the latest `tushar` branch and
+re-run `pnpm db:migrate`.
+
+### `seed:demo` fails: `Cannot find module '@platform/db/dist/index.js'`
+
+Internal packages need to be built before scripts can import from them.
+Run manually:
+
+```bash
+pnpm turbo run build --filter=@platform/config --filter=@platform/db
+pnpm seed:demo
+```
+
+This is now handled automatically by `pnpm bootstrap`.
+
+### Old Zitadel users appearing after a fresh setup
+
+You ran `docker compose down` without `-v`. The Postgres volume was preserved,
+so the old Zitadel data is still there. Fix:
+
+```bash
+docker compose down -v
+rm .env.local
+pnpm bootstrap
+```
+
+### Postgres healthcheck fails / PgBouncer won't start
+
+Postgres takes 10–20s on first boot while it runs `initdb`. Wait for it:
+
+```bash
+docker compose ps          # watch until ow-database shows "healthy"
+docker compose logs postgres --tail=30
 ```
 
 ### Port already in use
 
-If something is already on port 5432/6379/8080 etc.:
-
 ```bash
-lsof -i :5432    # find what's using the port
+# macOS/Linux
+lsof -i :3001
+# Windows PowerShell
+netstat -ano | findstr :3001
 ```
 
-Or change the host port in `docker-compose.yml` (the left side of `ports:`).
-
-### Full reset
-
-When in doubt, a full reset takes about 2 minutes:
-
-```bash
-docker compose down -v
-docker compose up -d
-pnpm db:migrate
-pnpm db:seed
-pnpm dev
-```
+Change the conflicting host port in `docker-compose.yml` (left side of `ports:`).

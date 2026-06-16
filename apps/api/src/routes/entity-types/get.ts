@@ -1,4 +1,4 @@
-import { requireAuth, requireRole } from "@platform/auth";
+import { requireAuth } from "@platform/auth";
 import { db } from "@platform/db";
 import { getEntityType } from "@platform/entity-engine";
 import { factory } from "./factory.js";
@@ -6,9 +6,8 @@ import { handleEntityError } from "../../lib/handle-entity-error.js";
 
 export const getEntityTypeHandler = factory.createHandlers(
   requireAuth(),
-  requireRole("admin"),
   async (c) => {
-    const id = c.req.param("id")!;
+    const id = c.req.param("id") ?? "";
     const { tenantId } = c.get("auth");
 
     try {

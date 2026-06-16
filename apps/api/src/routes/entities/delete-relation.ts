@@ -8,7 +8,7 @@ export const deleteRelationHandler = factory.createHandlers(
   requireAuth(),
   requireRole("admin", "agent"),
   async (c) => {
-    const relationId = c.req.param("relationId")!;
+    const relationId = c.req.param("relationId") ?? "";
     const { tenantId } = c.get("auth");
 
     try {

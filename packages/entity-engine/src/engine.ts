@@ -1,6 +1,13 @@
 import { eq, and, asc, gt, isNull, or, inArray, sql } from "drizzle-orm";
 import type { DbOrTx } from "@platform/db";
-import { entityInstances, entityTypes, entityFields } from "@platform/db";
+import {
+  entityInstances,
+  entityTypes,
+  entityFields,
+  workflows,
+  workflowStates,
+  workflowEvents,
+} from "@platform/db";
 import { logger } from "@platform/logger";
 import type {
   EntityInstance,
@@ -105,13 +112,42 @@ export async function createEntity(
     result.data as Record<string, unknown>,
   );
 
+  let currentState = input.currentState;
+  if (input.workflowId) {
+    const states = await db
+      .select({ name: workflowStates.name })
+      .from(workflowStates)
+      .where(eq(workflowStates.workflowId, input.workflowId));
+    const validStates = states.map((s) => s.name);
+    if (currentState) {
+      if (!validStates.includes(currentState)) {
+        throw new ValidationError([
+          {
+            field: "currentState",
+            code: "invalid",
+            message: `Invalid state '${currentState}' for the selected workflow. Valid states are: ${validStates.join(", ")}`,
+          },
+        ]);
+      }
+    } else {
+      const resolved = await resolveInitialState(db, input.workflowId);
+      // If the workflow's initialState is stale (state was deleted), fall back
+      // to the first defined state rather than inserting an invalid value.
+      currentState = validStates.includes(resolved)
+        ? resolved
+        : (validStates[0] ?? "initial");
+    }
+  } else {
+    currentState = currentState ?? "initial";
+  }
+
   const [row] = await db
     .insert(entityInstances)
     .values({
       entityTypeId: input.entityTypeId,
       tenantId,
       workflowId: input.workflowId ?? null,
-      currentState: "initial",
+      currentState,
       fields: fieldsWithFormulas,
       createdBy: input.createdBy ?? null,
       assignedTo: input.assignedTo ?? null,
@@ -119,6 +155,20 @@ export async function createEntity(
     .returning();
 
   if (!row) throw new EntityError("ENTITY_NOT_FOUND");
+
+  if (row.workflowId) {
+    await db.insert(workflowEvents).values({
+      tenantId,
+      instanceId: row.id,
+      workflowId: row.workflowId,
+      fromState: null,
+      toState: row.currentState,
+      triggeredBy: "user",
+      actorId: input.actorId ?? input.createdBy ?? null,
+      comment: "Record created",
+      metadata: { type: "create", fields: fieldsWithFormulas },
+    });
+  }
 
   logger.info(
     {
@@ -291,6 +341,25 @@ export async function updateEntity(
     if (input.assignedTo !== undefined) {
       updates.assignedTo = input.assignedTo;
     }
+    if (input.currentState !== undefined && input.currentState !== null) {
+      if (existing.workflowId) {
+        const states = await db
+          .select({ name: workflowStates.name })
+          .from(workflowStates)
+          .where(eq(workflowStates.workflowId, existing.workflowId));
+        const validStates = states.map((s) => s.name);
+        if (!validStates.includes(input.currentState)) {
+          throw new ValidationError([
+            {
+              field: "currentState",
+              code: "invalid",
+              message: `Invalid state '${input.currentState}' for the workflow. Valid states are: ${validStates.join(", ")}`,
+            },
+          ]);
+        }
+      }
+      updates.currentState = input.currentState;
+    }
 
     const [row] = await db
       .update(entityInstances)
@@ -304,6 +373,50 @@ export async function updateEntity(
       .returning();
 
     if (!row) throw new EntityError("ENTITY_NOT_FOUND", { instanceId });
+
+    // Logging logic
+    if (row.workflowId) {
+      const oldFields = existing.fields as Record<string, unknown>;
+      const newFields = row.fields as Record<string, unknown>;
+      const changed: Record<string, { old: unknown; new: unknown }> = {};
+      for (const key of Object.keys(newFields)) {
+        if (JSON.stringify(oldFields[key]) !== JSON.stringify(newFields[key])) {
+          changed[key] = { old: oldFields[key], new: newFields[key] };
+        }
+      }
+      if (existing.assignedTo !== row.assignedTo) {
+        changed["assignedTo"] = {
+          old: existing.assignedTo,
+          new: row.assignedTo,
+        };
+      }
+      if (existing.currentState !== row.currentState) {
+        changed["state"] = {
+          old: existing.currentState,
+          new: row.currentState,
+        };
+      }
+
+      if (
+        Object.keys(changed).length > 0 ||
+        existing.currentState !== row.currentState
+      ) {
+        await db.insert(workflowEvents).values({
+          tenantId,
+          instanceId,
+          workflowId: row.workflowId,
+          fromState: existing.currentState,
+          toState: row.currentState,
+          triggeredBy: "user",
+          actorId: input.actorId ?? null,
+          comment:
+            existing.currentState !== row.currentState
+              ? `State changed to ${row.currentState}`
+              : "Record updated",
+          metadata: { type: "update", changed },
+        });
+      }
+    }
 
     logger.info({ tenantId, instanceId }, "Entity updated");
 
@@ -327,11 +440,37 @@ export async function updateEntity(
     return rowToInstance(row);
   }
 
-  // Fields not provided — only updating assignedTo
-  if (input.assignedTo !== undefined) {
+  // Fields not provided — updating assignedTo and/or currentState
+  if (input.assignedTo !== undefined || input.currentState !== undefined) {
+    const updates: Partial<typeof entityInstances.$inferInsert> = {
+      updatedAt: new Date(),
+    };
+    if (input.assignedTo !== undefined) {
+      updates.assignedTo = input.assignedTo;
+    }
+    if (input.currentState !== undefined && input.currentState !== null) {
+      if (existing.workflowId) {
+        const states = await db
+          .select({ name: workflowStates.name })
+          .from(workflowStates)
+          .where(eq(workflowStates.workflowId, existing.workflowId));
+        const validStates = states.map((s) => s.name);
+        if (!validStates.includes(input.currentState)) {
+          throw new ValidationError([
+            {
+              field: "currentState",
+              code: "invalid",
+              message: `Invalid state '${input.currentState}' for the workflow. Valid states are: ${validStates.join(", ")}`,
+            },
+          ]);
+        }
+      }
+      updates.currentState = input.currentState;
+    }
+
     const [row] = await db
       .update(entityInstances)
-      .set({ assignedTo: input.assignedTo, updatedAt: new Date() })
+      .set(updates)
       .where(
         and(
           eq(entityInstances.id, instanceId),
@@ -341,6 +480,44 @@ export async function updateEntity(
       .returning();
 
     if (!row) throw new EntityError("ENTITY_NOT_FOUND", { instanceId });
+
+    // Logging logic for assignedTo and/or currentState update
+    if (row.workflowId) {
+      const changed: Record<string, { old: unknown; new: unknown }> = {};
+      if (existing.assignedTo !== row.assignedTo) {
+        changed["assignedTo"] = {
+          old: existing.assignedTo,
+          new: row.assignedTo,
+        };
+      }
+      if (existing.currentState !== row.currentState) {
+        changed["state"] = {
+          old: existing.currentState,
+          new: row.currentState,
+        };
+      }
+
+      if (
+        existing.currentState !== row.currentState ||
+        Object.keys(changed).length > 0
+      ) {
+        await db.insert(workflowEvents).values({
+          tenantId,
+          instanceId,
+          workflowId: row.workflowId,
+          fromState: existing.currentState,
+          toState: row.currentState,
+          triggeredBy: "user",
+          actorId: input.actorId ?? null,
+          comment:
+            existing.currentState !== row.currentState
+              ? `State changed to ${row.currentState}`
+              : "Record updated",
+          metadata: { type: "update", changed },
+        });
+      }
+    }
+
     return rowToInstance(row);
   }
 
@@ -573,6 +750,19 @@ async function loadEntityFields(
   }));
 }
 
+async function resolveInitialState(
+  db: DbOrTx,
+  workflowId: string | undefined | null,
+): Promise<string> {
+  if (!workflowId) return "initial";
+  const [wf] = await db
+    .select({ initialState: workflows.initialState })
+    .from(workflows)
+    .where(eq(workflows.id, workflowId))
+    .limit(1);
+  return wf?.initialState ?? "initial";
+}
+
 function runCrossFieldValidators(
   entityTypeName: string,
   fields: Record<string, unknown>,
@@ -647,11 +837,13 @@ export async function bulkCreateEntities(
       result.data as Record<string, unknown>,
     );
 
+    const initialState = await resolveInitialState(db, input.workflowId);
+
     toInsert.push({
       entityTypeId: input.entityTypeId,
       tenantId,
       workflowId: input.workflowId ?? null,
-      currentState: "initial",
+      currentState: initialState,
       fields: fieldsWithFormulas,
       createdBy: input.createdBy ?? null,
       assignedTo: input.assignedTo ?? null,

@@ -1,7 +1,7 @@
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { requireAuth, requireRole } from "@platform/auth";
-import { db } from "@platform/db";
+import { withTenantContext } from "@platform/db";
 import {
   addEntityField,
   FIELD_TYPES,
@@ -66,19 +66,21 @@ export const createEntityFieldHandler = factory.createHandlers(
     }
 
     try {
-      const field = await addEntityField(db, tenantId, typeId, {
-        entityTypeId: typeId,
-        name: input.name,
-        label: input.label,
-        fieldType: input.fieldType,
-        config: input.config,
-        isRequired: input.isRequired,
-        isIndexed: input.isIndexed,
-        isSystem: false,
-        sortOrder: input.sortOrder,
-        sensitivity: input.sensitivity,
-        createdAt: new Date(),
-      });
+      const field = await withTenantContext(tenantId, (tx) =>
+        addEntityField(tx, tenantId, typeId, {
+          entityTypeId: typeId,
+          name: input.name,
+          label: input.label,
+          fieldType: input.fieldType,
+          config: input.config,
+          isRequired: input.isRequired,
+          isIndexed: input.isIndexed,
+          isSystem: false,
+          sortOrder: input.sortOrder,
+          sensitivity: input.sensitivity,
+          createdAt: new Date(),
+        }),
+      );
       return c.json({ data: field }, 201);
     } catch (err) {
       return handleEntityError(c, err);

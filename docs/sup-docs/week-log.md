@@ -5,6 +5,40 @@
 
 ---
 
+## 2026-06-16 — Track 2D Phase 1 — saved views API + entity export (issue #15)
+
+**Session type:** Feature implementation
+**Branch state:** `main`, 1 commit ahead of origin (6d804f0)
+
+### Completed this session
+
+**Track 2D Phase 1 backend (T1–T4, T6–T9 of 24)**
+
+- **T1** — migration 0018: `saved_views` table with dual RLS policy (`tenant_id` + `user_id` GUCs), cascade FK to `entity_types`, analytics comment included
+- **T2** — Drizzle schema (`packages/db/src/schema/saved-views.ts`); `withTenantAndUserContext` helper added to `packages/db/src/middleware.ts` — sets both `app.tenant_id` and `app.user_id` in one call
+- **T3** — saved-views CRUD: `GET /saved-views?entityTypeId=`, `POST /saved-views` (max-20 limit, userId always from auth), `PATCH /saved-views/:id`, `DELETE /saved-views/:id`; wired into `app.ts`
+- **T4** — 11-test unit suite: list, create 201, max-20 → 409, userId injection prevention, isDefault clears prior, update 200/404, delete 204/404 — all passing
+- **T6–T8** — `GET /entity-types/:id/export?format=csv|xlsx`; PII/financial field exclusion by role; EXPORT_TOO_LARGE guard at 10k; system cols first; exceljs bold header + auto-width; routed before `/:id` to avoid conflict
+- **T9** — 14-test export suite: CSV/xlsx content-types, PII exclusion by role (agent vs pii_export/admin), EXPORT_TOO_LARGE, empty → headers-only, 404 on missing entity type — all passing
+
+**Key implementation notes:**
+
+- `getEntityType` throws `EntityError("ENTITY_TYPE_NOT_FOUND")` rather than returning null — caught and mapped to 404
+- xlsx uses `c.newResponse()` not `new Response()` to avoid undici-types portability error
+- `requireAuth()` mock in export tests is a pass-through so `makeApp(roles)` controls per-test role
+
+### Still pending (Phase 1 gate not fully met)
+
+- **T5** — saved-views RLS isolation test (`tests/isolation/saved-views.test.ts`) — needs Docker stack running; skipping until integration environment is available
+
+### Phase snapshot
+
+| Track                          | Status                             |
+| ------------------------------ | ---------------------------------- |
+| Track 2D — no-code + reporting | 🔄 Phase 1 backend: 8/9 tasks done |
+
+---
+
 ## 2026-06-16 — Pre-pilot engine fixes (#76–#84); PR #89 merged
 
 **Session type:** Bug fix / pre-pilot hardening

@@ -2,7 +2,7 @@
 
 **Spec:** `docs/specs/2d-no-code-builders-reporting.md`
 **Generated:** 2026-06-16
-**Status:** not started
+**Status:** phase 1 complete (T1–T4, T6–T9 done; T5 isolation test pending docker)
 **Issue:** #15
 
 ---

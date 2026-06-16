@@ -865,10 +865,14 @@ async function main(): Promise<void> {
   // Turbo respects the dependency graph: config is built before db.
   run("pnpm turbo run build --filter=@platform/config --filter=@platform/db");
 
-  run("pnpm db:migrate", { env: { DOTENV_CONFIG_PATH: ".env.local" } });
+  const dbEnv: NodeJS.ProcessEnv = { DOTENV_CONFIG_PATH: ".env.local" };
+  if (IN_DOCKER && process.env["MIGRATION_DATABASE_URL"]) {
+    dbEnv["MIGRATION_DATABASE_URL"] = process.env["MIGRATION_DATABASE_URL"];
+  }
+  run("pnpm db:migrate", { env: dbEnv });
   ok("Migrations applied");
 
-  run("pnpm db:seed", { env: { DOTENV_CONFIG_PATH: ".env.local" } });
+  run("pnpm db:seed", { env: dbEnv });
   ok("Base data seeded (dev tenant, roles)");
 
   // ── 7. Auth setup ─────────────────────────────────────────────────────────────

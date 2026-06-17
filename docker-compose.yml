@@ -379,7 +379,6 @@ services:
         required: false
     environment:
       RUNNING_IN_DOCKER: "true"
-      ZITADEL_BOOTSTRAP_URL: "http://zitadel:8080"
       DATABASE_URL: postgres://app_user:app_user_dev_password@pgbouncer:5432/platform
       MIGRATION_DATABASE_URL: postgres://migration_user:migration_user_dev_password@postgres:5432/platform
       REDIS_URL: redis://redis:6379

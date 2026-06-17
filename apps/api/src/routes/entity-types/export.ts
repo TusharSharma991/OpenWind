@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
 import PDFDocument from "pdfkit";
-import { requireAuth } from "@platform/auth";
+import { requireAuth, requireRole } from "@platform/auth";
 import { withTenantContext } from "@platform/db";
 import {
   getEntityType,
@@ -104,6 +104,7 @@ async function buildPdf(
 
 export const exportEntitiesHandler = factory.createHandlers(
   requireAuth(),
+  requireRole("agent", "admin"),
   zValidator("query", ExportQuerySchema),
   async (c) => {
     const { tenantId, userId, roles } = c.get("auth");

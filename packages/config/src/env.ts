@@ -40,10 +40,13 @@ const EnvSchema = z
     // Dev fallback: used as tenantId when urn:zitadel:iam:org:id is absent (instance admin login).
     // Must never be set in production — it bypasses tenant isolation for instance-admin logins.
     DEV_TENANT_ID: z.string().optional(),
-    // Service account key JSON (contents of the .json key file from Zitadel console).
+    // Service account key JSON (raw JSON string from Zitadel console).
     // Used to call the Zitadel Management API for live role/user queries.
     // Store the full JSON string. Never commit this value.
     ZITADEL_SERVICE_ACCOUNT_KEY: z.string().optional(),
+    // Base64-encoded service account key — written by bootstrap.
+    // Fallback when ZITADEL_SERVICE_ACCOUNT_KEY is absent.
+    ZITADEL_KEY_JSON: z.string().optional(),
     // Project ID — defaults to ZITADEL_AUDIENCE which is the project ID in this setup.
     ZITADEL_PROJECT_ID: z.string().optional(),
     // Token introspection — used for sensitive ops that require active-token verification

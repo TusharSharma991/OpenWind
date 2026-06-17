@@ -106,10 +106,15 @@ function httpPost(
 }
 
 // ── Parse service account key ─────────────────────────────────────────────────
-// Reads ZITADEL_SERVICE_ACCOUNT_KEY (raw JSON string written by bootstrap).
+// Tries ZITADEL_SERVICE_ACCOUNT_KEY (raw JSON) first, then ZITADEL_KEY_JSON
+// (base64-encoded JSON written by bootstrap).
 
 function parseServiceAccountKey(): ServiceAccountKey | null {
-  const raw = env.ZITADEL_SERVICE_ACCOUNT_KEY;
+  const rawDirect = env.ZITADEL_SERVICE_ACCOUNT_KEY;
+  const rawB64 = env.ZITADEL_KEY_JSON;
+  const raw =
+    rawDirect ??
+    (rawB64 ? Buffer.from(rawB64, "base64").toString("utf8") : undefined);
   if (!raw) return null;
 
   try {

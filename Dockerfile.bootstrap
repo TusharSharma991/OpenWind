@@ -13,4 +13,7 @@ COPY . .
 
 RUN pnpm install --no-frozen-lockfile
 
+# Build packages that seed.ts imports at runtime (config must have dist/)
+RUN pnpm --filter @platform/config build
+
 CMD ["tsx", "scripts/bootstrap.ts"]

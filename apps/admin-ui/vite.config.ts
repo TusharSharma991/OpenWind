@@ -37,7 +37,7 @@ export default defineConfig(({ mode }) => {
       },
       proxy: {
         "/api": {
-          target: "http://api:3000",
+          target: "http://ow-backend:3000",
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/api/, ""),
         },

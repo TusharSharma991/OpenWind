@@ -12,6 +12,5 @@ COPY packages/config/package.json ./packages/config/
 COPY . .
 
 RUN pnpm install --frozen-lockfile
-RUN pnpm turbo run build --filter=@platform/config --filter=@platform/db
 
 CMD ["tsx", "scripts/bootstrap.ts"]

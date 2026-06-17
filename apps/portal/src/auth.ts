@@ -69,3 +69,11 @@ export async function fetchWithAuth(
 
   return response.json();
 }
+
+export async function fetchRawWithAuth(url: string): Promise<Response> {
+  const user = await userManager.getUser();
+  const token = user?.access_token;
+  const headers = new Headers();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  return fetch(url, { headers });
+}

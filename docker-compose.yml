@@ -206,7 +206,7 @@ services:
       ZITADEL_EXTERNALSECURE: "false"
       ZITADEL_EXTERNALPORT: "${ZITADEL_HOST_PORT:-8080}"
       ZITADEL_EXTERNALDOMAIN: "${ZITADEL_EXTERNAL_DOMAIN:-localhost}"
-      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: admin@platform.local
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: owZitadelAdmin@openwind.local
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: Admin1234!
       # Machine user — key is printed to stdout on first boot.
       # bootstrap reads it from container logs via the mounted docker socket.
@@ -320,7 +320,7 @@ services:
   # Runs with tsx so source changes are picked up on container restart.
   # env_file provides all secrets; environment overrides service URLs so
   # container-to-container networking works (pgbouncer:5432 not localhost:6432).
-  api:
+  ow-backend:
     container_name: ow-backend
     build:
       context: .
@@ -332,10 +332,10 @@ services:
       DATABASE_URL: postgres://app_user:app_user_dev_password@pgbouncer:5432/platform
       REDIS_URL: redis://redis:6379
       # Zitadel routes by Host header — must match EXTERNALDOMAIN (localhost).
-      # extra_hosts maps localhost → Zitadel container so JWKS/introspection
-      # fetches from the API container hit the right service.
-      ZITADEL_JWKS_URL: http://localhost:8080/oauth/v2/keys
-      ZITADEL_INTROSPECTION_URL: http://localhost:8080/oauth/v2/introspect
+      # We connect via the internal service name (zitadel:8080) but the auth
+      # package overrides the Host header to match EXTERNALDOMAIN=localhost.
+      ZITADEL_JWKS_URL: http://zitadel:8080/oauth/v2/keys
+      ZITADEL_INTROSPECTION_URL: http://zitadel:8080/oauth/v2/introspect
       # OPENBAO_ADDR: http://openbao:8200  # uncomment when openbao service is enabled
       # S3_ENDPOINT: http://minio:9000      # uncomment when minio service is enabled
     restart: unless-stopped
@@ -348,7 +348,7 @@ services:
   # ── Admin UI (React + Refine) ──────────────────────────────────────────────
   # Dev mode: Vite dev server with HMR. Source files are mounted as volumes so
   # any change on the host is picked up instantly — no rebuild needed.
-  admin-ui:
+  ow-frontend:
     container_name: ow-frontend
     build:
       context: .
@@ -382,6 +382,8 @@ services:
       DATABASE_URL: postgres://app_user:app_user_dev_password@pgbouncer:5432/platform
       MIGRATION_DATABASE_URL: postgres://migration_user:migration_user_dev_password@postgres:5432/platform
       REDIS_URL: redis://redis:6379
+    volumes:
+      - ./.env.local:/app/.env.local
     depends_on:
       pgbouncer:
         condition: service_healthy

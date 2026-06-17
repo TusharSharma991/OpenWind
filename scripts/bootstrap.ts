@@ -619,10 +619,14 @@ async function runZitadelSetup(
   let oidcClientId: string;
   let oidcClientSecret: string;
 
+  // Include CORS_ORIGIN (production domain) in redirect URIs when set
+  const corsOrigin = process.env["CORS_ORIGIN"];
+  const extraOrigins: string[] = corsOrigin ? [corsOrigin] : [];
   const oidcPayload = {
     redirectUris: [
       "http://localhost:3001/auth/callback",
       "http://localhost:3000/auth/callback",
+      ...extraOrigins.map((o) => `${o}/auth/callback`),
     ],
     responseTypes: ["OIDC_RESPONSE_TYPE_CODE"],
     grantTypes: [
@@ -635,6 +639,8 @@ async function runZitadelSetup(
       "http://localhost:3001",
       "http://localhost:3001/login",
       "http://localhost:3000",
+      ...extraOrigins,
+      ...extraOrigins.map((o) => `${o}/login`),
     ],
     accessTokenType: "OIDC_TOKEN_TYPE_JWT",
     accessTokenRoleAssertion: true,
@@ -1078,10 +1084,9 @@ async function main(): Promise<void> {
 
   step(10, "Bootstrap complete");
 
-  const appHost = IN_DOCKER
-    ? `${_ZITADEL_EXTERNAL_DOMAIN !== "localhost" ? _ZITADEL_EXTERNAL_DOMAIN : "localhost"}:${process.env["ADMIN_UI_HOST_PORT"] ?? "3001"}`
-    : `localhost:${process.env["ADMIN_UI_HOST_PORT"] ?? "3001"}`;
-  const appUrl = `http://${appHost}`;
+  const appUrl =
+    process.env["CORS_ORIGIN"] ??
+    `http://localhost:${process.env["ADMIN_UI_HOST_PORT"] ?? "3001"}`;
 
   console.log(`
 ${BOLD}${GREEN}  ✅  OpenWind is ready!${RESET}

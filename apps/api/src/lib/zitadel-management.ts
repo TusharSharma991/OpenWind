@@ -151,7 +151,8 @@ async function getAccessToken(): Promise<string | null> {
       { "Content-Type": "application/x-www-form-urlencoded" },
       new URLSearchParams({
         grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
-        scope: "openid urn:zitadel:iam:org:project:id:zitadel:iam.write",
+        scope:
+          "openid profile email urn:zitadel:iam:org:project:id:zitadel:aud",
         assertion,
       }).toString(),
     );
@@ -230,8 +231,8 @@ export async function listOrgUsers(): Promise<OrgUser[]> {
   if (!token) return [];
 
   try {
-    // Search all active human users in the org (management API scopes to the SA's org)
-    const url = `${internalBase()}/management/v1/users/_search`;
+    // Use v2 UserService endpoint (gRPC-gateway) — returns active human users in the org
+    const url = `${internalBase()}/zitadel.user.v2.UserService/ListUsers`;
     const result = await httpPost(
       url,
       issuerHost(),
@@ -240,14 +241,8 @@ export async function listOrgUsers(): Promise<OrgUser[]> {
         "Content-Type": "application/json",
       },
       JSON.stringify({
-        limit: 500,
-        queries: [
-          {
-            stateQuery: {
-              state: "USER_STATE_ACTIVE",
-            },
-          },
-        ],
+        query: { limit: 500, asc: true },
+        queries: [{ stateQuery: { states: ["USER_STATE_ACTIVE"] } }],
       }),
     );
 
@@ -260,13 +255,15 @@ export async function listOrgUsers(): Promise<OrgUser[]> {
     }
 
     interface ZitadelUser {
-      id: string;
+      userId: string;
+      username?: string;
       preferredLoginName?: string;
+      loginNames?: string[];
       human?: {
         profile?: {
           displayName?: string;
-          firstName?: string;
-          lastName?: string;
+          givenName?: string;
+          familyName?: string;
         };
         email?: { email?: string };
       };
@@ -277,16 +274,18 @@ export async function listOrgUsers(): Promise<OrgUser[]> {
       .filter((u) => u.human !== undefined)
       .map((u) => {
         const profile = u.human?.profile ?? {};
+        const nameParts = [profile.givenName, profile.familyName].filter(
+          (s): s is string => typeof s === "string" && s.length > 0,
+        );
+        const fullName = nameParts.length > 0 ? nameParts.join(" ") : undefined;
         const displayName =
-          ((profile.displayName ??
-            [profile.firstName, profile.lastName].filter(Boolean).join(" ")) ||
-            u.preferredLoginName) ??
-          u.id;
+          profile.displayName ?? fullName ?? u.preferredLoginName ?? u.userId;
+        const loginName = u.preferredLoginName ?? u.loginNames?.[0] ?? u.userId;
         return {
-          userId: u.id,
+          userId: u.userId,
           email: u.human?.email?.email ?? "",
           displayName,
-          loginName: u.preferredLoginName ?? u.id,
+          loginName,
         };
       })
       .sort((a, b) => a.displayName.localeCompare(b.displayName));

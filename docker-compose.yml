@@ -214,10 +214,15 @@ services:
       ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_NAME: Setup Admin
       ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINEKEY_TYPE: 1
       ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINEKEY_EXPIRATIONDATE: "2040-01-01T00:00:00Z"
+      # Write the machine key to the shared volume so bootstrap can read it
+      # without needing docker exec or a Docker socket.
+      ZITADEL_FIRSTINSTANCE_MACHINEKEYPATH: /machinekey/zitadel-admin-sa.json
       # Disable Login V2 (the new SPA login) — it requires a separately hosted
       # frontend that isn't bundled in the Docker image, causing 404 in dev.
       # With this off, the console falls back to the built-in Login V1 HTML UI.
       ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_REQUIRED: "false"
+    volumes:
+      - zitadel_machinekey:/machinekey
     ports:
       - "${ZITADEL_HOST_PORT:-8080}:8080" # Zitadel UI + API → http://localhost:8080
     depends_on:
@@ -385,6 +390,7 @@ services:
     volumes:
       - ./.env.local:/app/.env.local
       - /var/run/docker.sock:/var/run/docker.sock
+      - zitadel_machinekey:/zitadel-machinekey:ro
     depends_on:
       pgbouncer:
         condition: service_healthy
@@ -396,6 +402,7 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  zitadel_machinekey:
   novu_mongo_data:
   mailhog_data:
   # minio_data:    # uncomment when minio service is enabled

@@ -451,22 +451,39 @@ async function generateAndSaveKeyJson(token: string): Promise<void> {
 }
 
 async function readMachineKeyFromContainer(): Promise<ZitadelKeyJson | null> {
-  // Zitadel writes the machine key JSON to /machinekey/zitadel-admin-sa.json
-  // on first boot when ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINEKEY_TYPE=1.
-  // We read it via docker exec — works both locally and inside Docker (socket mounted).
+  // Primary: read from the shared named volume mounted at /zitadel-machinekey
+  // (docker-compose mounts zitadel_machinekey into both ow-identity and bootstrap).
+  // Fallback: docker exec via the socket (requires docker-cli in the image).
+  const volumePath = "/zitadel-machinekey/zitadel-admin-sa.json";
   const containerName = "ow-identity";
-  const keyPath = "/machinekey/zitadel-admin-sa.json";
+  const containerPath = "/machinekey/zitadel-admin-sa.json";
+
+  let raw = "";
+
+  if (existsSync(volumePath)) {
+    try {
+      raw = readFileSync(volumePath, "utf8").trim();
+    } catch {
+      // fall through to docker exec
+    }
+  }
+
+  if (!raw) {
+    raw = runCapture(`docker exec ${containerName} cat ${containerPath}`);
+  }
+
+  if (!raw || raw.includes("No such file") || raw.includes("not found")) {
+    return null;
+  }
+
   try {
-    const raw = runCapture(`docker exec ${containerName} cat ${keyPath}`);
-    if (!raw || raw.includes("No such file")) return null;
     const parsed = JSON.parse(raw) as ZitadelKeyJson;
     if (!parsed.keyId || !parsed.key || !parsed.userId) return null;
-    // Save to .env.local so future runs skip this step entirely
     writeEnvVars({
       ZITADEL_KEY_JSON: Buffer.from(raw).toString("base64"),
       ZITADEL_SERVICE_ACCOUNT_KEY: raw,
     });
-    ok("Machine key read from Zitadel container — fully headless");
+    ok("Machine key read from Zitadel volume — fully headless");
     return parsed;
   } catch {
     return null;

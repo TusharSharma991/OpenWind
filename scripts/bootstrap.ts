@@ -33,9 +33,19 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const ENV_FILE = join(ROOT, ".env.local");
 const ENV_EXAMPLE = join(ROOT, ".env.example");
 const IN_DOCKER = process.env["RUNNING_IN_DOCKER"] === "true";
+const _ZITADEL_EXTERNAL_DOMAIN =
+  process.env["ZITADEL_EXTERNAL_DOMAIN"] ?? "localhost";
+const _ZITADEL_HOST_PORT = process.env["ZITADEL_HOST_PORT"] ?? "8080";
+// When running inside Docker with a custom external domain, Zitadel routes
+// requests by Host header — must use the external domain URL so the instance
+// lookup succeeds. The network alias on the docker network makes it resolvable.
 const ZITADEL_BASE =
   process.env["ZITADEL_BOOTSTRAP_URL"] ??
-  (IN_DOCKER ? "http://zitadel:8080" : "http://localhost:8080");
+  (IN_DOCKER
+    ? _ZITADEL_EXTERNAL_DOMAIN !== "localhost"
+      ? `http://${_ZITADEL_EXTERNAL_DOMAIN}:${_ZITADEL_HOST_PORT}`
+      : "http://zitadel:8080"
+    : `http://localhost:${_ZITADEL_HOST_PORT}`);
 const TOTAL_STEPS = 10;
 
 // Demo credentials (printed in summary, committed to docs — dev only)

@@ -42,3 +42,7 @@ export const fileCleanupQueue = new Queue("file-cleanup", { connection });
 // Jobs are added by the API's tenant lifecycle service with a configurable delay
 // (default 30 days). concurrency=1 in the worker prevents DB contention.
 export const tenantPurgeQueue = new Queue("tenant-purge", { connection });
+
+// Export queue — generates CSV/xlsx/PDF for large entity list exports (> 5 000 rows).
+// API enqueues via apps/api/src/lib/export-queue.ts using the same queue name.
+export const exportQueue = new Queue("export", { connection });

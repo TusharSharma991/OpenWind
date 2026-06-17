@@ -7,6 +7,7 @@ import { slaBreacher } from "./sla-breacher.js";
 import { stopAvScanWorker } from "./av-scan.js";
 import { scheduleFileCleanup, stopFileCleanupWorker } from "./file-cleanup.js";
 import { stopTenantPurgeWorker } from "./tenant-purge.js";
+import { stopExportWorker } from "./export-worker.js";
 
 logger.info("Worker process starting");
 
@@ -30,6 +31,7 @@ async function shutdown(): Promise<void> {
     stopAvScanWorker(),
     stopFileCleanupWorker(),
     stopTenantPurgeWorker(),
+    stopExportWorker(),
     closeRedis(),
   ]);
   process.exit(0);

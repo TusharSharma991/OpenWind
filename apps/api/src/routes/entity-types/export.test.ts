@@ -10,10 +10,9 @@ import { EntityError } from "@platform/entity-engine";
 const mockGetEntityType = vi.fn();
 const mockListEntityFields = vi.fn();
 const mockListEntities = vi.fn();
+const mockExportQueueAdd = vi.fn();
 
 vi.mock("@platform/auth", () => ({
-  // Pass-through — auth is set by makeApp's app.use("*",...) middleware,
-  // which must run before route-level requireAuth to control per-test roles.
   requireAuth: () => async (_c: Context, next: Next) => {
     await next();
   },
@@ -38,8 +37,9 @@ vi.mock("@platform/entity-engine", async (importOriginal) => {
   };
 });
 
-// csv-stringify/sync is a real dep — no need to mock it
-// exceljs is a real dep — no need to mock it
+vi.mock("../../lib/export-queue.js", () => ({
+  exportQueue: { add: (...args: unknown[]) => mockExportQueueAdd(...args) },
+}));
 
 const { exportEntitiesHandler } = await import("./export.js");
 
@@ -109,10 +109,7 @@ function makeInstance(id: string) {
 }
 
 function makeApp(roles: string[] = ["admin"]) {
-  // Override auth mock for role-specific tests
-  const app = new Hono<{
-    Variables: { auth: AuthContext; typeId: string };
-  }>();
+  const app = new Hono<{ Variables: { auth: AuthContext } }>();
   app.use("*", async (c, next) => {
     c.set("auth", {
       tenantId: "t-aaa",
@@ -138,44 +135,46 @@ beforeEach(() => {
     data: [makeInstance("inst-1"), makeInstance("inst-2")],
     nextCursor: null,
   });
+  mockExportQueueAdd.mockResolvedValue({ id: "job-async-001" });
 });
 
 // ── CSV tests ─────────────────────────────────────────────────────────────────
 
 describe("GET /entity-types/:id/export?format=csv", () => {
   it("returns 200 with text/csv content type", async () => {
-    const app = makeApp();
-    const res = await app.request(`/${TYPE_ID}/export?format=csv`);
+    const res = await makeApp().request(`/${TYPE_ID}/export?format=csv`);
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/csv");
   });
 
-  it("CSV headers row matches field labels in sort_order with system cols first", async () => {
-    const app = makeApp(["pii_export"]);
-    const res = await app.request(`/${TYPE_ID}/export?format=csv`);
+  it("CSV headers row has system cols first then field labels in sort_order", async () => {
+    const res = await makeApp(["pii_export"]).request(
+      `/${TYPE_ID}/export?format=csv`,
+    );
     const text = await res.text();
     const firstLine = text.split("\n")[0] ?? "";
     expect(firstLine).toContain("ID");
     expect(firstLine).toContain("State");
     expect(firstLine).toContain("Subject");
-    // index of Subject should come after State
     expect(firstLine.indexOf("Subject")).toBeGreaterThan(
       firstLine.indexOf("State"),
     );
   });
 
   it("CSV row count matches instance count", async () => {
-    const app = makeApp(["pii_export"]);
-    const res = await app.request(`/${TYPE_ID}/export?format=csv`);
-    const text = await res.text();
-    // header row + 2 data rows = 3 non-empty lines
-    const lines = text.split("\n").filter((l) => l.trim().length > 0);
-    expect(lines).toHaveLength(3);
+    const res = await makeApp(["pii_export"]).request(
+      `/${TYPE_ID}/export?format=csv`,
+    );
+    const lines = (await res.text())
+      .split("\n")
+      .filter((l) => l.trim().length > 0);
+    expect(lines).toHaveLength(3); // header + 2 data rows
   });
 
   it("PII fields excluded when user lacks pii_export role", async () => {
-    const app = makeApp(["agent"]); // no pii_export
-    const res = await app.request(`/${TYPE_ID}/export?format=csv`);
+    const res = await makeApp(["agent"]).request(
+      `/${TYPE_ID}/export?format=csv`,
+    );
     const text = await res.text();
     expect(text).not.toContain("Email");
     expect(text).not.toContain("Amount");
@@ -183,36 +182,37 @@ describe("GET /entity-types/:id/export?format=csv", () => {
   });
 
   it("PII fields included when user has pii_export role", async () => {
-    const app = makeApp(["pii_export"]);
-    const res = await app.request(`/${TYPE_ID}/export?format=csv`);
+    const res = await makeApp(["pii_export"]).request(
+      `/${TYPE_ID}/export?format=csv`,
+    );
     const text = await res.text();
     expect(text).toContain("Email");
     expect(text).toContain("Amount");
   });
 
   it("admin role can see PII fields", async () => {
-    const app = makeApp(["admin"]);
-    const res = await app.request(`/${TYPE_ID}/export?format=csv`);
+    const res = await makeApp(["admin"]).request(
+      `/${TYPE_ID}/export?format=csv`,
+    );
     const text = await res.text();
     expect(text).toContain("Email");
   });
 
-  it("empty result returns headers-only CSV (not 404)", async () => {
+  it("empty result returns headers-only CSV", async () => {
     mockListEntities.mockResolvedValue({ data: [], nextCursor: null });
-    const app = makeApp();
-    const res = await app.request(`/${TYPE_ID}/export?format=csv`);
+    const res = await makeApp().request(`/${TYPE_ID}/export?format=csv`);
     expect(res.status).toBe(200);
-    const text = await res.text();
-    const lines = text.split("\n").filter((l) => l.trim().length > 0);
-    expect(lines).toHaveLength(1); // headers only
+    const lines = (await res.text())
+      .split("\n")
+      .filter((l) => l.trim().length > 0);
+    expect(lines).toHaveLength(1);
   });
 
   it("Content-Disposition header contains entity plural and date", async () => {
-    const app = makeApp();
-    const res = await app.request(`/${TYPE_ID}/export?format=csv`);
-    const disposition = res.headers.get("content-disposition") ?? "";
-    expect(disposition).toContain("tickets-export-");
-    expect(disposition).toContain(".csv");
+    const res = await makeApp().request(`/${TYPE_ID}/export?format=csv`);
+    const d = res.headers.get("content-disposition") ?? "";
+    expect(d).toContain("tickets-export-");
+    expect(d).toContain(".csv");
   });
 });
 
@@ -220,45 +220,110 @@ describe("GET /entity-types/:id/export?format=csv", () => {
 
 describe("GET /entity-types/:id/export?format=xlsx", () => {
   it("returns 200 with xlsx content type", async () => {
-    const app = makeApp();
-    const res = await app.request(`/${TYPE_ID}/export?format=xlsx`);
+    const res = await makeApp().request(`/${TYPE_ID}/export?format=xlsx`);
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("spreadsheetml.sheet");
   });
 
-  it("Content-Disposition header contains .xlsx", async () => {
-    const app = makeApp();
-    const res = await app.request(`/${TYPE_ID}/export?format=xlsx`);
-    const disposition = res.headers.get("content-disposition") ?? "";
-    expect(disposition).toContain(".xlsx");
+  it("Content-Disposition contains .xlsx", async () => {
+    const res = await makeApp().request(`/${TYPE_ID}/export?format=xlsx`);
+    expect(res.headers.get("content-disposition")).toContain(".xlsx");
   });
 
   it("response body is a non-empty buffer", async () => {
-    const app = makeApp();
-    const res = await app.request(`/${TYPE_ID}/export?format=xlsx`);
-    const buffer = await res.arrayBuffer();
-    expect(buffer.byteLength).toBeGreaterThan(0);
+    const res = await makeApp().request(`/${TYPE_ID}/export?format=xlsx`);
+    expect((await res.arrayBuffer()).byteLength).toBeGreaterThan(0);
+  });
+});
+
+// ── PDF tests ─────────────────────────────────────────────────────────────────
+
+describe("GET /entity-types/:id/export?format=pdf", () => {
+  it("returns 200 with application/pdf content type", async () => {
+    const res = await makeApp().request(`/${TYPE_ID}/export?format=pdf`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("application/pdf");
+  });
+
+  it("Content-Disposition contains .pdf", async () => {
+    const res = await makeApp().request(`/${TYPE_ID}/export?format=pdf`);
+    expect(res.headers.get("content-disposition")).toContain(".pdf");
+  });
+
+  it("response body starts with PDF magic bytes (%PDF)", async () => {
+    const res = await makeApp().request(`/${TYPE_ID}/export?format=pdf`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    expect(buf.slice(0, 4).toString("ascii")).toBe("%PDF");
+  });
+
+  it("uses landscape layout when more than 6 columns", async () => {
+    // Add 7 extra fields to push column count above 6 (4 system + 7 custom = 11)
+    const extraFields = Array.from({ length: 7 }, (_, i) => ({
+      ...publicField,
+      id: `f-extra-${i}`,
+      name: `extra_${i}`,
+      label: `Extra ${i}`,
+      sortOrder: i + 10,
+    }));
+    mockListEntityFields.mockResolvedValue([publicField, ...extraFields]);
+    const res = await makeApp().request(`/${TYPE_ID}/export?format=pdf`);
+    expect(res.status).toBe(200);
+  });
+});
+
+// ── Async path ────────────────────────────────────────────────────────────────
+
+describe("async export — row count > 5 000", () => {
+  it("returns 202 with jobId when row count exceeds sync limit", async () => {
+    const manyRows = Array.from({ length: 5_001 }, (_, i) =>
+      makeInstance(`inst-${i}`),
+    );
+    mockListEntities.mockResolvedValue({ data: manyRows, nextCursor: null });
+
+    const res = await makeApp().request(`/${TYPE_ID}/export?format=csv`);
+    expect(res.status).toBe(202);
+    const body = (await res.json()) as { jobId: string };
+    expect(body.jobId).toBe("job-async-001");
+  });
+
+  it("enqueues job with correct payload", async () => {
+    const manyRows = Array.from({ length: 5_001 }, (_, i) =>
+      makeInstance(`inst-${i}`),
+    );
+    mockListEntities.mockResolvedValue({ data: manyRows, nextCursor: null });
+
+    await makeApp(["admin"]).request(
+      `/${TYPE_ID}/export?format=xlsx&state=open`,
+    );
+
+    expect(mockExportQueueAdd).toHaveBeenCalledWith(
+      "export",
+      expect.objectContaining({
+        tenantId: "t-aaa",
+        entityTypeId: TYPE_ID,
+        format: "xlsx",
+        filters: { state: "open" },
+      }),
+    );
   });
 });
 
 // ── Guard tests ───────────────────────────────────────────────────────────────
 
 describe("export guards", () => {
-  it("returns 400 EXPORT_TOO_LARGE when rows exceed limit", async () => {
+  it("returns 400 EXPORT_TOO_LARGE when rows exceed 10 000", async () => {
     const manyRows = Array.from({ length: 10_001 }, (_, i) =>
       makeInstance(`inst-${i}`),
     );
     mockListEntities.mockResolvedValue({ data: manyRows, nextCursor: null });
-    const app = makeApp();
-    const res = await app.request(`/${TYPE_ID}/export?format=csv`);
+    const res = await makeApp().request(`/${TYPE_ID}/export?format=csv`);
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe("EXPORT_TOO_LARGE");
   });
 
-  it("returns 400 for invalid format", async () => {
-    const app = makeApp();
-    const res = await app.request(`/${TYPE_ID}/export?format=pdf`);
+  it("returns 400 for unknown format", async () => {
+    const res = await makeApp().request(`/${TYPE_ID}/export?format=docx`);
     expect(res.status).toBe(400);
   });
 
@@ -266,8 +331,7 @@ describe("export guards", () => {
     mockGetEntityType.mockRejectedValue(
       new EntityError("ENTITY_TYPE_NOT_FOUND", { entityTypeId: TYPE_ID }),
     );
-    const app = makeApp();
-    const res = await app.request(`/${TYPE_ID}/export?format=csv`);
+    const res = await makeApp().request(`/${TYPE_ID}/export?format=csv`);
     expect(res.status).toBe(404);
   });
 });

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
+import PDFDocument from "pdfkit";
 import { requireAuth } from "@platform/auth";
 import { withTenantContext } from "@platform/db";
 import {
@@ -12,26 +13,119 @@ import {
 } from "@platform/entity-engine";
 import { stringify } from "csv-stringify/sync";
 import ExcelJS from "exceljs";
+import { exportQueue } from "../../lib/export-queue.js";
 import { factory } from "./factory.js";
 
+const SYNC_ROW_LIMIT = 5_000;
 const EXPORT_ROW_LIMIT = 10_000;
 
-// Roles that may see PII / financial fields in an export
 const PII_EXPORT_ROLES = new Set(["pii_export", "admin", "superadmin"]);
 
 const ExportQuerySchema = z.object({
-  format: z.enum(["csv", "xlsx"]),
+  format: z.enum(["csv", "xlsx", "pdf"]),
   state: z.string().optional(),
   assignedTo: z.string().uuid().optional(),
 });
+
+// ── PDF builder ───────────────────────────────────────────────────────────────
+
+async function buildPdf(
+  headers: string[],
+  rows: string[][],
+  entityName: string,
+): Promise<Buffer> {
+  const landscape = headers.length > 6;
+  const doc = new PDFDocument({
+    margin: 30,
+    layout: landscape ? "landscape" : "portrait",
+    size: "A4",
+  });
+  const chunks: Buffer[] = [];
+
+  return new Promise<Buffer>((resolve, reject) => {
+    doc.on("data", (chunk: Buffer) => chunks.push(chunk));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+
+    const pageW = landscape ? 841.89 : 595.28;
+    const pageH = landscape ? 595.28 : 841.89;
+    const margin = 30;
+    const usableW = pageW - margin * 2;
+    const colW = Math.max(Math.min(usableW / headers.length, 160), 40);
+    const lineH = 14;
+    const maxY = pageH - margin;
+
+    doc.fontSize(12).font("Helvetica-Bold").text(entityName, margin, margin);
+    let y = margin + 22;
+
+    doc.rect(margin, y, usableW, lineH).fill("#e5e7eb");
+    doc.fill("black").fontSize(8).font("Helvetica-Bold");
+    headers.forEach((h, i) => {
+      const t = h.length > 20 ? h.slice(0, 17) + "…" : h;
+      doc.text(t, margin + i * colW, y + 3, {
+        width: colW - 6,
+        lineBreak: false,
+      });
+    });
+    y += lineH;
+
+    doc.font("Helvetica").fontSize(7);
+    rows.forEach((row, ri) => {
+      if (y + lineH > maxY) {
+        doc.addPage({
+          layout: landscape ? "landscape" : "portrait",
+          size: "A4",
+        });
+        y = margin;
+      }
+      if (ri % 2 === 0) {
+        doc.rect(margin, y, usableW, lineH).fill("#f9fafb");
+      }
+      doc.fill("black");
+      row.forEach((cell, ci) => {
+        const t = cell.length > 25 ? cell.slice(0, 22) + "…" : cell;
+        doc.text(t, margin + ci * colW, y + 3, {
+          width: colW - 6,
+          lineBreak: false,
+        });
+      });
+      y += lineH;
+    });
+
+    doc.end();
+  });
+}
+
+// ── Shared row builder ────────────────────────────────────────────────────────
+
+function buildRow(instance: EntityInstance, fields: EntityField[]): string[] {
+  return [
+    instance.id,
+    instance.currentState,
+    instance.createdAt.toISOString(),
+    instance.updatedAt.toISOString(),
+    ...fields.map((f) => {
+      const v = instance.fields[f.name];
+      if (v === null || v === undefined) return "";
+      if (typeof v === "object") return JSON.stringify(v);
+      return String(v);
+    }),
+  ];
+}
+
+// ── Route handler ─────────────────────────────────────────────────────────────
 
 export const exportEntitiesHandler = factory.createHandlers(
   requireAuth(),
   zValidator("query", ExportQuerySchema),
   async (c) => {
-    const { tenantId, roles } = c.get("auth");
+    const { tenantId, userId, roles } = c.get("auth");
     const entityTypeId = c.req.param("id") ?? "";
     const { format, state, assignedTo } = c.req.valid("query");
+    const filters = {
+      ...(state !== undefined && { state }),
+      ...(assignedTo !== undefined && { assignedTo }),
+    };
 
     const canSeePii = roles.some((r) => PII_EXPORT_ROLES.has(r));
 
@@ -50,21 +144,19 @@ export const exportEntitiesHandler = factory.createHandlers(
       }
 
       const allFields = await listEntityFields(tx, tenantId, entityTypeId);
-
       const exportFields: EntityField[] = canSeePii
         ? allFields
         : allFields.filter(
             (f) => f.sensitivity !== "pii" && f.sensitivity !== "financial",
           );
 
-      const countPage = await listEntities(tx, tenantId, {
+      const page = await listEntities(tx, tenantId, {
         entityTypeId,
-        ...(state !== undefined && { state }),
-        ...(assignedTo !== undefined && { assignedTo }),
+        ...filters,
         limit: EXPORT_ROW_LIMIT + 1,
       });
 
-      return { entityType, fields: exportFields, rows: countPage.data };
+      return { entityType, fields: exportFields, rows: page.data };
     });
 
     if (!result) {
@@ -81,17 +173,28 @@ export const exportEntitiesHandler = factory.createHandlers(
         {
           error: "EXPORT_TOO_LARGE",
           message: `Export exceeds ${EXPORT_ROW_LIMIT} rows. Apply filters to narrow the result set.`,
-          count: rows.length,
         },
         400,
       );
     }
 
+    // ── Async path ─────────────────────────────────────────────────────────────
+    if (rows.length > SYNC_ROW_LIMIT) {
+      const job = await exportQueue.add("export", {
+        tenantId,
+        entityTypeId,
+        format,
+        filters,
+        requestedBy: userId,
+      });
+      return c.json({ jobId: job.id }, 202);
+    }
+
+    // ── Sync path ─────────────────────────────────────────────────────────────
     const dateStr = new Date().toISOString().slice(0, 10);
     const safePlural = entityType.plural
       .replace(/[^a-z0-9]/gi, "-")
       .toLowerCase();
-
     const headers = [
       "ID",
       "State",
@@ -99,47 +202,34 @@ export const exportEntitiesHandler = factory.createHandlers(
       "Updated At",
       ...fields.map((f) => f.label),
     ];
-
-    function buildRow(instance: EntityInstance): string[] {
-      const system = [
-        instance.id,
-        instance.currentState,
-        instance.createdAt.toISOString(),
-        instance.updatedAt.toISOString(),
-      ];
-      const fieldValues = fields.map((f) => {
-        const v = instance.fields[f.name];
-        if (v === null || v === undefined) return "";
-        if (typeof v === "object") return JSON.stringify(v);
-        return String(v);
-      });
-      return [...system, ...fieldValues];
-    }
+    const dataRows = rows.map((r) => buildRow(r, fields));
 
     if (format === "csv") {
-      const csvData = stringify([headers, ...rows.map(buildRow)]);
-
+      const csvData = stringify([headers, ...dataRows]);
       return c.newResponse(csvData, 200, {
         "Content-Type": "text/csv; charset=utf-8",
         "Content-Disposition": `attachment; filename="${safePlural}-export-${dateStr}.csv"`,
       });
     }
 
-    // ── xlsx ──────────────────────────────────────────────────────────────────
-    const workbook = new ExcelJS.Workbook();
-    const sheetName = entityType.plural.slice(0, 31);
-    const sheet = workbook.addWorksheet(sheetName);
+    if (format === "pdf") {
+      const pdfBuffer = await buildPdf(headers, dataRows, entityType.plural);
+      return c.newResponse(pdfBuffer as unknown as string, 200, {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="${safePlural}-export-${dateStr}.pdf"`,
+      });
+    }
 
+    // xlsx
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet(entityType.plural.slice(0, 31));
     sheet.addRow(headers);
     const headerRow = sheet.getRow(1);
     headerRow.font = { bold: true };
     headerRow.commit();
-
-    for (const instance of rows) {
-      sheet.addRow(buildRow(instance));
+    for (const row of rows) {
+      sheet.addRow(buildRow(row, fields));
     }
-
-    // Auto-column width heuristic: max cell length, capped at 50
     for (let i = 1; i <= headers.length; i++) {
       const col = sheet.getColumn(i);
       let maxLen = 10;
@@ -152,9 +242,7 @@ export const exportEntitiesHandler = factory.createHandlers(
       });
       col.width = Math.min(maxLen + 2, 50);
     }
-
     const buffer = await workbook.xlsx.writeBuffer();
-
     return c.newResponse(buffer as unknown as string, 200, {
       "Content-Type":
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

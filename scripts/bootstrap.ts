@@ -844,11 +844,13 @@ async function main(): Promise<void> {
     dbEnv["MIGRATION_DATABASE_URL"] = process.env["MIGRATION_DATABASE_URL"];
   }
   // Run scripts directly with tsx to bypass turbo (not available in bootstrap container).
-  // tsx is globally installed in the image so it's always on PATH.
-  run("tsx packages/db/src/run-migrations.ts", { env: dbEnv });
+  // tsx is globally installed; NODE_PATH points to the workspace root node_modules so
+  // all workspace dependencies (postgres, drizzle-orm, etc.) are resolvable.
+  const tsxEnv = { ...dbEnv, NODE_PATH: join(ROOT, "node_modules") };
+  run("tsx packages/db/src/run-migrations.ts", { env: tsxEnv });
   ok("Migrations applied");
 
-  run("tsx packages/db/src/seed.ts", { env: dbEnv });
+  run("tsx packages/db/src/seed.ts", { env: tsxEnv });
   ok("Base data seeded (dev tenant, roles)");
 
   // ── 7. Auth setup ─────────────────────────────────────────────────────────────

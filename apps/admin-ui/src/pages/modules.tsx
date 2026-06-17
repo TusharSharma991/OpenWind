@@ -100,9 +100,10 @@ const PLAN_LABEL: Record<string, string> = {
 // ── main component ────────────────────────────────────────────────────────────
 
 export function Modules(): React.ReactElement {
-  const { data, isLoading } = useList<Module>({ resource: "modules" });
+  const { data, isLoading, refetch } = useList<Module>({ resource: "modules" });
   const [actionError, setActionError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [seeding, setSeeding] = useState(false);
 
   // Fork modal state
   const [forkTarget, setForkTarget] = useState<Module | null>(null);
@@ -124,6 +125,19 @@ export function Modules(): React.ReactElement {
         (m.description ?? "").toLowerCase().includes(q),
     );
   }, [modules, search]);
+
+  async function handleSeed(): Promise<void> {
+    setSeeding(true);
+    setActionError(null);
+    try {
+      await fetchWithAuth(`${API_URL}/modules/seed`, { method: "POST" });
+      await refetch();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Seed failed");
+    } finally {
+      setSeeding(false);
+    }
+  }
 
   function openForkModal(mod: Module): void {
     setForkTarget(mod);
@@ -245,11 +259,24 @@ export function Modules(): React.ReactElement {
         <div className="empty-state">
           <div className="empty-icon">⬡</div>
           <h4>No templates found</h4>
-          <p>
-            {search
-              ? `No templates match "${search}"`
-              : "Run the platform seed to populate the template registry."}
-          </p>
+          {search ? (
+            <p>No templates match "{search}"</p>
+          ) : (
+            <>
+              <p>
+                The template registry is empty. Click below to load the built-in
+                module templates.
+              </p>
+              <button
+                className="btn-primary"
+                onClick={() => void handleSeed()}
+                disabled={seeding}
+                style={{ marginTop: "12px" }}
+              >
+                {seeding ? "Seeding…" : "Seed Templates"}
+              </button>
+            </>
+          )}
         </div>
       ) : (
         <div className="mod-grid">

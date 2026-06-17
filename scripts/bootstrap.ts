@@ -443,10 +443,11 @@ async function generateAndSaveKeyJson(token: string): Promise<void> {
   const keyJsonStr = Buffer.from(keyRes.keyDetails, "base64").toString("utf8");
   writeEnvVars({
     ZITADEL_KEY_JSON: Buffer.from(keyJsonStr).toString("base64"),
+    // ZITADEL_SERVICE_ACCOUNT_KEY is the raw JSON string read by the API server
+    // (zitadel-management.ts) for live user/role queries at runtime.
+    ZITADEL_SERVICE_ACCOUNT_KEY: keyJsonStr,
   });
-  ok(
-    "ZITADEL_KEY_JSON saved to .env.local — future bootstrap runs will be fully headless",
-  );
+  ok("ZITADEL_KEY_JSON + ZITADEL_SERVICE_ACCOUNT_KEY saved to .env.local");
 }
 
 async function getAdminToken(): Promise<string> {
@@ -1026,6 +1027,44 @@ async function main(): Promise<void> {
     role: "user",
   });
 
+  // Test users — 5 users with "user" role for development / demo purposes
+  const TEST_USERS = [
+    {
+      firstName: "Alice",
+      lastName: "Tester",
+      userName: "testUser1",
+      email: "testUser1@openwind.local",
+    },
+    {
+      firstName: "Bob",
+      lastName: "Tester",
+      userName: "testUser2",
+      email: "testUser2@openwind.local",
+    },
+    {
+      firstName: "Carol",
+      lastName: "Tester",
+      userName: "testUser3",
+      email: "testUser3@openwind.local",
+    },
+    {
+      firstName: "David",
+      lastName: "Tester",
+      userName: "testUser4",
+      email: "testUser4@openwind.local",
+    },
+    {
+      firstName: "Eve",
+      lastName: "Tester",
+      userName: "testUser5",
+      email: "testUser5@openwind.local",
+    },
+  ];
+
+  for (const u of TEST_USERS) {
+    await createDemoUser(authToken, projectId, { ...u, role: "user" });
+  }
+
   // ── 9. Module templates ───────────────────────────────────────────────────────
 
   step(9, "Module templates");
@@ -1060,6 +1099,10 @@ ${BOLD}${GREEN}  ✅  OpenWind is ready!${RESET}
 
   ${BOLD}Portal User${RESET}  (end-user view)
     Username:  ${YELLOW}owUser${RESET}
+    Password:  ${YELLOW}${DEMO_PASSWORD}${RESET}
+
+  ${BOLD}Test Users${RESET}  (5 users with "user" role)
+    testUser1 / testUser2 / testUser3 / testUser4 / testUser5
     Password:  ${YELLOW}${DEMO_PASSWORD}${RESET}
 
   ${BOLD}─────────────────────────────────────────────────────────────${RESET}

@@ -29,6 +29,8 @@ import { useParams, Link, useNavigate, useBlocker } from "react-router-dom";
 import { fetchWithAuth, API_URL } from "../../lib/api.js";
 import { useEntityTypes } from "../../entity-type-context.js";
 import { userManager } from "../../authProvider.js";
+import { UserPicker } from "../../components/user-picker.js";
+import type { UserOption } from "../../components/user-picker.js";
 
 function toWorkflowSlug(name: string): string {
   return name
@@ -63,6 +65,7 @@ type WorkflowFull = {
   entityTypeId: string;
   initialState: string;
   isActive: boolean;
+  assignedTo: string | null;
   createdAt: string;
   states: WorkflowState[];
   transitions: WorkflowTransition[];
@@ -1053,6 +1056,44 @@ export function WorkflowDetail(): React.ReactElement {
     void refetch();
   }
 
+  // User assignment
+  const [orgUsers, setOrgUsers] = useState<UserOption[]>([]);
+  const [assignedTo, setAssignedTo] = useState<string | null>(null);
+  const [savingAssign, setSavingAssign] = useState(false);
+
+  useEffect(() => {
+    fetchWithAuth(`${API_URL}/users`)
+      .then((res) => {
+        setOrgUsers((res as { data?: UserOption[] }).data ?? []);
+      })
+      .catch(() => {
+        /* users list unavailable — picker stays empty */
+      });
+  }, []);
+
+  useEffect(() => {
+    if (data?.data) {
+      setAssignedTo((data.data as WorkflowFull).assignedTo ?? null);
+    }
+  }, [data?.data]);
+
+  async function handleAssign(userId: string | null): Promise<void> {
+    if (!id) return;
+    setSavingAssign(true);
+    try {
+      await fetchWithAuth(`${API_URL}/workflows/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ assignedTo: userId }),
+      });
+      setAssignedTo(userId);
+      void refetch();
+    } catch {
+      // ignore — keep current assignment
+    } finally {
+      setSavingAssign(false);
+    }
+  }
+
   async function handleToggleActive(): Promise<void> {
     if (!id || !workflow) return;
     setTogglingActive(true);
@@ -1642,6 +1683,66 @@ export function WorkflowDetail(): React.ReactElement {
             accent="hsl(35,90%,50%)"
           />
         </div>
+      </div>
+
+      {/* ── Assign Workflow ─────────────────────────────────────────────── */}
+      <div
+        className="data-panel"
+        style={{
+          marginBottom: "20px",
+          display: "flex",
+          alignItems: "center",
+          gap: "16px",
+          padding: "14px 20px",
+          flexWrap: "wrap",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            minWidth: "120px",
+          }}
+        >
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+            <circle cx="12" cy="7" r="4" />
+          </svg>
+          <span
+            style={{
+              fontSize: "13px",
+              fontWeight: 600,
+              color: "var(--text-secondary)",
+            }}
+          >
+            Workflow Admin
+          </span>
+        </div>
+        <UserPicker
+          users={orgUsers}
+          value={assignedTo}
+          onChange={(uid) => void handleAssign(uid)}
+          placeholder="Assign workflow admin…"
+          disabled={savingAssign}
+        />
+        {savingAssign && (
+          <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>
+            Saving…
+          </span>
+        )}
+        {!savingAssign && assignedTo && (
+          <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>
+            This user has full admin access over this workflow.
+          </span>
+        )}
       </div>
 
       {inlineError && (

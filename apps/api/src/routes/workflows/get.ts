@@ -6,7 +6,7 @@ import { handleWorkflowError } from "../../lib/handle-workflow-error.js";
 
 export const getWorkflowHandler = factory.createHandlers(
   requireAuth(),
-  requireRole("admin"),
+  requireRole("admin", "agent"),
   async (c) => {
     const id = c.req.param("id") ?? "";
     const { tenantId } = c.get("auth");

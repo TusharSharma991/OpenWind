@@ -363,7 +363,7 @@ async function generateAndSaveKeyJson(token: string): Promise<void> {
 function readZitadelMachineKey(): ZitadelKeyJson | null {
   // Read key from Zitadel container logs (works both in Docker via socket mount and on host)
   const logCmd = IN_DOCKER
-    ? `docker logs ow-zita`
+    ? `docker logs ow-identity`
     : `docker compose logs zitadel`;
   try {
     const logs = execSync(logCmd, { encoding: "utf8", cwd: ROOT });
@@ -390,8 +390,10 @@ async function getAdminToken(): Promise<string> {
       return token;
     } catch (e) {
       warn(
-        `Saved key auth failed (${String(e)}) — trying machine key from volume`,
+        `Saved key auth failed (${String(e)}) — clearing stale key, re-reading from container logs`,
       );
+      // Remove stale key so it doesn't interfere on future runs
+      writeEnvVars({ ZITADEL_KEY_JSON: "" });
     }
   }
 

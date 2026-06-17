@@ -504,9 +504,19 @@ async function getAdminToken(): Promise<string> {
     }
   }
 
-  // Auto-read machine key from the Zitadel container (no browser needed)
+  // Auto-read machine key — wait up to 90s for Zitadel to write it on first boot
   info("Reading machine key from Zitadel container...");
-  const containerKey = await readMachineKeyFromContainer();
+  let containerKey: ZitadelKeyJson | null = null;
+  for (let attempt = 1; attempt <= 18; attempt++) {
+    containerKey = await readMachineKeyFromContainer();
+    if (containerKey) break;
+    if (attempt < 18) {
+      info(
+        `Machine key not ready yet, retrying in 5s… (${attempt * 5}s / 90s)`,
+      );
+      await sleep(5_000);
+    }
+  }
   if (containerKey) {
     try {
       const token = await getTokenFromKeyJson(containerKey);

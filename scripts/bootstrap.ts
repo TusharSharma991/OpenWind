@@ -357,47 +357,8 @@ async function generateAndSaveKeyJson(token: string): Promise<void> {
   );
 }
 
-// Read the machine key that Zitadel prints to stdout during first-boot setup.
-// When MACHINEKEY_KEYPATH is not used (or not supported by the version), Zitadel
-// logs the key JSON directly to its stdout. We scrape it from container logs.
-function readZitadelMachineKey(): ZitadelKeyJson | null {
-  // Find the Zitadel container by compose labels — robust regardless of container_name
-  // overrides or project directory name differences between environments.
-  let logCmd: string;
-  if (IN_DOCKER) {
-    try {
-      const containerId = execSync(
-        `docker ps -q --filter "label=com.docker.compose.service=zitadel" --filter "label=com.docker.compose.project=openwind"`,
-        { encoding: "utf8" },
-      ).trim();
-      if (!containerId) {
-        warn("Could not find Zitadel container via compose labels");
-        return null;
-      }
-      logCmd = `docker logs ${containerId}`;
-    } catch {
-      return null;
-    }
-  } else {
-    logCmd = `docker compose logs zitadel`;
-  }
-  try {
-    const logs = execSync(logCmd, { encoding: "utf8", cwd: ROOT });
-    for (const line of logs.split("\n")) {
-      const idx = line.indexOf('{"type":"serviceaccount"');
-      if (idx !== -1) {
-        const jsonStr = line.slice(idx).trim();
-        return JSON.parse(jsonStr) as ZitadelKeyJson;
-      }
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
 async function getAdminToken(): Promise<string> {
-  // Headless path A — saved key JSON already in .env.local (re-runs after first setup)
+  // Fast path — saved key from a previous run (stored in .env.local after first setup)
   const keyJson = readKeyJsonFromEnv();
   if (keyJson) {
     try {
@@ -405,48 +366,18 @@ async function getAdminToken(): Promise<string> {
       ok("Authenticated via saved JWT key — fully headless");
       return token;
     } catch (e) {
-      warn(
-        `Saved key auth failed (${String(e)}) — clearing stale key, re-reading from container logs`,
-      );
-      // Remove stale key so it doesn't interfere on future runs
+      warn(`Saved key auth failed (${String(e)}) — clearing stale key`);
       writeEnvVars({ ZITADEL_KEY_JSON: "" });
     }
   }
 
-  // Headless path B — Zitadel wrote a machine key to the mounted volume on first boot
-  info("Reading machine key from Zitadel container volume...");
-  const machineKey = readZitadelMachineKey();
-  if (machineKey) {
-    try {
-      const token = await getTokenFromKeyJson(machineKey);
-      ok(
-        "Authenticated via Zitadel machine key — fully headless, no manual step needed",
-      );
-      // Save to .env.local so future runs use path A (faster)
-      writeEnvVars({
-        ZITADEL_KEY_JSON: Buffer.from(JSON.stringify(machineKey)).toString(
-          "base64",
-        ),
-      });
-      ok("Machine key saved to .env.local for future runs");
-      return token;
-    } catch (e) {
-      warn(
-        `Machine key auth failed (${String(e)}) — falling back to manual PAT`,
-      );
-    }
-  } else {
-    warn(
-      "Machine key not found in volume — volume may not be mounted or Zitadel is still initialising",
-    );
-  }
-
-  // Fallback — manual PAT (only hits if docker-compose.yml is missing the volume config)
+  // Manual PAT — one-time step on first boot. After setup a service account
+  // key is generated and saved to .env.local so all future runs skip this.
   console.log(`
-  ${YELLOW}One manual step is required.${RESET}
-  Zitadel's API needs a Personal Access Token (PAT) for this first setup.
-  This is a one-time step — afterwards, a service account key is saved to
-  .env.local and all future runs will be fully headless.
+  ${YELLOW}One-time Zitadel setup required.${RESET}
+  A Personal Access Token is needed to configure the identity provider.
+  After this step a service account key is saved to .env.local and
+  future runs will be fully headless.
 
   ${BOLD}1.${RESET} Open:  ${CYAN}${ZITADEL_BASE}${RESET}
   ${BOLD}2.${RESET} Log in: ${DIM}admin@platform.local  /  Admin1234!${RESET}

@@ -382,8 +382,6 @@ services:
       DATABASE_URL: postgres://app_user:app_user_dev_password@pgbouncer:5432/platform
       MIGRATION_DATABASE_URL: postgres://migration_user:migration_user_dev_password@postgres:5432/platform
       REDIS_URL: redis://redis:6379
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       pgbouncer:
         condition: service_healthy

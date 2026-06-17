@@ -843,10 +843,11 @@ async function main(): Promise<void> {
   if (IN_DOCKER && process.env["MIGRATION_DATABASE_URL"]) {
     dbEnv["MIGRATION_DATABASE_URL"] = process.env["MIGRATION_DATABASE_URL"];
   }
-  run("pnpm db:migrate", { env: dbEnv });
+  // Run db scripts directly in the package to avoid turbo (not available in the container)
+  run("pnpm --filter @platform/db run db:migrate", { env: dbEnv });
   ok("Migrations applied");
 
-  run("pnpm db:seed", { env: dbEnv });
+  run("pnpm --filter @platform/db run db:seed", { env: dbEnv });
   ok("Base data seeded (dev tenant, roles)");
 
   // ── 7. Auth setup ─────────────────────────────────────────────────────────────

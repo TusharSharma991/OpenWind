@@ -693,6 +693,7 @@ export function CustomerRecordList(): React.ReactElement {
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
+      URL.revokeObjectURL(a.href);
     } catch (err) {
       setExportError(err instanceof Error ? err.message : "Export failed");
     } finally {

@@ -1,3 +1,4 @@
+import { request as nodeHttpRequest } from "node:http";
 import { importPKCS8, SignJWT } from "jose";
 import { z } from "zod";
 import { env } from "@platform/config";
@@ -10,7 +11,7 @@ const ServiceAccountKeySchema = z.object({
   keyId: z.string(),
   key: z.string(),
   userId: z.string(),
-  expirationDate: z.string(),
+  expirationDate: z.string().optional(),
 });
 
 type ServiceAccountKey = z.infer<typeof ServiceAccountKeySchema>;
@@ -21,34 +22,108 @@ interface ZitadelRole {
   group: string;
 }
 
+export interface OrgUser {
+  userId: string;
+  email: string;
+  displayName: string;
+  loginName: string;
+}
+
 // ── Token cache ───────────────────────────────────────────────────────────────
 
 let _cachedToken: string | null = null;
 let _tokenExpiresAt = 0;
 
-// ── Role cache ────────────────────────────────────────────────────────────────
+// ── Role / user cache ─────────────────────────────────────────────────────────
 
 let _cachedRoles: string[] | null = null;
 let _rolesExpiresAt = 0;
-const ROLES_TTL_MS = 5 * 60 * 1000; // 5 minutes
+let _cachedUsers: OrgUser[] | null = null;
+let _usersExpiresAt = 0;
+const CACHE_TTL_MS = 5 * 60 * 1000;
 
-// ── Parse key ─────────────────────────────────────────────────────────────────
+// ── URL helpers ───────────────────────────────────────────────────────────────
+//
+// ZITADEL_ISSUER is http://localhost:8080 (what the browser sees / JWT iss claim).
+// Inside Docker the backend container must reach Zitadel via the Docker service name.
+// We derive the internal base URL from ZITADEL_INTROSPECTION_URL which is already
+// set to http://zitadel:8080/... in docker-compose — no extra env var needed.
+
+function internalBase(): string {
+  try {
+    return new URL(env.ZITADEL_INTROSPECTION_URL).origin;
+  } catch {
+    return env.ZITADEL_ISSUER;
+  }
+}
+
+function issuerHost(): string {
+  try {
+    return new URL(env.ZITADEL_ISSUER).hostname;
+  } catch {
+    return "localhost";
+  }
+}
+
+// ── node:http helpers (allows custom Host header — fetch forbids it) ───────────
+
+function httpPost(
+  url: string,
+  host: string,
+  headers: Record<string, string>,
+  body: string,
+): Promise<{ status: number; text: string }> {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const buf = Buffer.from(body, "utf8");
+    const req = nodeHttpRequest(
+      {
+        hostname: parsed.hostname,
+        port: parsed.port ? parseInt(parsed.port, 10) : 80,
+        path: parsed.pathname + parsed.search,
+        method: "POST",
+        headers: {
+          ...headers,
+          Host: host,
+          "Content-Length": buf.length.toString(),
+        },
+      },
+      (res) => {
+        let data = "";
+        res.on("data", (chunk: Buffer) => {
+          data += chunk.toString();
+        });
+        res.on("end", () =>
+          resolve({ status: res.statusCode ?? 0, text: data }),
+        );
+      },
+    );
+    req.setTimeout(10_000, () => req.destroy(new Error("timeout")));
+    req.on("error", reject);
+    req.write(buf);
+    req.end();
+  });
+}
+
+// ── Parse service account key ─────────────────────────────────────────────────
+// Reads ZITADEL_SERVICE_ACCOUNT_KEY (raw JSON string written by bootstrap).
 
 function parseServiceAccountKey(): ServiceAccountKey | null {
   const raw = env.ZITADEL_SERVICE_ACCOUNT_KEY;
   if (!raw) return null;
+
   try {
     return ServiceAccountKeySchema.parse(JSON.parse(raw));
   } catch {
     logger.error(
       { keyConfigured: !!raw },
-      "Failed to parse ZITADEL_SERVICE_ACCOUNT_KEY — invalid JSON or missing fields",
+      "Failed to parse service account key — invalid JSON or missing fields",
     );
     return null;
   }
 }
 
-// ── Get access token (JWT bearer exchange) ────────────────────────────────────
+// ── Get access token (JWT bearer → OAuth token exchange) ──────────────────────
 
 async function getAccessToken(): Promise<string | null> {
   const now = Date.now();
@@ -58,7 +133,6 @@ async function getAccessToken(): Promise<string | null> {
   if (!keyConfig) return null;
 
   try {
-    // Sign a JWT assertion with the RSA private key
     const privateKey = await importPKCS8(keyConfig.key, "RS256");
     const assertion = await new SignJWT({})
       .setProtectedHeader({ alg: "RS256", kid: keyConfig.keyId })
@@ -69,27 +143,28 @@ async function getAccessToken(): Promise<string | null> {
       .setExpirationTime("1h")
       .sign(privateKey);
 
-    // Exchange the JWT assertion for an OAuth access token
-    const res = await fetch(`${env.ZITADEL_ISSUER}/oauth/v2/token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
+    // Use internal Docker URL for the token exchange; send Host matching EXTERNALDOMAIN
+    const tokenUrl = `${internalBase()}/oauth/v2/token`;
+    const result = await httpPost(
+      tokenUrl,
+      issuerHost(),
+      { "Content-Type": "application/x-www-form-urlencoded" },
+      new URLSearchParams({
         grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
         scope: "openid urn:zitadel:iam:org:project:id:zitadel:iam.write",
         assertion,
-      }),
-    });
+      }).toString(),
+    );
 
-    if (!res.ok) {
-      const body = await res.text();
+    if (result.status < 200 || result.status >= 300) {
       logger.error(
-        { status: res.status, body },
+        { status: result.status, body: result.text },
         "Zitadel token exchange failed",
       );
       return null;
     }
 
-    const data = (await res.json()) as {
+    const data = JSON.parse(result.text) as {
       access_token: string;
       expires_in: number;
     };
@@ -111,45 +186,123 @@ export async function listProjectRoles(): Promise<string[]> {
   const token = await getAccessToken();
   if (!token) return [];
 
-  // Project ID: explicit env var, or fall back to ZITADEL_AUDIENCE (same value in this setup)
   const projectId = env.ZITADEL_PROJECT_ID ?? env.ZITADEL_AUDIENCE;
-  if (!projectId) {
-    logger.warn(
-      { projectId: env.ZITADEL_PROJECT_ID, audience: env.ZITADEL_AUDIENCE },
-      "ZITADEL_PROJECT_ID and ZITADEL_AUDIENCE are both unset — cannot fetch roles",
-    );
-    return [];
-  }
+  if (!projectId) return [];
 
   try {
-    const res = await fetch(
-      `${env.ZITADEL_ISSUER}/management/v1/projects/${projectId}/roles/_search`,
+    const url = `${internalBase()}/management/v1/projects/${projectId}/roles/_search`;
+    const result = await httpPost(
+      url,
+      issuerHost(),
       {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ limit: 200 }),
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
       },
+      JSON.stringify({ limit: 200 }),
     );
 
-    if (!res.ok) {
-      const body = await res.text();
+    if (result.status < 200 || result.status >= 300) {
       logger.error(
-        { status: res.status, body },
-        "Zitadel list project roles failed",
+        { status: result.status, body: result.text },
+        "Zitadel list roles failed",
       );
       return [];
     }
 
-    const data = (await res.json()) as { result?: ZitadelRole[] };
+    const data = JSON.parse(result.text) as { result?: ZitadelRole[] };
     const roles = (data.result ?? []).map((r) => r.key);
     _cachedRoles = roles;
-    _rolesExpiresAt = now + ROLES_TTL_MS;
+    _rolesExpiresAt = now + CACHE_TTL_MS;
     return roles;
   } catch (err) {
     logger.error({ err }, "Failed to list Zitadel project roles");
     return [];
   }
+}
+
+// ── List org users ────────────────────────────────────────────────────────────
+
+export async function listOrgUsers(): Promise<OrgUser[]> {
+  const now = Date.now();
+  if (_cachedUsers && now < _usersExpiresAt) return _cachedUsers;
+
+  const token = await getAccessToken();
+  if (!token) return [];
+
+  try {
+    // Search all active human users in the org (management API scopes to the SA's org)
+    const url = `${internalBase()}/management/v1/users/_search`;
+    const result = await httpPost(
+      url,
+      issuerHost(),
+      {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      JSON.stringify({
+        limit: 500,
+        queries: [
+          {
+            stateQuery: {
+              state: "USER_STATE_ACTIVE",
+            },
+          },
+        ],
+      }),
+    );
+
+    if (result.status < 200 || result.status >= 300) {
+      logger.warn(
+        { status: result.status, body: result.text },
+        "Zitadel list users failed",
+      );
+      return [];
+    }
+
+    interface ZitadelUser {
+      id: string;
+      preferredLoginName?: string;
+      human?: {
+        profile?: {
+          displayName?: string;
+          firstName?: string;
+          lastName?: string;
+        };
+        email?: { email?: string };
+      };
+    }
+
+    const data = JSON.parse(result.text) as { result?: ZitadelUser[] };
+    const users: OrgUser[] = (data.result ?? [])
+      .filter((u) => u.human !== undefined)
+      .map((u) => {
+        const profile = u.human?.profile ?? {};
+        const displayName =
+          ((profile.displayName ??
+            [profile.firstName, profile.lastName].filter(Boolean).join(" ")) ||
+            u.preferredLoginName) ??
+          u.id;
+        return {
+          userId: u.id,
+          email: u.human?.email?.email ?? "",
+          displayName,
+          loginName: u.preferredLoginName ?? u.id,
+        };
+      })
+      .sort((a, b) => a.displayName.localeCompare(b.displayName));
+
+    _cachedUsers = users;
+    _usersExpiresAt = now + CACHE_TTL_MS;
+    return users;
+  } catch (err) {
+    logger.error({ err }, "Failed to list Zitadel org users");
+    return [];
+  }
+}
+
+// ── Cache invalidation ────────────────────────────────────────────────────────
+
+export function invalidateUserCache(): void {
+  _cachedUsers = null;
+  _usersExpiresAt = 0;
 }

@@ -25,6 +25,7 @@ import { CreateWorkflow } from "./pages/workflows/create.js";
 import { AdminRecords } from "./pages/records/index.js";
 import { WorkflowRecords } from "./pages/records/workflow-records.js";
 import { Settings } from "./pages/settings.js";
+import { UsersPage } from "./pages/users.js";
 import { CustomerRecordList } from "./pages/customer/record-list.js";
 import { CustomerRecordCreate } from "./pages/customer/record-create.js";
 import { CustomerRecordDetail } from "./pages/customer/record-detail.js";
@@ -103,6 +104,7 @@ export function App(): React.ReactElement {
               element={<WorkflowRecords />}
             />
 
+            <Route path="/users" element={<UsersPage />} />
             <Route path="/settings" element={<Settings />} />
 
             {/* Customer routes */}

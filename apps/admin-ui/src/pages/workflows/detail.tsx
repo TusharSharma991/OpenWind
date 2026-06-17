@@ -5,6 +5,7 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { WorkflowCanvas } from "../../components/workflow-canvas.js";
 import {
   DndContext,
   closestCenter,
@@ -998,6 +999,7 @@ export function WorkflowDetail(): React.ReactElement {
   );
 
   const [togglingActive, setTogglingActive] = useState(false);
+  const [canvasView, setCanvasView] = useState<"canvas" | "pipeline">("canvas");
 
   async function handleToggleActive(): Promise<void> {
     if (!id || !workflow) return;
@@ -1629,19 +1631,115 @@ export function WorkflowDetail(): React.ReactElement {
       >
         {/* ── Left column ── */}
         <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-          {/* State Flow */}
+          {/* State Flow / Canvas */}
           <div
             className="data-panel"
             style={{ borderTop: "3px solid var(--accent-primary)" }}
           >
-            <SectionHeader label="State Pipeline" />
-            <StateFlowDiagram
-              states={workflow.states}
-              transitions={workflow.transitions}
-              initialState={workflow.initialState}
-              workflowId={id}
-              onStateUpdated={() => void refetch()}
-            />
+            {workflow.states.length > 20 || workflow.transitions.length > 40 ? (
+              <>
+                <div
+                  className="alert"
+                  style={{
+                    marginBottom: "14px",
+                    fontSize: "12px",
+                    background: "hsla(38,92%,50%,.08)",
+                    border: "1px solid hsla(38,92%,50%,.25)",
+                    borderRadius: "8px",
+                    padding: "10px 14px",
+                    color: "var(--warning)",
+                    fontWeight: 500,
+                  }}
+                >
+                  Canvas view is disabled for workflows with more than 20 states
+                  or 40 transitions. Using pipeline view.
+                </div>
+                <SectionHeader label="State Pipeline" />
+                <StateFlowDiagram
+                  states={workflow.states}
+                  transitions={workflow.transitions}
+                  initialState={workflow.initialState}
+                  workflowId={id}
+                  onStateUpdated={() => void refetch()}
+                />
+              </>
+            ) : (
+              <>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    marginBottom: "14px",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: "11px",
+                      fontWeight: 700,
+                      color: "var(--text-muted)",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.8px",
+                    }}
+                  >
+                    {canvasView === "canvas"
+                      ? "Workflow Canvas"
+                      : "State Pipeline"}
+                  </span>
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "2px",
+                      background: "var(--bg-tertiary)",
+                      borderRadius: "8px",
+                      padding: "3px",
+                      border: "1px solid var(--border-color)",
+                    }}
+                  >
+                    {(["canvas", "pipeline"] as const).map((v) => (
+                      <button
+                        key={v}
+                        onClick={() => setCanvasView(v)}
+                        style={{
+                          padding: "3px 12px",
+                          fontSize: "11px",
+                          fontWeight: 600,
+                          borderRadius: "6px",
+                          border: "none",
+                          cursor: "pointer",
+                          background:
+                            canvasView === v
+                              ? "var(--accent-primary)"
+                              : "transparent",
+                          color:
+                            canvasView === v ? "#fff" : "var(--text-secondary)",
+                          transition: "background 0.15s",
+                        }}
+                      >
+                        {v === "canvas" ? "Canvas" : "Pipeline"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {canvasView === "canvas" ? (
+                  <WorkflowCanvas
+                    states={workflow.states}
+                    transitions={workflow.transitions}
+                    initialState={workflow.initialState}
+                    workflowId={id ?? ""}
+                    isAdmin={true}
+                  />
+                ) : (
+                  <StateFlowDiagram
+                    states={workflow.states}
+                    transitions={workflow.transitions}
+                    initialState={workflow.initialState}
+                    workflowId={id}
+                    onStateUpdated={() => void refetch()}
+                  />
+                )}
+              </>
+            )}
           </div>
 
           {/* Fields */}

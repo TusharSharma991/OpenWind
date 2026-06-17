@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { eq } from "drizzle-orm";
 import { db, withTenantContext } from "@platform/db";
-import { entityTypes } from "@platform/db";
+import { entityInstances, entityTypes } from "@platform/db";
 import {
   createEntityType,
   createEntity,
@@ -48,6 +48,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await db
+    .delete(entityInstances)
+    .where(eq(entityInstances.entityTypeId, entityType.id));
   await db.delete(entityTypes).where(eq(entityTypes.id, entityType.id));
 });
 

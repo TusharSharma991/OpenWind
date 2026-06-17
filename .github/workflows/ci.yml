@@ -155,9 +155,20 @@ jobs:
         ports:
           - 5432:5432
 
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+        ports:
+          - 6379:6379
+
     env:
       DATABASE_URL: postgresql://platform:platform_test_password@localhost:5432/platform_test
       DATABASE_MIGRATION_URL: postgresql://platform:platform_test_password@localhost:5432/platform_test
+      REDIS_URL: redis://localhost:6379
       NODE_ENV: test
 
     steps:

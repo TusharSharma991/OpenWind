@@ -37,13 +37,14 @@ const _ZITADEL_EXTERNAL_DOMAIN =
   process.env["ZITADEL_EXTERNAL_DOMAIN"] ?? "localhost";
 const _ZITADEL_HOST_PORT = process.env["ZITADEL_HOST_PORT"] ?? "8080";
 // When running inside Docker with a custom external domain, Zitadel routes
-// requests by Host header — must use the external domain URL so the instance
-// lookup succeeds. The network alias on the docker network makes it resolvable.
+// requests by Host header — must match EXTERNALDOMAIN so instance lookup
+// succeeds. Inside the Docker network the container always listens on :8080
+// regardless of the host-mapped port, so we always use port 8080 here.
 const ZITADEL_BASE =
   process.env["ZITADEL_BOOTSTRAP_URL"] ??
   (IN_DOCKER
     ? _ZITADEL_EXTERNAL_DOMAIN !== "localhost"
-      ? `http://${_ZITADEL_EXTERNAL_DOMAIN}:${_ZITADEL_HOST_PORT}`
+      ? `http://${_ZITADEL_EXTERNAL_DOMAIN}:8080`
       : "http://zitadel:8080"
     : `http://localhost:${_ZITADEL_HOST_PORT}`);
 const TOTAL_STEPS = 10;

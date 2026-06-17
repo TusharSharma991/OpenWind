@@ -141,6 +141,20 @@
       "when": 1778749338318,
       "tag": "0017_workflow_events_actor_id_text",
       "breakpoints": false
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1781510400000,
+      "tag": "0018_saved_views",
+      "breakpoints": false
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1781683200000,
+      "tag": "0019_create_app_user",
+      "breakpoints": false
     }
   ]
 }

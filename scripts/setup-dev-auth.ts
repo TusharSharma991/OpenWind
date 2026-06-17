@@ -30,7 +30,6 @@ import { createSign } from "node:crypto";
 const ZITADEL_BASE = process.env["ZITADEL_BASE_URL"] ?? "http://localhost:8080";
 const ADMIN_EMAIL =
   process.env["ZITADEL_ADMIN_EMAIL"] ?? "admin@platform.local";
-const ADMIN_PASSWORD = process.env["ZITADEL_ADMIN_PASSWORD"] ?? "Admin1234!";
 // Accept a pre-generated PAT directly (bypasses the auth flow entirely)
 const ADMIN_PAT = process.env["ZITADEL_ADMIN_PAT"];
 
@@ -185,7 +184,7 @@ async function getAdminToken(): Promise<string> {
       `  ZITADEL_KEY_JSON in .env.local so future runs are fully headless.\n\n` +
       `  Option B: generate a PAT manually:\n` +
       `  1. Open http://localhost:8080\n` +
-      `  2. Log in as ${ADMIN_EMAIL} / ${ADMIN_PASSWORD}\n` +
+      `  2. Log in as ${ADMIN_EMAIL} (password from ZITADEL_ADMIN_PASSWORD or docker-compose)\n` +
       `  3. Avatar → Personal Access Tokens → New (no expiry) → copy\n` +
       `  4. Run: ZITADEL_ADMIN_PAT=<token> pnpm setup-auth\n`,
   );

@@ -5,6 +5,47 @@
 
 ---
 
+## 2026-06-16 — Track 2D Phase 2 — admin-ui automation builder, saved views, export, workflow editor (issue #15, PR #107)
+
+**Session type:** Feature implementation
+**Branch:** `feat/15-track-2d-phase2-admin-ui` → PR #107 open for review
+
+### Completed this session
+
+**Track 2D Phase 2 admin-ui (T10–T21 of 24)**
+
+- **T10** — automation rules list page with enable/disable toggle, delete, link to wizard
+- **T11** — `step-trigger.tsx`: trigger type picker + dynamic config (workflow/state selects, entity type/field selects)
+- **T12** — `step-conditions.tsx`: recursive conditions builder (AND/OR groups, field comparisons, add/remove/nest)
+- **T13** — `step-actions.tsx`: actions builder supporting `notify`, `set_field`, `transition`, `webhook` action types
+- **T14** — `step-save.tsx` + `wizard.tsx`: 4-step wizard shell with progress indicator, edit mode pre-populate, POST/PATCH on save
+- **T15** — wired `/automations`, `/automations/new`, `/automations/:id/edit` routes in `App.tsx`; nav entry in `layout.tsx`
+- **T16** — workflow detail: `StateEditPopover` — clicking a state circle opens inline edit for label/color/SLA, PATCH on save
+- **T17** — workflow detail: dnd-kit drag-to-reorder states with optimistic update + rollback on failure
+- **T18** — workflow detail: SVG quadratic bezier arcs for non-adjacent transitions (arc height scales with state gap, arrowhead marker)
+- **T19** — admin-ui record list: saved views dropdown, auto-apply default view, save-current-filter modal
+- **T20** — admin-ui record list: CSV/xlsx export split-button; EXPORT_TOO_LARGE banner
+- **T21** — portal record list: same saved views + export (mirrors admin-ui)
+
+**Key implementation notes:**
+
+- `(value as Type) ?? fallback` ESLint pattern: cast must be `as Type | undefined` when `??` is used, otherwise `no-unnecessary-condition` fires
+- dnd-kit `setNodeRef` expects `Element | null`; custom `Map<string, HTMLDivElement>` requires `setNodeRef(el as unknown as HTMLElement)` workaround
+- `useLayoutEffect` without deps array for SVG arc measurement — intentional, always re-measure after any layout change
+- `jsx-a11y/anchor-has-content` rule is not installed in this project; do not add eslint-disable comments for it
+
+### Still pending (Phase 2 gate not fully met)
+
+- **T5** — saved-views RLS isolation test (`tests/isolation/saved-views.test.ts`) — needs Docker; deferred
+
+### Phase snapshot
+
+| Track                          | Status                                |
+| ------------------------------ | ------------------------------------- |
+| Track 2D — no-code + reporting | 🔄 Phase 2 admin-ui: 12/13 tasks done |
+
+---
+
 ## 2026-06-16 — Track 2D Phase 1 — saved views API + entity export (issue #15)
 
 **Session type:** Feature implementation

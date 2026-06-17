@@ -1,0 +1,382 @@
+import React, { useCallback, useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { fetchWithAuth, API_URL } from "../../lib/api.js";
+
+type AutomationRule = {
+  id: string;
+  name: string;
+  triggerType: string;
+  actions: Array<{ type: string; config: Record<string, unknown> }>;
+  isEnabled: boolean;
+  priority: number;
+  createdAt: string;
+};
+
+const TRIGGER_LABELS: Record<string, string> = {
+  "workflow.entered_state": "State entered",
+  "workflow.transitioned": "Transitioned",
+  "workflow.sla_breached": "SLA breached",
+  "field.changed": "Field changed",
+  "entity.created": "Record created",
+  "entity.assigned": "Record assigned",
+  "schedule.cron": "Scheduled",
+  "connector.event": "Connector event",
+};
+
+const TRIGGER_COLORS: Record<string, string> = {
+  "workflow.entered_state": "#6366f1",
+  "workflow.transitioned": "#8b5cf6",
+  "workflow.sla_breached": "#ef4444",
+  "field.changed": "#f59e0b",
+  "entity.created": "#10b981",
+  "entity.assigned": "#3b82f6",
+  "schedule.cron": "#6b7280",
+  "connector.event": "#ec4899",
+};
+
+export function Automations(): React.ReactElement {
+  const navigate = useNavigate();
+  const [rules, setRules] = useState<AutomationRule[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<AutomationRule | null>(
+    null,
+  );
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const load = useCallback((): void => {
+    setLoading(true);
+    setError(null);
+    fetchWithAuth(`${API_URL}/automation-rules`)
+      .then((res) => {
+        setRules((res as { data: AutomationRule[] }).data);
+        setLoading(false);
+      })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : "Failed to load rules");
+        setLoading(false);
+      });
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function handleToggle(rule: AutomationRule): Promise<void> {
+    setTogglingId(rule.id);
+    try {
+      await fetchWithAuth(`${API_URL}/automation-rules/${rule.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ isEnabled: !rule.isEnabled }),
+      });
+      setRules((prev) =>
+        prev.map((r) =>
+          r.id === rule.id ? { ...r, isEnabled: !r.isEnabled } : r,
+        ),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update rule");
+    } finally {
+      setTogglingId(null);
+    }
+  }
+
+  async function handleDelete(rule: AutomationRule): Promise<void> {
+    setDeletingId(rule.id);
+    try {
+      await fetchWithAuth(`${API_URL}/automation-rules/${rule.id}`, {
+        method: "DELETE",
+      });
+      setRules((prev) => prev.filter((r) => r.id !== rule.id));
+      setConfirmDelete(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete rule");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  return (
+    <div style={{ padding: "32px 36px", maxWidth: "1100px" }}>
+      {/* Header */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: "28px",
+        }}
+      >
+        <div>
+          <h2 className="page-title">Automation Rules</h2>
+          <p className="page-subtitle">
+            Trigger actions automatically based on workflow events.
+          </p>
+        </div>
+        <button
+          className="btn btn-primary"
+          onClick={() => void navigate("/automations/new")}
+        >
+          + New Rule
+        </button>
+      </div>
+
+      {error && (
+        <div className="alert alert-error" style={{ marginBottom: "16px" }}>
+          {error}
+        </div>
+      )}
+
+      {loading ? (
+        <div className="loading-center">
+          <div className="spinner" />
+          <p className="loader-text">Loading rules…</p>
+        </div>
+      ) : rules.length === 0 ? (
+        <div className="empty-state">
+          <div className="empty-icon">⚡</div>
+          <p style={{ fontWeight: 600, marginBottom: "4px" }}>
+            No automation rules yet
+          </p>
+          <p style={{ color: "var(--text-muted)", fontSize: "13px" }}>
+            Create a rule to trigger actions when workflow events occur.
+          </p>
+          <button
+            className="btn btn-primary"
+            style={{ marginTop: "16px" }}
+            onClick={() => void navigate("/automations/new")}
+          >
+            + New Rule
+          </button>
+        </div>
+      ) : (
+        <div className="table-scroll">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Trigger</th>
+                <th>Actions</th>
+                <th>Priority</th>
+                <th>Enabled</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {rules.map((rule) => {
+                const triggerColor =
+                  TRIGGER_COLORS[rule.triggerType] ?? "var(--accent-primary)";
+                return (
+                  <tr key={rule.id}>
+                    <td>
+                      <Link
+                        to={`/automations/${rule.id}/edit`}
+                        style={{
+                          fontWeight: 600,
+                          color: "var(--text-primary)",
+                          textDecoration: "none",
+                        }}
+                      >
+                        {rule.name}
+                      </Link>
+                    </td>
+                    <td>
+                      <span
+                        className="badge"
+                        style={{
+                          background: `${triggerColor}22`,
+                          color: triggerColor,
+                          border: `1px solid ${triggerColor}44`,
+                          fontSize: "11px",
+                          fontWeight: 600,
+                          padding: "2px 8px",
+                          borderRadius: "20px",
+                        }}
+                      >
+                        {TRIGGER_LABELS[rule.triggerType] ?? rule.triggerType}
+                      </span>
+                    </td>
+                    <td>
+                      <span
+                        style={{ color: "var(--text-muted)", fontSize: "13px" }}
+                      >
+                        {rule.actions.length}{" "}
+                        {rule.actions.length === 1 ? "action" : "actions"}
+                      </span>
+                    </td>
+                    <td>
+                      <span
+                        style={{
+                          color: "var(--text-secondary)",
+                          fontSize: "13px",
+                        }}
+                      >
+                        {rule.priority}
+                      </span>
+                    </td>
+                    <td>
+                      <button
+                        className={`form-checkbox ${rule.isEnabled ? "checked" : ""}`}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "6px",
+                          background: "none",
+                          border: "none",
+                          cursor: togglingId === rule.id ? "wait" : "pointer",
+                          padding: "2px 0",
+                          color: rule.isEnabled
+                            ? "var(--success)"
+                            : "var(--text-muted)",
+                          fontWeight: 600,
+                          fontSize: "12px",
+                          opacity: togglingId === rule.id ? 0.5 : 1,
+                        }}
+                        disabled={togglingId === rule.id}
+                        onClick={() => void handleToggle(rule)}
+                        title={rule.isEnabled ? "Disable rule" : "Enable rule"}
+                      >
+                        <span
+                          style={{
+                            display: "inline-block",
+                            width: "28px",
+                            height: "16px",
+                            borderRadius: "8px",
+                            background: rule.isEnabled
+                              ? "var(--success)"
+                              : "var(--border-color)",
+                            position: "relative",
+                            transition: "background 0.2s",
+                            flexShrink: 0,
+                          }}
+                        >
+                          <span
+                            style={{
+                              display: "block",
+                              width: "12px",
+                              height: "12px",
+                              borderRadius: "50%",
+                              background: "#fff",
+                              position: "absolute",
+                              top: "2px",
+                              left: rule.isEnabled ? "14px" : "2px",
+                              transition: "left 0.2s",
+                            }}
+                          />
+                        </span>
+                        {rule.isEnabled ? "On" : "Off"}
+                      </button>
+                    </td>
+                    <td>
+                      <div style={{ display: "flex", gap: "8px" }}>
+                        <button
+                          className="icon-btn icon-btn-edit"
+                          title="Edit rule"
+                          onClick={() =>
+                            void navigate(`/automations/${rule.id}/edit`)
+                          }
+                        >
+                          ✏
+                        </button>
+                        <button
+                          className="icon-btn icon-btn-delete"
+                          title="Delete rule"
+                          onClick={() => setConfirmDelete(rule)}
+                        >
+                          🗑
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Delete confirm modal */}
+      {confirmDelete && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,.55)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1100,
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !deletingId)
+              setConfirmDelete(null);
+          }}
+        >
+          <div
+            style={{
+              background: "var(--bg-primary)",
+              border: "1px solid var(--border-color)",
+              borderRadius: "14px",
+              padding: "28px 32px",
+              width: "100%",
+              maxWidth: "420px",
+              boxShadow: "var(--shadow-lg)",
+            }}
+          >
+            <div
+              style={{
+                width: "44px",
+                height: "44px",
+                borderRadius: "10px",
+                background: "hsla(0,84%,60%,.12)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "20px",
+                marginBottom: "16px",
+              }}
+            >
+              🗑
+            </div>
+            <p style={{ margin: "0 0 6px", fontSize: "15px", fontWeight: 600 }}>
+              Delete &ldquo;{confirmDelete.name}&rdquo;?
+            </p>
+            <p
+              style={{
+                margin: "0 0 24px",
+                fontSize: "13px",
+                color: "var(--danger)",
+              }}
+            >
+              This action cannot be undone.
+            </p>
+            <div
+              style={{
+                display: "flex",
+                gap: "10px",
+                justifyContent: "flex-end",
+              }}
+            >
+              <button
+                className="btn btn-secondary"
+                onClick={() => setConfirmDelete(null)}
+                disabled={!!deletingId}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn-danger-sm"
+                onClick={() => void handleDelete(confirmDelete)}
+                disabled={!!deletingId}
+                style={{ minWidth: "90px" }}
+              >
+                {deletingId ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

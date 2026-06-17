@@ -7,6 +7,7 @@ export type ExportJobPayload = {
   format: "csv" | "xlsx" | "pdf";
   filters: { state?: string; assignedTo?: string };
   requestedBy: string;
+  includePii: boolean;
 };
 
 export type ExportJobResult = {

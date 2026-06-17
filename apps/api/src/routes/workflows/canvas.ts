@@ -128,23 +128,27 @@ export const canvasSaveHandler = factory.createHandlers(
           );
         }
 
-        for (const s of existingStates) {
-          await tx
-            .update(workflowStates)
-            .set({
-              label: s.label,
-              color: s.color ?? null,
-              isTerminal: s.isTerminal,
-              slaHours: s.slaHours ?? null,
-              sortOrder: s.sortOrder,
-            })
-            .where(
-              and(
-                eq(workflowStates.id, s.id),
-                eq(workflowStates.workflowId, workflowId),
+        // State name is immutable (referenced by transitions and automation rules);
+        // only mutable display/config fields are updated here.
+        await Promise.all(
+          existingStates.map((s) =>
+            tx
+              .update(workflowStates)
+              .set({
+                label: s.label,
+                color: s.color ?? null,
+                isTerminal: s.isTerminal,
+                slaHours: s.slaHours ?? null,
+                sortOrder: s.sortOrder,
+              })
+              .where(
+                and(
+                  eq(workflowStates.id, s.id),
+                  eq(workflowStates.workflowId, workflowId),
+                ),
               ),
-            );
-        }
+          ),
+        );
 
         if (newTransitions.length > 0) {
           await tx.insert(workflowTransitions).values(
@@ -161,22 +165,30 @@ export const canvasSaveHandler = factory.createHandlers(
           );
         }
 
-        for (const t of existingTransitions) {
-          await tx
-            .update(workflowTransitions)
-            .set({
-              label: t.label || null,
-              allowedRoles: t.allowedRoles,
-              requiresComment: t.requiresComment,
-              requiresFields: t.requiresFields,
-            })
-            .where(
-              and(
-                eq(workflowTransitions.id, t.id),
-                eq(workflowTransitions.workflowId, workflowId),
+        // fromState/toState are included so the DB reflects the authoritative shape.
+        // The canvas UI does not support reconnecting existing edges — any endpoint
+        // change always produces a __new_ transition ID — so these fields are
+        // effectively immutable in practice, but we write them for correctness.
+        await Promise.all(
+          existingTransitions.map((t) =>
+            tx
+              .update(workflowTransitions)
+              .set({
+                fromState: t.fromState,
+                toState: t.toState,
+                label: t.label || null,
+                allowedRoles: t.allowedRoles,
+                requiresComment: t.requiresComment,
+                requiresFields: t.requiresFields,
+              })
+              .where(
+                and(
+                  eq(workflowTransitions.id, t.id),
+                  eq(workflowTransitions.workflowId, workflowId),
+                ),
               ),
-            );
-        }
+          ),
+        );
 
         logger.info(
           {

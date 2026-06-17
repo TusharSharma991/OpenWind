@@ -4,7 +4,7 @@
  * BullMQ processor for the "export" queue.
  *
  * For each job:
- *  1. Fetch entity type + fields from the DB (honouring canSeePii via requestedBy role lookup)
+ *  1. Fetch entity type + fields from the DB (honouring includePii from payload)
  *  2. Stream entity rows up to EXPORT_ROW_LIMIT
  *  3. Render CSV, xlsx, or PDF into a Buffer
  *  4. Upload to S3 at exports/{tenantId}/{jobId}.{format}
@@ -28,12 +28,12 @@ import {
   getEntityType,
   listEntityFields,
   listEntities,
-  type EntityField,
-  type EntityInstance,
+  buildExportRow,
 } from "@platform/entity-engine";
 import { env } from "@platform/config";
 import { logger } from "@platform/logger";
 import { connection } from "./queues.js";
+
 // These types must stay in sync with ExportJobPayload / ExportJobResult in
 // apps/api/src/lib/export-queue.ts — both sides must use the same queue name
 // ("export") and the same payload shape.
@@ -43,6 +43,7 @@ type ExportJobPayload = {
   format: "csv" | "xlsx" | "pdf";
   filters: { state?: string; assignedTo?: string };
   requestedBy: string;
+  includePii: boolean;
 };
 
 type ExportJobResult = {
@@ -53,6 +54,10 @@ type ExportJobResult = {
 
 const EXPORT_ROW_LIMIT = 10_000;
 const DOWNLOAD_URL_TTL_SECONDS = 3_600; // 1 h
+
+// Tailwind gray-200 / gray-50 — match the admin-ui table palette
+const PDF_HEADER_BG = "#e5e7eb";
+const PDF_ROW_ALT_BG = "#f9fafb";
 
 // ── S3 client ─────────────────────────────────────────────────────────────────
 
@@ -71,21 +76,6 @@ function getS3(): S3Client {
 }
 
 // ── Renderers ─────────────────────────────────────────────────────────────────
-
-function buildRow(instance: EntityInstance, fields: EntityField[]): string[] {
-  return [
-    instance.id,
-    instance.currentState,
-    instance.createdAt.toISOString(),
-    instance.updatedAt.toISOString(),
-    ...fields.map((f) => {
-      const v = instance.fields[f.name];
-      if (v === null || v === undefined) return "";
-      if (typeof v === "object") return JSON.stringify(v);
-      return String(v);
-    }),
-  ];
-}
 
 function renderCsv(headers: string[], rows: string[][]): Buffer {
   return Buffer.from(stringify([headers, ...rows]), "utf-8");
@@ -138,7 +128,7 @@ async function renderPdf(
     doc.fontSize(12).font("Helvetica-Bold").text(entityName, margin, margin);
     let y = margin + 22;
 
-    doc.rect(margin, y, usableW, lineH).fill("#e5e7eb");
+    doc.rect(margin, y, usableW, lineH).fill(PDF_HEADER_BG);
     doc.fill("black").fontSize(8).font("Helvetica-Bold");
     headers.forEach((h, i) => {
       const t = h.length > 20 ? h.slice(0, 17) + "…" : h;
@@ -159,7 +149,7 @@ async function renderPdf(
         y = margin;
       }
       if (ri % 2 === 0) {
-        doc.rect(margin, y, usableW, lineH).fill("#f9fafb");
+        doc.rect(margin, y, usableW, lineH).fill(PDF_ROW_ALT_BG);
       }
       doc.fill("black");
       row.forEach((cell, ci) => {
@@ -181,7 +171,7 @@ async function renderPdf(
 export const exportWorker = new Worker<ExportJobPayload, ExportJobResult>(
   "export",
   async (job) => {
-    const { tenantId, entityTypeId, format, filters } = job.data;
+    const { tenantId, entityTypeId, format, filters, includePii } = job.data;
 
     logger.info(
       { tenantId, entityTypeId, format, jobId: job.id },
@@ -192,11 +182,13 @@ export const exportWorker = new Worker<ExportJobPayload, ExportJobResult>(
       const entityType = await getEntityType(tx, tenantId, entityTypeId);
       const allFields = await listEntityFields(tx, tenantId, entityTypeId);
 
-      // Async exports use public fields only — no PII unless explicitly requested.
-      // PII role is checked at enqueue time (route handler); requestedBy stored for audit.
-      const exportFields = allFields.filter(
-        (f) => f.sensitivity !== "pii" && f.sensitivity !== "financial",
-      );
+      // includePii is set at enqueue time based on the requesting user's roles;
+      // the worker trusts the value carried in the job payload.
+      const exportFields = includePii
+        ? allFields
+        : allFields.filter(
+            (f) => f.sensitivity !== "pii" && f.sensitivity !== "financial",
+          );
 
       const page = await listEntities(tx, tenantId, {
         entityTypeId,
@@ -215,7 +207,7 @@ export const exportWorker = new Worker<ExportJobPayload, ExportJobResult>(
       "Updated At",
       ...fields.map((f) => f.label),
     ];
-    const dataRows = rows.map((r) => buildRow(r, fields));
+    const dataRows = rows.map((r) => buildExportRow(r, fields));
 
     let fileBuffer: Buffer;
     let contentType: string;

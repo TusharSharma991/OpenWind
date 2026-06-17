@@ -71,3 +71,4 @@ export {
   validateEntityRefs,
   validateUserRefs,
 } from "./validation/index.js";
+export { buildExportRow } from "./export-utils.js";

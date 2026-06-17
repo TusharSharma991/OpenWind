@@ -8,8 +8,8 @@ import {
   listEntityFields,
   listEntities,
   EntityError,
+  buildExportRow,
   type EntityField,
-  type EntityInstance,
 } from "@platform/entity-engine";
 import { stringify } from "csv-stringify/sync";
 import ExcelJS from "exceljs";
@@ -20,6 +20,10 @@ const SYNC_ROW_LIMIT = 5_000;
 const EXPORT_ROW_LIMIT = 10_000;
 
 const PII_EXPORT_ROLES = new Set(["pii_export", "admin", "superadmin"]);
+
+// Tailwind gray-200 / gray-50 — match the admin-ui table palette
+const PDF_HEADER_BG = "#e5e7eb";
+const PDF_ROW_ALT_BG = "#f9fafb";
 
 const ExportQuerySchema = z.object({
   format: z.enum(["csv", "xlsx", "pdf"]),
@@ -58,7 +62,7 @@ async function buildPdf(
     doc.fontSize(12).font("Helvetica-Bold").text(entityName, margin, margin);
     let y = margin + 22;
 
-    doc.rect(margin, y, usableW, lineH).fill("#e5e7eb");
+    doc.rect(margin, y, usableW, lineH).fill(PDF_HEADER_BG);
     doc.fill("black").fontSize(8).font("Helvetica-Bold");
     headers.forEach((h, i) => {
       const t = h.length > 20 ? h.slice(0, 17) + "…" : h;
@@ -79,7 +83,7 @@ async function buildPdf(
         y = margin;
       }
       if (ri % 2 === 0) {
-        doc.rect(margin, y, usableW, lineH).fill("#f9fafb");
+        doc.rect(margin, y, usableW, lineH).fill(PDF_ROW_ALT_BG);
       }
       doc.fill("black");
       row.forEach((cell, ci) => {
@@ -94,23 +98,6 @@ async function buildPdf(
 
     doc.end();
   });
-}
-
-// ── Shared row builder ────────────────────────────────────────────────────────
-
-function buildRow(instance: EntityInstance, fields: EntityField[]): string[] {
-  return [
-    instance.id,
-    instance.currentState,
-    instance.createdAt.toISOString(),
-    instance.updatedAt.toISOString(),
-    ...fields.map((f) => {
-      const v = instance.fields[f.name];
-      if (v === null || v === undefined) return "";
-      if (typeof v === "object") return JSON.stringify(v);
-      return String(v);
-    }),
-  ];
 }
 
 // ── Route handler ─────────────────────────────────────────────────────────────
@@ -186,6 +173,7 @@ export const exportEntitiesHandler = factory.createHandlers(
         format,
         filters,
         requestedBy: userId,
+        includePii: canSeePii,
       });
       return c.json({ jobId: job.id }, 202);
     }
@@ -202,7 +190,7 @@ export const exportEntitiesHandler = factory.createHandlers(
       "Updated At",
       ...fields.map((f) => f.label),
     ];
-    const dataRows = rows.map((r) => buildRow(r, fields));
+    const dataRows = rows.map((r) => buildExportRow(r, fields));
 
     if (format === "csv") {
       const csvData = stringify([headers, ...dataRows]);
@@ -214,6 +202,8 @@ export const exportEntitiesHandler = factory.createHandlers(
 
     if (format === "pdf") {
       const pdfBuffer = await buildPdf(headers, dataRows, entityType.plural);
+      // Hono's newResponse accepts BodyInit; Buffer is not in that union but
+      // works at runtime via Node.js's fetch-compatible body handling.
       return c.newResponse(pdfBuffer as unknown as string, 200, {
         "Content-Type": "application/pdf",
         "Content-Disposition": `attachment; filename="${safePlural}-export-${dateStr}.pdf"`,
@@ -228,7 +218,7 @@ export const exportEntitiesHandler = factory.createHandlers(
     headerRow.font = { bold: true };
     headerRow.commit();
     for (const row of rows) {
-      sheet.addRow(buildRow(row, fields));
+      sheet.addRow(buildExportRow(row, fields));
     }
     for (let i = 1; i <= headers.length; i++) {
       const col = sheet.getColumn(i);
@@ -243,6 +233,7 @@ export const exportEntitiesHandler = factory.createHandlers(
       col.width = Math.min(maxLen + 2, 50);
     }
     const buffer = await workbook.xlsx.writeBuffer();
+    // Same as pdfBuffer cast above — Buffer satisfies BodyInit at runtime.
     return c.newResponse(buffer as unknown as string, 200, {
       "Content-Type":
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

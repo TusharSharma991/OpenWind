@@ -369,13 +369,33 @@ function signJwt(
   return `${header}.${body}.${signer.sign(privateKeyPem, "base64url")}`;
 }
 
+async function discoverIssuer(): Promise<string> {
+  // Hit the OIDC discovery endpoint to get the exact issuer URL Zitadel expects
+  // as the JWT audience — avoids port mismatch between internal (8080) and external (443).
+  try {
+    const res = await httpGet(
+      `${ZITADEL_BASE}/.well-known/openid-configuration`,
+      _ZITADEL_EXTERNAL_DOMAIN,
+      {},
+    );
+    if (res.status === 200) {
+      const data = JSON.parse(res.text) as { issuer: string };
+      if (data.issuer) return data.issuer;
+    }
+  } catch {
+    // fall back to ZITADEL_BASE
+  }
+  return ZITADEL_BASE;
+}
+
 async function getTokenFromKeyJson(keyJson: ZitadelKeyJson): Promise<string> {
+  const issuer = await discoverIssuer();
   const now = Math.floor(Date.now() / 1000);
   const jwt = signJwt(
     {
       iss: keyJson.userId,
       sub: keyJson.userId,
-      aud: [ZITADEL_BASE],
+      aud: [issuer],
       iat: now,
       exp: now + 60,
     },

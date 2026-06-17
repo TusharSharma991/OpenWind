@@ -450,6 +450,29 @@ async function generateAndSaveKeyJson(token: string): Promise<void> {
   ok("ZITADEL_KEY_JSON + ZITADEL_SERVICE_ACCOUNT_KEY saved to .env.local");
 }
 
+async function readMachineKeyFromContainer(): Promise<ZitadelKeyJson | null> {
+  // Zitadel writes the machine key JSON to /machinekey/zitadel-admin-sa.json
+  // on first boot when ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINEKEY_TYPE=1.
+  // We read it via docker exec — works both locally and inside Docker (socket mounted).
+  const containerName = "ow-identity";
+  const keyPath = "/machinekey/zitadel-admin-sa.json";
+  try {
+    const raw = runCapture(`docker exec ${containerName} cat ${keyPath}`);
+    if (!raw || raw.includes("No such file")) return null;
+    const parsed = JSON.parse(raw) as ZitadelKeyJson;
+    if (!parsed.keyId || !parsed.key || !parsed.userId) return null;
+    // Save to .env.local so future runs skip this step entirely
+    writeEnvVars({
+      ZITADEL_KEY_JSON: Buffer.from(raw).toString("base64"),
+      ZITADEL_SERVICE_ACCOUNT_KEY: raw,
+    });
+    ok("Machine key read from Zitadel container — fully headless");
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 async function getAdminToken(): Promise<string> {
   // Fast path — saved key from a previous run (stored in .env.local after first setup)
   const keyJson = readKeyJsonFromEnv();
@@ -461,6 +484,19 @@ async function getAdminToken(): Promise<string> {
     } catch (e) {
       warn(`Saved key auth failed (${String(e)}) — clearing stale key`);
       writeEnvVars({ ZITADEL_KEY_JSON: "" });
+    }
+  }
+
+  // Auto-read machine key from the Zitadel container (no browser needed)
+  info("Reading machine key from Zitadel container...");
+  const containerKey = await readMachineKeyFromContainer();
+  if (containerKey) {
+    try {
+      const token = await getTokenFromKeyJson(containerKey);
+      ok("Authenticated via Zitadel container machine key — fully headless");
+      return token;
+    } catch (e) {
+      warn(`Container key auth failed: ${String(e)}`);
     }
   }
 

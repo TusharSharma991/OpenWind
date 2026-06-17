@@ -361,10 +361,26 @@ async function generateAndSaveKeyJson(token: string): Promise<void> {
 // When MACHINEKEY_KEYPATH is not used (or not supported by the version), Zitadel
 // logs the key JSON directly to its stdout. We scrape it from container logs.
 function readZitadelMachineKey(): ZitadelKeyJson | null {
-  // Read key from Zitadel container logs (works both in Docker via socket mount and on host)
-  const logCmd = IN_DOCKER
-    ? `docker logs ow-identity`
-    : `docker compose logs zitadel`;
+  // Find the Zitadel container by compose labels — robust regardless of container_name
+  // overrides or project directory name differences between environments.
+  let logCmd: string;
+  if (IN_DOCKER) {
+    try {
+      const containerId = execSync(
+        `docker ps -q --filter "label=com.docker.compose.service=zitadel" --filter "label=com.docker.compose.project=openwind"`,
+        { encoding: "utf8" },
+      ).trim();
+      if (!containerId) {
+        warn("Could not find Zitadel container via compose labels");
+        return null;
+      }
+      logCmd = `docker logs ${containerId}`;
+    } catch {
+      return null;
+    }
+  } else {
+    logCmd = `docker compose logs zitadel`;
+  }
   try {
     const logs = execSync(logCmd, { encoding: "utf8", cwd: ROOT });
     for (const line of logs.split("\n")) {

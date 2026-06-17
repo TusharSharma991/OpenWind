@@ -93,11 +93,12 @@ describe("GET /exports/:jobId/download", () => {
     expect(body.downloadUrl).toContain("s3.example.com");
   });
 
-  it("returns 500 when job has failed", async () => {
+  it("returns 200 with status failed when job has failed (allows client polling branch to work)", async () => {
     mockGetJob.mockResolvedValue(makeJob("failed"));
     const res = await makeApp().request("/exports/job-001/download");
-    expect(res.status).toBe(500);
-    const body = (await res.json()) as { error: string };
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { status: string; error: string };
+    expect(body.status).toBe("failed");
     expect(body.error).toBe("EXPORT_FAILED");
   });
 

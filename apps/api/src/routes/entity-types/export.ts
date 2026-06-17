@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
-import PDFDocument from "pdfkit";
 import { requireAuth, requireRole } from "@platform/auth";
 import { withTenantContext } from "@platform/db";
 import {
@@ -9,6 +8,7 @@ import {
   listEntities,
   EntityError,
   buildExportRow,
+  renderExportPdf,
   type EntityField,
 } from "@platform/entity-engine";
 import { stringify } from "csv-stringify/sync";
@@ -19,83 +19,11 @@ import { factory } from "./factory.js";
 const SYNC_ROW_LIMIT = 5_000;
 const EXPORT_ROW_LIMIT = 10_000;
 
-const PDF_HEADER_BG = "#e5e7eb"; // Tailwind gray-200
-const PDF_ROW_ALT_BG = "#f9fafb"; // Tailwind gray-50
-
 const ExportQuerySchema = z.object({
   format: z.enum(["csv", "xlsx", "pdf"]),
   state: z.string().optional(),
   assignedTo: z.string().uuid().optional(),
 });
-
-// ── PDF builder ───────────────────────────────────────────────────────────────
-
-async function buildPdf(
-  headers: string[],
-  rows: string[][],
-  entityName: string,
-): Promise<Buffer> {
-  const landscape = headers.length > 6;
-  const doc = new PDFDocument({
-    margin: 30,
-    layout: landscape ? "landscape" : "portrait",
-    size: "A4",
-  });
-  const chunks: Buffer[] = [];
-
-  return new Promise<Buffer>((resolve, reject) => {
-    doc.on("data", (chunk: Buffer) => chunks.push(chunk));
-    doc.on("end", () => resolve(Buffer.concat(chunks)));
-    doc.on("error", reject);
-
-    const pageW = landscape ? 841.89 : 595.28;
-    const pageH = landscape ? 595.28 : 841.89;
-    const margin = 30;
-    const usableW = pageW - margin * 2;
-    const colW = Math.max(Math.min(usableW / headers.length, 160), 40);
-    const lineH = 14;
-    const maxY = pageH - margin;
-
-    doc.fontSize(12).font("Helvetica-Bold").text(entityName, margin, margin);
-    let y = margin + 22;
-
-    doc.rect(margin, y, usableW, lineH).fill(PDF_HEADER_BG);
-    doc.fill("black").fontSize(8).font("Helvetica-Bold");
-    headers.forEach((h, i) => {
-      const t = h.length > 20 ? h.slice(0, 17) + "…" : h;
-      doc.text(t, margin + i * colW, y + 3, {
-        width: colW - 6,
-        lineBreak: false,
-      });
-    });
-    y += lineH;
-
-    doc.font("Helvetica").fontSize(7);
-    rows.forEach((row, ri) => {
-      if (y + lineH > maxY) {
-        doc.addPage({
-          layout: landscape ? "landscape" : "portrait",
-          size: "A4",
-        });
-        y = margin;
-      }
-      if (ri % 2 === 0) {
-        doc.rect(margin, y, usableW, lineH).fill(PDF_ROW_ALT_BG);
-      }
-      doc.fill("black");
-      row.forEach((cell, ci) => {
-        const t = cell.length > 25 ? cell.slice(0, 22) + "…" : cell;
-        doc.text(t, margin + ci * colW, y + 3, {
-          width: colW - 6,
-          lineBreak: false,
-        });
-      });
-      y += lineH;
-    });
-
-    doc.end();
-  });
-}
 
 // ── Route handler ─────────────────────────────────────────────────────────────
 
@@ -173,6 +101,7 @@ export const exportEntitiesHandler = factory.createHandlers(
         requestedBy: userId,
         includePii: canSeePii,
       });
+      if (!job.id) throw new Error("Export job enqueue returned no ID");
       return c.json({ jobId: job.id }, 202);
     }
 
@@ -199,7 +128,11 @@ export const exportEntitiesHandler = factory.createHandlers(
     }
 
     if (format === "pdf") {
-      const pdfBuffer = await buildPdf(headers, dataRows, entityType.plural);
+      const pdfBuffer = await renderExportPdf(
+        headers,
+        dataRows,
+        entityType.plural,
+      );
       // Hono's newResponse accepts BodyInit; Buffer is not in that union but
       // works at runtime via Node.js's fetch-compatible body handling.
       return c.newResponse(pdfBuffer as unknown as string, 200, {

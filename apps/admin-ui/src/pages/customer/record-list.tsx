@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { fetchWithAuth, fetchRawWithAuth, API_URL } from "../../lib/api.js";
+import { fetchWithAuth, API_URL } from "../../lib/api.js";
 import { useEntityTypes } from "../../entity-type-context.js";
 import type { SavedView } from "../../lib/types.js";
+import { useExport } from "../../lib/use-export.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -536,16 +537,17 @@ export function CustomerRecordList(): React.ReactElement {
   const viewsDropdownRef = useRef<HTMLDivElement>(null);
 
   // T20: Export
-  const [exportStatus, setExportStatus] = useState<
-    "idle" | "loading" | "polling" | "ready" | "error"
-  >("idle");
-  const [exportJobId, setExportJobId] = useState<string | null>(null);
-  const [exportDownloadUrl, setExportDownloadUrl] = useState<string | null>(
-    null,
-  );
-  const [exportError, setExportError] = useState<string | null>(null);
-  const [showFormatPicker, setShowFormatPicker] = useState(false);
-  const formatPickerRef = useRef<HTMLDivElement>(null);
+  const {
+    exportStatus,
+    exportError,
+    exportDownloadUrl,
+    showFormatPicker,
+    formatPickerRef,
+    setShowFormatPicker,
+    handleExport,
+    triggerAsyncDownload,
+    resetExport,
+  } = useExport(entityTypeId);
 
   // Local column order — allows drag-reorder without a backend call
   const [colOrder, setColOrder] = useState<string[]>([]);
@@ -687,107 +689,6 @@ export function CustomerRecordList(): React.ReactElement {
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
-
-  // Poll export job when in polling state
-  useEffect(() => {
-    if (exportStatus !== "polling" || !exportJobId) return;
-    let cancelled = false;
-
-    async function poll(): Promise<void> {
-      if (cancelled) return;
-      try {
-        const res = (await fetchWithAuth(
-          `${API_URL}/exports/${exportJobId}/download`,
-        )) as { status: string; downloadUrl?: string };
-        if (res.status === "complete" && res.downloadUrl) {
-          setExportDownloadUrl(res.downloadUrl);
-          setExportStatus("ready");
-        } else if (res.status === "failed") {
-          setExportError("Export failed on the server. Please try again.");
-          setExportStatus("error");
-        } else {
-          setTimeout(() => void poll(), 3_000);
-        }
-      } catch {
-        setExportError("Could not check export status. Please try again.");
-        setExportStatus("error");
-      }
-    }
-
-    const timer = setTimeout(() => void poll(), 3_000);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [exportStatus, exportJobId]);
-
-  async function handleExport(format: "csv" | "xlsx" | "pdf"): Promise<void> {
-    if (
-      !entityTypeId ||
-      exportStatus === "loading" ||
-      exportStatus === "polling"
-    )
-      return;
-    setShowFormatPicker(false);
-    setExportStatus("loading");
-    setExportError(null);
-    setExportJobId(null);
-    setExportDownloadUrl(null);
-    try {
-      const response = await fetchRawWithAuth(
-        `${API_URL}/entity-types/${entityTypeId}/export?format=${format}`,
-      );
-      if (response.status === 400) {
-        const body = (await response.json()) as {
-          error: string;
-          message?: string;
-        };
-        setExportError(
-          body.error === "EXPORT_TOO_LARGE"
-            ? "Export exceeds 10,000 row limit. Refine your filters and try again."
-            : (body.message ?? "Export failed"),
-        );
-        setExportStatus("error");
-        return;
-      }
-      if (response.status === 202) {
-        const body = (await response.json()) as { jobId: string };
-        setExportJobId(body.jobId);
-        setExportStatus("polling");
-        return;
-      }
-      if (response.ok) {
-        const blob = await response.blob();
-        const blobUrl = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = blobUrl;
-        a.download = `export.${format}`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(blobUrl);
-        setExportStatus("idle");
-        return;
-      }
-      setExportError(`Unexpected response: ${String(response.status)}`);
-      setExportStatus("error");
-    } catch (err) {
-      setExportError(err instanceof Error ? err.message : "Export failed");
-      setExportStatus("error");
-    }
-  }
-
-  function triggerAsyncDownload(): void {
-    if (!exportDownloadUrl) return;
-    const a = document.createElement("a");
-    a.href = exportDownloadUrl;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setExportStatus("idle");
-    setExportDownloadUrl(null);
-    setExportJobId(null);
-  }
 
   // Build ordered columns
   const orderedStates: WorkflowState[] = colOrder
@@ -1026,7 +927,7 @@ export function CustomerRecordList(): React.ReactElement {
           <div ref={formatPickerRef} style={{ position: "relative" }}>
             <button
               className="kb-export-btn"
-              onClick={() => setShowFormatPicker((v) => !v)}
+              onClick={() => setShowFormatPicker(!showFormatPicker)}
               disabled={
                 exportStatus === "loading" || exportStatus === "polling"
               }
@@ -1322,10 +1223,7 @@ export function CustomerRecordList(): React.ReactElement {
                 fontSize: "16px",
                 color: "var(--text-muted)",
               }}
-              onClick={() => {
-                setExportStatus("idle");
-                setExportDownloadUrl(null);
-              }}
+              onClick={resetExport}
             >
               ×
             </button>
@@ -1358,10 +1256,7 @@ export function CustomerRecordList(): React.ReactElement {
               color: "inherit",
               fontSize: "16px",
             }}
-            onClick={() => {
-              setExportError(null);
-              setExportStatus("idle");
-            }}
+            onClick={resetExport}
           >
             ×
           </button>

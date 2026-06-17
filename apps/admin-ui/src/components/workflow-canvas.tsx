@@ -78,10 +78,6 @@ type StateNodeData = {
 const NODE_W = 160;
 const NODE_H = 72;
 const NEW_PREFIX = "__new_";
-let _newCounter = 0;
-function newId(): string {
-  return `${NEW_PREFIX}${++_newCounter}`;
-}
 
 // ── localStorage helpers ─────────────────────────────────────────────────────
 
@@ -802,6 +798,14 @@ export function WorkflowCanvas({
   onSave,
   onDirtyChange,
 }: CanvasProps): React.ReactElement {
+  // Per-instance counter for temporary IDs — useRef avoids module-level mutable state
+  // which would cause ID collisions between React 18 StrictMode double-renders and
+  // between multiple canvas instances mounted on the same page.
+  const newCounterRef = useRef(0);
+  function newId(): string {
+    return `${NEW_PREFIX}${++newCounterRef.current}`;
+  }
+
   // ── Draft state (local edits, not yet persisted) ────────────────────────
   const [draftStates, setDraftStates] = useState<WorkflowState[]>(states);
   const [draftTransitions, setDraftTransitions] =
@@ -1321,7 +1325,6 @@ export function WorkflowCanvas({
         fitViewOptions={{ padding: 0.18 }}
         minZoom={0.3}
         maxZoom={2.5}
-        proOptions={{ hideAttribution: true }}
         style={{
           background: "var(--bg-tertiary, #f4f4f6)",
           borderRadius: "8px",

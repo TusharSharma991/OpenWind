@@ -71,6 +71,12 @@ export const canvasSaveHandler = factory.createHandlers(
         const deletedStateIds = deletedStates.map((s) => s.id);
         const deletedStateNames = new Set(deletedStates.map((s) => s.name));
 
+        if (deletedStateNames.has(current.initialState)) {
+          const err = new Error("Cannot delete the workflow's initial state");
+          (err as Error & { code: string }).code = "INITIAL_STATE_DELETE";
+          throw err;
+        }
+
         const newTransitions = input.transitions.filter((t) =>
           t.id.startsWith(NEW_PREFIX),
         );
@@ -207,6 +213,18 @@ export const canvasSaveHandler = factory.createHandlers(
 
       return c.json({ data: updated });
     } catch (err) {
+      if (
+        err instanceof Error &&
+        (err as Error & { code?: string }).code === "INITIAL_STATE_DELETE"
+      ) {
+        return c.json(
+          {
+            error: "INVALID_OPERATION",
+            message: "Cannot delete the workflow's initial state",
+          },
+          422,
+        );
+      }
       return handleWorkflowError(c, err);
     }
   },

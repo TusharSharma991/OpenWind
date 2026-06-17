@@ -28,6 +28,7 @@ import { useOne } from "@refinedev/core";
 import { useParams, Link, useNavigate, useBlocker } from "react-router-dom";
 import { fetchWithAuth, API_URL } from "../../lib/api.js";
 import { useEntityTypes } from "../../entity-type-context.js";
+import { userManager } from "../../authProvider.js";
 
 function toWorkflowSlug(name: string): string {
   return name
@@ -969,6 +970,21 @@ export function WorkflowDetail(): React.ReactElement {
     queryOptions: { enabled: !!id },
   });
 
+  const [isAdmin, setIsAdmin] = useState(false);
+  useEffect(() => {
+    userManager
+      .getUser()
+      .then((user) => {
+        if (!user?.profile) return;
+        const rolesMap = (user.profile["urn:zitadel:iam:org:project:roles"] ??
+          {}) as Record<string, unknown>;
+        setIsAdmin(Object.keys(rolesMap).includes("admin"));
+      })
+      .catch(() => {
+        /* leave isAdmin false */
+      });
+  }, []);
+
   const [fields, setFields] = useState<EntityField[]>([]);
   const [fieldsLoading, setFieldsLoading] = useState(false);
   const [showAddField, setShowAddField] = useState(false);
@@ -1006,6 +1022,16 @@ export function WorkflowDetail(): React.ReactElement {
   const [canvasDirty, setCanvasDirty] = useState(false);
 
   const blocker = useBlocker(canvasDirty);
+
+  // Warn on browser refresh/tab-close when canvas has unsaved changes
+  useEffect(() => {
+    if (!canvasDirty) return;
+    const handler = (e: BeforeUnloadEvent): void => {
+      e.preventDefault();
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [canvasDirty]);
 
   const workflowName = (data?.data as { name?: string } | undefined)?.name;
   useEffect(() => {
@@ -1753,7 +1779,7 @@ export function WorkflowDetail(): React.ReactElement {
                     transitions={workflow.transitions}
                     initialState={workflow.initialState}
                     workflowId={id ?? ""}
-                    isAdmin={true}
+                    isAdmin={isAdmin}
                     onSave={handleCanvasSave}
                     onDirtyChange={setCanvasDirty}
                   />

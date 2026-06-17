@@ -839,10 +839,6 @@ async function main(): Promise<void> {
 
   step(6, "Running database migrations and base seed");
 
-  // Build internal packages needed by db:seed and seed:demo scripts.
-  // Turbo respects the dependency graph: config is built before db.
-  run("pnpm turbo run build --filter=@platform/config --filter=@platform/db");
-
   const dbEnv: NodeJS.ProcessEnv = { DOTENV_CONFIG_PATH: ".env.local" };
   if (IN_DOCKER && process.env["MIGRATION_DATABASE_URL"]) {
     dbEnv["MIGRATION_DATABASE_URL"] = process.env["MIGRATION_DATABASE_URL"];

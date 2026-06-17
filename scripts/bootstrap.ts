@@ -36,10 +36,9 @@ const IN_DOCKER = process.env["RUNNING_IN_DOCKER"] === "true";
 const _ZITADEL_EXTERNAL_DOMAIN =
   process.env["ZITADEL_EXTERNAL_DOMAIN"] ?? "localhost";
 const _ZITADEL_HOST_PORT = process.env["ZITADEL_HOST_PORT"] ?? "8080";
-// When running inside Docker with a custom external domain, Zitadel routes
-// requests by Host header — must match EXTERNALDOMAIN so instance lookup
-// succeeds. Inside the Docker network the container always listens on :8080
-// regardless of the host-mapped port, so we always use port 8080 here.
+// ZITADEL_BASE is used for API calls — Zitadel routes by Host header so the
+// URL must match EXTERNALDOMAIN for instance lookup to succeed.
+// Inside Docker the container always listens on :8080 regardless of host port.
 const ZITADEL_BASE =
   process.env["ZITADEL_BOOTSTRAP_URL"] ??
   (IN_DOCKER
@@ -47,6 +46,11 @@ const ZITADEL_BASE =
       ? `http://${_ZITADEL_EXTERNAL_DOMAIN}:8080`
       : "http://zitadel:8080"
     : `http://localhost:${_ZITADEL_HOST_PORT}`);
+// Health check always uses the internal container address — no Host header
+// routing needed, and it works regardless of EXTERNALSECURE setting.
+const ZITADEL_HEALTH_URL = IN_DOCKER
+  ? "http://zitadel:8080"
+  : `http://localhost:${_ZITADEL_HOST_PORT}`;
 const TOTAL_STEPS = 10;
 
 // Demo credentials (printed in summary, committed to docs — dev only)
@@ -850,7 +854,7 @@ async function main(): Promise<void> {
   } else {
     await waitForPostgres();
   }
-  await waitForHttp(`${ZITADEL_BASE}/healthz`, "Zitadel", 80, 3000);
+  await waitForHttp(`${ZITADEL_HEALTH_URL}/healthz`, "Zitadel", 80, 3000);
 
   info(`Zitadel bootstrap URL: ${ZITADEL_BASE}`);
 

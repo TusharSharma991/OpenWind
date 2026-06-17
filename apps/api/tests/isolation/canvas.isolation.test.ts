@@ -31,6 +31,7 @@ const TENANT_B = "bbbbbbbb-4444-4000-b000-000000000042";
 let entityTypeId: string;
 let workflowIdA: string;
 let workflowIdB: string;
+let openStateIdA: string; // UUID primary key of Tenant A's "open" state
 
 // ── Setup ────────────────────────────────────────────────────────────────────
 
@@ -73,10 +74,24 @@ beforeAll(async () => {
   if (!wfB) throw new Error("workflow B insert failed");
   workflowIdB = wfB.id;
 
-  await db.insert(workflowStates).values([
-    { workflowId: workflowIdA, name: "open", label: "Open", sortOrder: 0 },
-    { workflowId: workflowIdB, name: "open", label: "Open", sortOrder: 0 },
-  ]);
+  const [stateA] = await db
+    .insert(workflowStates)
+    .values({
+      workflowId: workflowIdA,
+      name: "open",
+      label: "Open",
+      sortOrder: 0,
+    })
+    .returning();
+  if (!stateA) throw new Error("state A insert failed");
+  openStateIdA = stateA.id;
+
+  await db.insert(workflowStates).values({
+    workflowId: workflowIdB,
+    name: "open",
+    label: "Open",
+    sortOrder: 0,
+  });
 });
 
 // ── Teardown ─────────────────────────────────────────────────────────────────
@@ -114,18 +129,22 @@ function makeApp(tenantId: string, userId: string, roles: string[]) {
   return app;
 }
 
-const validCanvasBody = {
-  states: [
-    {
-      id: "open",
-      name: "open",
-      label: "Open",
-      sortOrder: 0,
-      isTerminal: false,
-    },
-  ],
-  transitions: [],
-};
+// Build a valid canvas body using the real UUID from the DB.
+// The canvas handler compares state IDs against UUID primary keys, not names.
+function validCanvasBody() {
+  return {
+    states: [
+      {
+        id: openStateIdA,
+        name: "open",
+        label: "Open",
+        sortOrder: 0,
+        isTerminal: false,
+      },
+    ],
+    transitions: [],
+  };
+}
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -136,7 +155,7 @@ describe("PUT /workflows/:id/canvas — cross-tenant isolation", () => {
     const res = await app.request(`/${workflowIdB}/canvas`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(validCanvasBody),
+      body: JSON.stringify(validCanvasBody()),
     });
 
     expect(res.status).toBe(404);
@@ -158,7 +177,7 @@ describe("PUT /workflows/:id/canvas — cross-tenant isolation", () => {
     const res = await app.request(`/${workflowIdA}/canvas`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(validCanvasBody),
+      body: JSON.stringify(validCanvasBody()),
     });
 
     expect(res.status).toBe(200);

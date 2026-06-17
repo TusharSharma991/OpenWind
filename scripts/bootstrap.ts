@@ -374,15 +374,29 @@ async function getAdminToken(): Promise<string> {
   // Manual PAT — one-time step on first boot. After setup a service account
   // key is generated and saved to .env.local so all future runs skip this.
   console.log(`
-  ${YELLOW}One-time Zitadel setup required.${RESET}
-  A Personal Access Token is needed to configure the identity provider.
-  After this step a service account key is saved to .env.local and
-  future runs will be fully headless.
+${BOLD}${YELLOW}  ┌─────────────────────────────────────────────────────────────┐
+  │  One-time setup step  —  takes about 60 seconds             │
+  └─────────────────────────────────────────────────────────────┘${RESET}
 
-  ${BOLD}1.${RESET} Open:  ${CYAN}${ZITADEL_BASE}${RESET}
-  ${BOLD}2.${RESET} Log in: ${DIM}admin@platform.local  /  Admin1234!${RESET}
-  ${BOLD}3.${RESET} Click your avatar (top-right) → "Personal Access Tokens"
-  ${BOLD}4.${RESET} Click "${BOLD}+ New${RESET}" → set no expiry → click "Add" → ${BOLD}copy the token${RESET}
+  You need to create a Personal Access Token in Zitadel.
+  This happens ${BOLD}once${RESET} — the key is then saved for all future runs.
+
+  ${BOLD}Step 1${RESET}  Open the Zitadel console in your browser:
+
+           ${CYAN}${BOLD}${ZITADEL_BASE}${RESET}
+
+  ${BOLD}Step 2${RESET}  Log in with the system admin account:
+
+           Username:  ${YELLOW}admin@platform.local${RESET}
+           Password:  ${YELLOW}Admin1234!${RESET}
+
+  ${BOLD}Step 3${RESET}  Click your ${BOLD}avatar / initials${RESET} in the top-right corner
+           then select ${BOLD}"Personal Access Tokens"${RESET} from the menu
+
+  ${BOLD}Step 4${RESET}  Click ${BOLD}"+ New"${RESET}, leave expiry ${BOLD}empty${RESET}, click ${BOLD}"Add"${RESET}
+           then ${BOLD}copy the token${RESET} that appears in the dialog
+
+  ${DIM}The token is shown only once — copy it before closing the dialog.${RESET}
 `);
 
   const pat = await ask(`  ${BOLD}Paste your PAT here:${RESET} `);
@@ -896,49 +910,57 @@ async function main(): Promise<void> {
     role: "user",
   });
 
-  // ── 9. Demo data ──────────────────────────────────────────────────────────────
+  // ── 9. Module templates ───────────────────────────────────────────────────────
 
-  step(9, "Seeding module templates");
+  step(9, "Module templates");
 
-  run("pnpm seed:demo");
   ok(
-    "7 templates seeded (Helpdesk, CRM, HRMS, Reimbursements, Projects, Invoicing, Procurement)",
+    "Templates auto-seed on first visit to the Templates page — no action needed",
   );
+  info('Or click "Seed Templates" on the Templates page if the list is empty.');
 
   // ── 10. Summary ───────────────────────────────────────────────────────────────
 
   step(10, "Bootstrap complete");
 
+  const appHost = IN_DOCKER
+    ? `${_ZITADEL_EXTERNAL_DOMAIN !== "localhost" ? _ZITADEL_EXTERNAL_DOMAIN : "localhost"}:${process.env["ADMIN_UI_HOST_PORT"] ?? "3001"}`
+    : `localhost:${process.env["ADMIN_UI_HOST_PORT"] ?? "3001"}`;
+  const appUrl = `http://${appHost}`;
+  const zitadelUrl = ZITADEL_BASE;
+
   console.log(`
 ${BOLD}${GREEN}  ✅  OpenWind is ready!${RESET}
 
-  ${BOLD}Everything is running in Docker.${RESET} Open ${CYAN}http://localhost:3001${RESET} and log in.
+  ${BOLD}Open the app in your browser:${RESET}
 
-  ${BOLD}URLs${RESET}
-  ┌─────────────────────────────────────────────────────────┐
-  │  App (admin + portal)  ${CYAN}http://localhost:3001${RESET}            │
-  │  API                   ${CYAN}http://localhost:3000${RESET}            │
-  │  API docs              ${CYAN}http://localhost:3000/docs${RESET}       │
-  │  Zitadel console       ${CYAN}http://localhost:8080${RESET}            │
-  └─────────────────────────────────────────────────────────┘
+    ${CYAN}${BOLD}${appUrl}${RESET}
 
-  ${BOLD}Demo credentials${RESET}  (all at http://localhost:3001)
-  ┌─────────────────────────────────────────────────────────┐
-  │  ${YELLOW}owAdmin${RESET}  /  ${YELLOW}OpenWind1234!${RESET}   → admin view             │
-  │  ${YELLOW}owAgent${RESET}  /  ${YELLOW}OpenWind1234!${RESET}   → agent view             │
-  │  ${YELLOW}owUser${RESET}   /  ${YELLOW}OpenWind1234!${RESET}   → user view              │
-  │                                                         │
-  │  Zitadel console (system admin)                         │
-  │  ${DIM}admin@platform.local   /  Admin1234!${RESET}                │
-  └─────────────────────────────────────────────────────────┘
+  ${BOLD}─────────────────────────────────────────────────────────────${RESET}
+  ${BOLD}Login accounts${RESET}
 
-  ${BOLD}What's ready${RESET}
-  • 7 module templates available on the Templates page
-  • Fork any template to create a named entity type + workflow
-  • Clean slate — no pre-created workflows or records
+  ${BOLD}OpenWind Admin${RESET}  (full platform access)
+    Email:     ${YELLOW}${DEMO_ADMIN_EMAIL}${RESET}
+    Password:  ${YELLOW}${DEMO_PASSWORD}${RESET}
 
-  ${DIM}Rebuild after code changes: docker compose up -d --build${RESET}
-  ${DIM}Reset everything: docker compose down -v && rm .env.local && pnpm bootstrap${RESET}
+  ${BOLD}Support Agent${RESET}  (agent view)
+    Email:     ${YELLOW}${DEMO_AGENT_EMAIL}${RESET}
+    Password:  ${YELLOW}${DEMO_PASSWORD}${RESET}
+
+  ${BOLD}Portal User${RESET}  (end-user view)
+    Email:     ${YELLOW}${DEMO_USER_EMAIL}${RESET}
+    Password:  ${YELLOW}${DEMO_PASSWORD}${RESET}
+
+  ${BOLD}─────────────────────────────────────────────────────────────${RESET}
+  ${BOLD}Zitadel console${RESET}  (identity provider — manage users, orgs, apps)
+
+    URL:       ${CYAN}${zitadelUrl}${RESET}
+    Email:     ${DIM}admin@platform.local${RESET}
+    Password:  ${DIM}Admin1234!${RESET}
+
+  ${BOLD}─────────────────────────────────────────────────────────────${RESET}
+  ${DIM}Rebuild after code changes:  docker compose up -d --build${RESET}
+  ${DIM}Reset everything:            docker compose down -v && docker compose --profile bootstrap run --rm bootstrap${RESET}
 `);
 }
 

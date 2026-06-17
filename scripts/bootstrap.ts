@@ -843,11 +843,12 @@ async function main(): Promise<void> {
   if (IN_DOCKER && process.env["MIGRATION_DATABASE_URL"]) {
     dbEnv["MIGRATION_DATABASE_URL"] = process.env["MIGRATION_DATABASE_URL"];
   }
-  // Run db scripts directly in the package to avoid turbo (not available in the container)
-  run("pnpm --filter @platform/db run db:migrate", { env: dbEnv });
+  // Run scripts directly with tsx to bypass turbo (not available in bootstrap container).
+  // tsx is globally installed in the image so it's always on PATH.
+  run("tsx packages/db/src/run-migrations.ts", { env: dbEnv });
   ok("Migrations applied");
 
-  run("pnpm --filter @platform/db run db:seed", { env: dbEnv });
+  run("tsx packages/db/src/seed.ts", { env: dbEnv });
   ok("Base data seeded (dev tenant, roles)");
 
   // ── 7. Auth setup ─────────────────────────────────────────────────────────────

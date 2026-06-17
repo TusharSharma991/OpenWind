@@ -843,10 +843,13 @@ async function main(): Promise<void> {
   if (IN_DOCKER && process.env["MIGRATION_DATABASE_URL"]) {
     dbEnv["MIGRATION_DATABASE_URL"] = process.env["MIGRATION_DATABASE_URL"];
   }
-  run("pnpm db:migrate", { env: dbEnv });
+  // Run from within packages/db using pnpm exec so the local .bin/tsx is resolved.
+  // This avoids turbo (whose workspace binary has the wrong platform binary on alpine).
+  const dbPkgDir = join(ROOT, "packages", "db");
+  run("pnpm exec tsx src/run-migrations.ts", { cwd: dbPkgDir, env: dbEnv });
   ok("Migrations applied");
 
-  run("pnpm db:seed", { env: dbEnv });
+  run("pnpm exec tsx src/seed.ts", { cwd: dbPkgDir, env: dbEnv });
   ok("Base data seeded (dev tenant, roles)");
 
   // ── 7. Auth setup ─────────────────────────────────────────────────────────────

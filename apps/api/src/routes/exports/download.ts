@@ -1,9 +1,7 @@
 import { Hono } from "hono";
 import { requireAuth } from "@platform/auth";
-import { exportQueue } from "../../lib/export-queue.js";
+import { exportQueue, PII_EXPORT_ROLES } from "../../lib/export-queue.js";
 import type { AuthContext } from "@platform/auth";
-
-const PII_EXPORT_ROLES = new Set(["pii_export", "admin", "superadmin"]);
 
 const router = new Hono<{ Variables: { auth: AuthContext } }>();
 

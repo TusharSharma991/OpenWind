@@ -13,17 +13,14 @@ import {
 } from "@platform/entity-engine";
 import { stringify } from "csv-stringify/sync";
 import ExcelJS from "exceljs";
-import { exportQueue } from "../../lib/export-queue.js";
+import { exportQueue, PII_EXPORT_ROLES } from "../../lib/export-queue.js";
 import { factory } from "./factory.js";
 
 const SYNC_ROW_LIMIT = 5_000;
 const EXPORT_ROW_LIMIT = 10_000;
 
-const PII_EXPORT_ROLES = new Set(["pii_export", "admin", "superadmin"]);
-
-// Tailwind gray-200 / gray-50 — match the admin-ui table palette
-const PDF_HEADER_BG = "#e5e7eb";
-const PDF_ROW_ALT_BG = "#f9fafb";
+const PDF_HEADER_BG = "#e5e7eb"; // Tailwind gray-200
+const PDF_ROW_ALT_BG = "#f9fafb"; // Tailwind gray-50
 
 const ExportQuerySchema = z.object({
   format: z.enum(["csv", "xlsx", "pdf"]),

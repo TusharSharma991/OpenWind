@@ -39,6 +39,7 @@ vi.mock("@platform/entity-engine", async (importOriginal) => {
 
 vi.mock("../../lib/export-queue.js", () => ({
   exportQueue: { add: (...args: unknown[]) => mockExportQueueAdd(...args) },
+  PII_EXPORT_ROLES: new Set(["pii_export", "admin", "superadmin"]),
 }));
 
 const { exportEntitiesHandler } = await import("./export.js");

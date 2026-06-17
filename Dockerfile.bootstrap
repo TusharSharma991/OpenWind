@@ -11,6 +11,6 @@ COPY packages/config/package.json ./packages/config/
 # Copy full source so tsx can run the bootstrap script and all pnpm scripts
 COPY . .
 
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --no-frozen-lockfile
 
 CMD ["tsx", "scripts/bootstrap.ts"]

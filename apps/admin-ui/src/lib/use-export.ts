@@ -35,11 +35,11 @@ export function useExport(entityTypeId: string | undefined): UseExportReturn {
       try {
         const res = (await fetchWithAuth(
           `${API_URL}/exports/${exportJobId}/download`,
-        )) as { status: string; downloadUrl?: string };
-        if (res.status === "complete" && res.downloadUrl) {
-          setExportDownloadUrl(res.downloadUrl);
+        )) as { data: { status: string; downloadUrl?: string } };
+        if (res.data.status === "complete" && res.data.downloadUrl) {
+          setExportDownloadUrl(res.data.downloadUrl);
           setExportStatus("ready");
-        } else if (res.status === "failed") {
+        } else if (res.data.status === "failed") {
           setExportError("Export failed on the server. Please try again.");
           setExportStatus("error");
         } else {

@@ -28,10 +28,10 @@ import {
   listEntityFields,
   listEntities,
   buildExportRow,
-  renderExportPdf,
   type ExportJobPayload,
   type ExportJobResult,
 } from "@platform/entity-engine";
+import { renderExportPdf } from "./render-export-pdf.js";
 import { env } from "@platform/config";
 import { logger } from "@platform/logger";
 import { connection } from "./queues.js";

@@ -11,6 +11,9 @@ vi.mock("@platform/auth", () => ({
   requireAuth: () => async (_c: Context, next: Next) => {
     await next();
   },
+  requireRole: () => async (_c: Context, next: Next) => {
+    await next();
+  },
 }));
 
 vi.mock("../../lib/export-queue.js", () => ({
@@ -63,8 +66,8 @@ describe("GET /exports/:jobId/download", () => {
     mockGetJob.mockResolvedValue(makeJob("active"));
     const res = await makeApp().request("/exports/job-001/download");
     expect(res.status).toBe(202);
-    const body = (await res.json()) as { status: string };
-    expect(body.status).toBe("pending");
+    const body = (await res.json()) as { data: { status: string } };
+    expect(body.data.status).toBe("pending");
   });
 
   it("returns 202 with status pending when job is waiting", async () => {
@@ -86,20 +89,34 @@ describe("GET /exports/:jobId/download", () => {
     const res = await makeApp().request("/exports/job-001/download");
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
-      status: string;
-      downloadUrl: string;
+      data: { status: string; downloadUrl: string };
     };
-    expect(body.status).toBe("complete");
-    expect(body.downloadUrl).toContain("s3.example.com");
+    expect(body.data.status).toBe("complete");
+    expect(body.data.downloadUrl).toContain("s3.example.com");
+  });
+
+  it("returns 200 with EXPORT_EXPIRED when completed job returnvalue is null (TTL expired)", async () => {
+    mockGetJob.mockResolvedValue(
+      makeJob("completed", { returnvalue: undefined }),
+    );
+    const res = await makeApp().request("/exports/job-001/download");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: { status: string; error: string };
+    };
+    expect(body.data.status).toBe("failed");
+    expect(body.data.error).toBe("EXPORT_EXPIRED");
   });
 
   it("returns 200 with status failed when job has failed (allows client polling branch to work)", async () => {
     mockGetJob.mockResolvedValue(makeJob("failed"));
     const res = await makeApp().request("/exports/job-001/download");
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { status: string; error: string };
-    expect(body.status).toBe("failed");
-    expect(body.error).toBe("EXPORT_FAILED");
+    const body = (await res.json()) as {
+      data: { status: string; error: string };
+    };
+    expect(body.data.status).toBe("failed");
+    expect(body.data.error).toBe("EXPORT_FAILED");
   });
 
   it("returns 404 when job does not exist", async () => {

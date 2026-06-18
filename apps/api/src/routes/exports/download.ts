@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { requireAuth } from "@platform/auth";
+import { requireAuth, requireRole } from "@platform/auth";
 import { exportQueue, PII_EXPORT_ROLES } from "../../lib/export-queue.js";
 import type { AuthContext } from "@platform/auth";
 
@@ -18,6 +18,7 @@ const router = new Hono<{ Variables: { auth: AuthContext } }>();
 router.get(
   "/:jobId/download",
   requireAuth(),
+  requireRole("agent", "admin"),
   zValidator("param", JobIdParamSchema),
   async (c) => {
     const { tenantId, userId, roles } = c.get("auth");
@@ -56,17 +57,29 @@ router.get(
     const state = await job.getState();
 
     if (state === "completed") {
-      const result = job.returnvalue;
-      return c.json({ status: "complete", downloadUrl: result.downloadUrl });
+      const result = job.returnvalue as { downloadUrl?: string } | null;
+      // returnvalue is null when removeOnComplete TTL has expired
+      if (!result?.downloadUrl) {
+        return c.json(
+          { data: { status: "failed", error: "EXPORT_EXPIRED" } },
+          200,
+        );
+      }
+      return c.json({
+        data: { status: "complete", downloadUrl: result.downloadUrl },
+      });
     }
 
     if (state === "failed") {
       // Return 200 so the client's polling branch lands on status: "failed"
       // rather than treating the response as a network error.
-      return c.json({ status: "failed", error: "EXPORT_FAILED" }, 200);
+      return c.json(
+        { data: { status: "failed", error: "EXPORT_FAILED" } },
+        200,
+      );
     }
 
-    return c.json({ status: "pending" }, 202);
+    return c.json({ data: { status: "pending" } }, 202);
   },
 );
 

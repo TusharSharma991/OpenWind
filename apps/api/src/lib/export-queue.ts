@@ -1,22 +1,13 @@
 import { Queue } from "bullmq";
+import type {
+  ExportJobPayload,
+  ExportJobResult,
+} from "@platform/entity-engine";
 import { connection } from "./redis.js";
 
+export { type ExportJobPayload, type ExportJobResult };
+
 export const PII_EXPORT_ROLES = new Set(["pii_export", "admin", "superadmin"]);
-
-export type ExportJobPayload = {
-  tenantId: string;
-  entityTypeId: string;
-  format: "csv" | "xlsx" | "pdf";
-  filters: { state?: string; assignedTo?: string };
-  requestedBy: string;
-  includePii: boolean;
-};
-
-export type ExportJobResult = {
-  downloadUrl: string;
-  format: "csv" | "xlsx" | "pdf";
-  rowCount: number;
-};
 
 export const exportQueue = new Queue<ExportJobPayload, ExportJobResult>(
   "export",

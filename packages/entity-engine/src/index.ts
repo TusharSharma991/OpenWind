@@ -73,7 +73,6 @@ export {
 } from "./validation/index.js";
 export {
   buildExportRow,
-  renderExportPdf,
   type ExportJobPayload,
   type ExportJobResult,
 } from "./export-utils.js";

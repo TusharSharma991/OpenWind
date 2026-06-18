@@ -1,9 +1,10 @@
 /**
- * Isolation tests for the entity export endpoint.
+ * Isolation tests for the entity export data layer.
  *
- * Verifies that Tenant A's export cannot return rows owned by Tenant B,
- * and that cross-tenant job polling is rejected.
+ * Verifies that Tenant A's export cannot return rows owned by Tenant B
+ * (RLS enforcement on listEntities used by both sync and async export paths).
  *
+ * Cross-tenant job polling access control is covered in download.test.ts.
  * Tests run against a real Postgres instance (no mocks).
  */
 

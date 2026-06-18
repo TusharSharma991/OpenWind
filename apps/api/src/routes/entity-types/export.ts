@@ -8,9 +8,9 @@ import {
   listEntities,
   EntityError,
   buildExportRow,
-  renderExportPdf,
   type EntityField,
 } from "@platform/entity-engine";
+import { renderExportPdf } from "../../lib/render-export-pdf.js";
 import { stringify } from "csv-stringify/sync";
 import ExcelJS from "exceljs";
 import { exportQueue, PII_EXPORT_ROLES } from "../../lib/export-queue.js";

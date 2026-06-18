@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from "react-router-dom";
 import { fetchWithAuth, API_URL } from "../../auth.js";
 import { useEntityTypes } from "../../entity-type-context.js";
 import type { SavedView } from "../../lib/types.js";
+import { useExport } from "../../lib/use-export.js";
 
 type EntityField = {
   id: string;
@@ -81,8 +82,17 @@ export function RecordList(): React.ReactElement {
   const viewsRef = useRef<HTMLDivElement>(null);
 
   // T21: Export
-  const [exportLoading, setExportLoading] = useState(false);
-  const [exportError, setExportError] = useState<string | null>(null);
+  const {
+    exportStatus,
+    exportError,
+    exportDownloadUrl,
+    showFormatPicker,
+    formatPickerRef,
+    setShowFormatPicker,
+    handleExport,
+    triggerAsyncDownload,
+    resetExport,
+  } = useExport(entityType?.id);
 
   useEffect(() => {
     if (!entityTypeId) return;
@@ -171,36 +181,18 @@ export function RecordList(): React.ReactElement {
     }
   }
 
-  async function handleExport(format: "csv" | "xlsx"): Promise<void> {
-    if (!entityTypeId || exportLoading) return;
-    setExportLoading(true);
-    setExportError(null);
-    try {
-      const res = await fetchWithAuth(
-        `${API_URL}/entity-types/${entityTypeId}/export?format=${format}`,
-      );
+  // Close format picker on outside click
+  useEffect(() => {
+    function handleClick(e: MouseEvent): void {
       if (
-        res &&
-        typeof res === "object" &&
-        "error" in (res as Record<string, unknown>)
-      ) {
-        const err = res as { error: string; message?: string };
-        setExportError(err.message ?? err.error);
-        return;
-      }
-      const a = document.createElement("a");
-      a.href = res as string;
-      a.download = `export.${format}`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(a.href);
-    } catch (err) {
-      setExportError(err instanceof Error ? err.message : "Export failed");
-    } finally {
-      setExportLoading(false);
+        formatPickerRef.current &&
+        !formatPickerRef.current.contains(e.target as Node)
+      )
+        setShowFormatPicker(false);
     }
-  }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
 
   const visibleFields = fields.slice(0, 4);
   const slug = typeSlug ?? "";
@@ -393,31 +385,163 @@ export function RecordList(): React.ReactElement {
           )}
         </div>
 
-        {/* T21: Export split-button */}
-        <div style={{ display: "flex" }}>
+        {/* T21: Export format picker */}
+        <div ref={formatPickerRef} style={{ position: "relative" }}>
           <button
             className="rl-export-btn"
-            onClick={() => void handleExport("csv")}
-            disabled={exportLoading}
+            onClick={() => setShowFormatPicker(!showFormatPicker)}
+            disabled={exportStatus === "loading" || exportStatus === "polling"}
           >
-            {exportLoading ? "Exporting…" : "↓ Export"}
+            {exportStatus === "loading"
+              ? "Preparing…"
+              : exportStatus === "polling"
+                ? "Processing…"
+                : "↓ Export ▾"}
           </button>
-          <button
-            className="rl-export-btn-arrow"
-            onClick={() => void handleExport("xlsx")}
-            disabled={exportLoading}
-            title="Download Excel"
-          >
-            xlsx
-          </button>
+          {showFormatPicker && (
+            <div
+              style={{
+                position: "absolute",
+                top: "calc(100% + 4px)",
+                right: 0,
+                background: "var(--bg-primary)",
+                border: "1px solid var(--border-color)",
+                borderRadius: "8px",
+                boxShadow: "var(--shadow-lg)",
+                zIndex: 100,
+                minWidth: "110px",
+                overflow: "hidden",
+              }}
+            >
+              {(
+                [
+                  { fmt: "csv", label: "CSV" },
+                  { fmt: "xlsx", label: "Excel" },
+                  { fmt: "pdf", label: "PDF" },
+                ] as const
+              ).map(({ fmt, label }) => (
+                <button
+                  key={fmt}
+                  onClick={() => void handleExport(fmt)}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    textAlign: "left",
+                    padding: "9px 14px",
+                    fontSize: "13px",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    color: "var(--text-primary)",
+                  }}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.background =
+                      "var(--bg-secondary)";
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.background =
+                      "none";
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* T21: Export error */}
-      {exportError && (
+      {/* T21: Row count warning (5000–10000 rows) */}
+      {records.length >= 5_000 && records.length <= 10_000 && (
         <div
           style={{
-            margin: "0 0 12px",
+            marginBottom: "8px",
+            padding: "8px 14px",
+            background: "hsla(38,92%,50%,.08)",
+            color: "var(--warning, #d97706)",
+            border: "1px solid hsla(38,92%,50%,.25)",
+            borderRadius: "6px",
+            fontSize: "12px",
+            fontWeight: 500,
+          }}
+        >
+          Large export — this may take a moment. A download link will appear
+          when ready.
+        </div>
+      )}
+
+      {/* T21: Async polling toast */}
+      {exportStatus === "polling" && (
+        <div
+          style={{
+            marginBottom: "8px",
+            padding: "10px 14px",
+            background: "hsla(250,84%,60%,.07)",
+            border: "1px solid hsla(250,84%,60%,.2)",
+            borderRadius: "6px",
+            fontSize: "13px",
+            display: "flex",
+            alignItems: "center",
+            gap: "10px",
+            color: "var(--accent-primary)",
+          }}
+        >
+          <span
+            className="spinner"
+            style={{ width: "14px", height: "14px", flexShrink: 0 }}
+          />
+          Preparing export…
+        </div>
+      )}
+
+      {/* T21: Download ready toast */}
+      {exportStatus === "ready" && exportDownloadUrl && (
+        <div
+          style={{
+            marginBottom: "8px",
+            padding: "10px 14px",
+            background: "hsla(142,76%,36%,.07)",
+            border: "1px solid hsla(142,76%,36%,.2)",
+            borderRadius: "6px",
+            fontSize: "13px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "10px",
+          }}
+        >
+          <span style={{ color: "var(--success)", fontWeight: 500 }}>
+            Export ready
+          </span>
+          <div style={{ display: "flex", gap: "8px" }}>
+            <button
+              className="rl-export-btn"
+              style={{ padding: "4px 12px", fontSize: "12px" }}
+              onClick={triggerAsyncDownload}
+            >
+              Download
+            </button>
+            <button
+              style={{
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                fontSize: "16px",
+                color: "var(--text-muted)",
+              }}
+              onClick={resetExport}
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* T21: Export error banner */}
+      {exportStatus === "error" && exportError && (
+        <div
+          style={{
+            marginBottom: "12px",
             padding: "10px 14px",
             background: "var(--danger-light)",
             color: "var(--danger)",
@@ -428,7 +552,7 @@ export function RecordList(): React.ReactElement {
             justifyContent: "space-between",
           }}
         >
-          <span>⚠ Export failed: {exportError}</span>
+          <span>⚠ {exportError}</span>
           <button
             style={{
               background: "none",
@@ -437,7 +561,7 @@ export function RecordList(): React.ReactElement {
               color: "inherit",
               fontSize: "16px",
             }}
-            onClick={() => setExportError(null)}
+            onClick={resetExport}
           >
             ×
           </button>

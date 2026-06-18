@@ -6,6 +6,10 @@ import React, {
   useState,
 } from "react";
 import {
+  WorkflowCanvas,
+  type CanvasDraft,
+} from "../../components/workflow-canvas.js";
+import {
   DndContext,
   closestCenter,
   PointerSensor,
@@ -21,9 +25,10 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useOne } from "@refinedev/core";
-import { useParams, Link, useNavigate } from "react-router-dom";
+import { useParams, Link, useNavigate, useBlocker } from "react-router-dom";
 import { fetchWithAuth, API_URL } from "../../lib/api.js";
 import { useEntityTypes } from "../../entity-type-context.js";
+import { userManager } from "../../authProvider.js";
 
 function toWorkflowSlug(name: string): string {
   return name
@@ -965,6 +970,21 @@ export function WorkflowDetail(): React.ReactElement {
     queryOptions: { enabled: !!id },
   });
 
+  const [isAdmin, setIsAdmin] = useState(false);
+  useEffect(() => {
+    userManager
+      .getUser()
+      .then((user) => {
+        if (!user?.profile) return;
+        const rolesMap = (user.profile["urn:zitadel:iam:org:project:roles"] ??
+          {}) as Record<string, unknown>;
+        setIsAdmin(Object.keys(rolesMap).includes("admin"));
+      })
+      .catch(() => {
+        /* leave isAdmin false */
+      });
+  }, []);
+
   const [fields, setFields] = useState<EntityField[]>([]);
   const [fieldsLoading, setFieldsLoading] = useState(false);
   const [showAddField, setShowAddField] = useState(false);
@@ -998,6 +1018,40 @@ export function WorkflowDetail(): React.ReactElement {
   );
 
   const [togglingActive, setTogglingActive] = useState(false);
+  const [canvasView, setCanvasView] = useState<"canvas" | "pipeline">("canvas");
+  const [canvasDirty, setCanvasDirty] = useState(false);
+
+  const blocker = useBlocker(canvasDirty);
+
+  // Warn on browser refresh/tab-close when canvas has unsaved changes
+  useEffect(() => {
+    if (!canvasDirty) return;
+    const handler = (e: BeforeUnloadEvent): void => {
+      e.preventDefault();
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [canvasDirty]);
+
+  const workflowName = (data?.data as { name?: string } | undefined)?.name;
+  useEffect(() => {
+    if (!workflowName) return;
+    document.title = canvasDirty
+      ? `● ${workflowName} — Workflow`
+      : `${workflowName} — Workflow`;
+    return () => {
+      document.title = "OpenWind";
+    };
+  }, [canvasDirty, workflowName]);
+
+  async function handleCanvasSave(draft: CanvasDraft): Promise<void> {
+    if (!id) throw new Error("Workflow ID missing");
+    await fetchWithAuth(`${API_URL}/workflows/${id}/canvas`, {
+      method: "PUT",
+      body: JSON.stringify(draft),
+    });
+    void refetch();
+  }
 
   async function handleToggleActive(): Promise<void> {
     if (!id || !workflow) return;
@@ -1629,19 +1683,117 @@ export function WorkflowDetail(): React.ReactElement {
       >
         {/* ── Left column ── */}
         <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-          {/* State Flow */}
+          {/* State Flow / Canvas */}
           <div
             className="data-panel"
             style={{ borderTop: "3px solid var(--accent-primary)" }}
           >
-            <SectionHeader label="State Pipeline" />
-            <StateFlowDiagram
-              states={workflow.states}
-              transitions={workflow.transitions}
-              initialState={workflow.initialState}
-              workflowId={id}
-              onStateUpdated={() => void refetch()}
-            />
+            {workflow.states.length > 20 || workflow.transitions.length > 40 ? (
+              <>
+                <div
+                  className="alert"
+                  style={{
+                    marginBottom: "14px",
+                    fontSize: "12px",
+                    background: "hsla(38,92%,50%,.08)",
+                    border: "1px solid hsla(38,92%,50%,.25)",
+                    borderRadius: "8px",
+                    padding: "10px 14px",
+                    color: "var(--warning)",
+                    fontWeight: 500,
+                  }}
+                >
+                  Canvas view is disabled for workflows with more than 20 states
+                  or 40 transitions. Using pipeline view.
+                </div>
+                <SectionHeader label="State Pipeline" />
+                <StateFlowDiagram
+                  states={workflow.states}
+                  transitions={workflow.transitions}
+                  initialState={workflow.initialState}
+                  workflowId={id}
+                  onStateUpdated={() => void refetch()}
+                />
+              </>
+            ) : (
+              <>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    marginBottom: "14px",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: "11px",
+                      fontWeight: 700,
+                      color: "var(--text-muted)",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.8px",
+                    }}
+                  >
+                    {canvasView === "canvas"
+                      ? "Workflow Canvas"
+                      : "State Pipeline"}
+                  </span>
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "2px",
+                      background: "var(--bg-tertiary)",
+                      borderRadius: "8px",
+                      padding: "3px",
+                      border: "1px solid var(--border-color)",
+                    }}
+                  >
+                    {(["canvas", "pipeline"] as const).map((v) => (
+                      <button
+                        key={v}
+                        onClick={() => setCanvasView(v)}
+                        style={{
+                          padding: "3px 12px",
+                          fontSize: "11px",
+                          fontWeight: 600,
+                          borderRadius: "6px",
+                          border: "none",
+                          cursor: "pointer",
+                          background:
+                            canvasView === v
+                              ? "var(--accent-primary)"
+                              : "transparent",
+                          color:
+                            canvasView === v ? "#fff" : "var(--text-secondary)",
+                          transition: "background 0.15s",
+                        }}
+                      >
+                        {v === "canvas" ? "Canvas" : "Pipeline"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {canvasView === "canvas" ? (
+                  <WorkflowCanvas
+                    states={workflow.states}
+                    transitions={workflow.transitions}
+                    initialState={workflow.initialState}
+                    workflowId={id ?? ""}
+                    isAdmin={isAdmin}
+                    onSave={handleCanvasSave}
+                    onDirtyChange={setCanvasDirty}
+                  />
+                ) : (
+                  <StateFlowDiagram
+                    states={workflow.states}
+                    transitions={workflow.transitions}
+                    initialState={workflow.initialState}
+                    workflowId={id}
+                    onStateUpdated={() => void refetch()}
+                  />
+                )}
+              </>
+            )}
           </div>
 
           {/* Fields */}
@@ -3239,6 +3391,60 @@ export function WorkflowDetail(): React.ReactElement {
                 style={{ minWidth: "120px" }}
               >
                 {deletingWorkflow ? "Deleting…" : "Delete Workflow"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Nav-away guard — unsaved canvas changes */}
+      {blocker.state === "blocked" && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 9999,
+          }}
+        >
+          <div
+            style={{
+              background: "var(--bg-card, #fff)",
+              border: "1px solid var(--border-color, #e5e7eb)",
+              borderRadius: "12px",
+              padding: "24px 26px",
+              width: "360px",
+              boxShadow: "0 8px 32px rgba(0,0,0,.16)",
+            }}
+          >
+            <div
+              style={{
+                fontSize: "14px",
+                fontWeight: 700,
+                marginBottom: "8px",
+                color: "var(--text-primary)",
+              }}
+            >
+              Unsaved canvas changes
+            </div>
+            <div
+              style={{
+                fontSize: "13px",
+                color: "var(--text-secondary)",
+                marginBottom: "20px",
+              }}
+            >
+              You have unsaved canvas changes. Leave without saving?
+            </div>
+            <div style={{ display: "flex", gap: "10px" }}>
+              <button className="btn-primary" onClick={() => blocker.proceed()}>
+                Leave without saving
+              </button>
+              <button className="btn" onClick={() => blocker.reset()}>
+                Stay
               </button>
             </div>
           </div>

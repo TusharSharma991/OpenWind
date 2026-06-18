@@ -71,3 +71,8 @@ export {
   validateEntityRefs,
   validateUserRefs,
 } from "./validation/index.js";
+export {
+  buildExportRow,
+  type ExportJobPayload,
+  type ExportJobResult,
+} from "./export-utils.js";

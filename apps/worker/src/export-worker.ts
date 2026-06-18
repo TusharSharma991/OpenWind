@@ -1,0 +1,178 @@
+/**
+ * export-worker.ts
+ *
+ * BullMQ processor for the "export" queue.
+ *
+ * For each job:
+ *  1. Fetch entity type + fields from the DB (honouring includePii from payload)
+ *  2. Stream entity rows up to EXPORT_ROW_LIMIT
+ *  3. Render CSV, xlsx, or PDF into a Buffer
+ *  4. Upload to S3 at exports/{tenantId}/{jobId}.{format}
+ *  5. Generate a presigned GET URL valid for 1 h
+ *  6. Return { downloadUrl, format, rowCount } as the job return value
+ *     — the polling endpoint reads this via queue.getJob(id).returnvalue
+ */
+
+import { Worker } from "bullmq";
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+} from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import ExcelJS from "exceljs";
+import { stringify } from "csv-stringify/sync";
+import { withTenantContext } from "@platform/db";
+import {
+  getEntityType,
+  listEntityFields,
+  listEntities,
+  buildExportRow,
+  type ExportJobPayload,
+  type ExportJobResult,
+} from "@platform/entity-engine";
+import { renderExportPdf } from "./render-export-pdf.js";
+import { env } from "@platform/config";
+import { logger } from "@platform/logger";
+import { connection } from "./queues.js";
+
+const EXPORT_ROW_LIMIT = 10_000;
+const DOWNLOAD_URL_TTL_SECONDS = 3_600; // 1 h
+
+// ── S3 client ─────────────────────────────────────────────────────────────────
+
+let _s3: S3Client | undefined;
+function getS3(): S3Client {
+  _s3 ??= new S3Client({
+    endpoint: env.S3_ENDPOINT,
+    region: "us-east-1",
+    credentials: {
+      accessKeyId: env.S3_ACCESS_KEY,
+      secretAccessKey: env.S3_SECRET_KEY,
+    },
+    forcePathStyle: true,
+  });
+  return _s3;
+}
+
+// ── Renderers ─────────────────────────────────────────────────────────────────
+
+function renderCsv(headers: string[], rows: string[][]): Buffer {
+  return Buffer.from(stringify([headers, ...rows]), "utf-8");
+}
+
+async function renderXlsx(
+  headers: string[],
+  rows: string[][],
+  sheetName: string,
+): Promise<Buffer> {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet(sheetName.slice(0, 31));
+  sheet.addRow(headers);
+  const headerRow = sheet.getRow(1);
+  headerRow.font = { bold: true };
+  headerRow.commit();
+  for (const row of rows) {
+    sheet.addRow(row);
+  }
+  const buf = await workbook.xlsx.writeBuffer();
+  return Buffer.from(buf);
+}
+
+// ── Worker ────────────────────────────────────────────────────────────────────
+
+export const exportWorker = new Worker<ExportJobPayload, ExportJobResult>(
+  "export",
+  async (job) => {
+    const { tenantId, entityTypeId, format, filters, includePii } = job.data;
+
+    logger.info(
+      { tenantId, entityTypeId, format, jobId: job.id },
+      "export job started",
+    );
+
+    const result = await withTenantContext(tenantId, async (tx) => {
+      const entityType = await getEntityType(tx, tenantId, entityTypeId);
+      const allFields = await listEntityFields(tx, tenantId, entityTypeId);
+
+      // includePii is set at enqueue time based on the requesting user's roles;
+      // the worker trusts the value carried in the job payload.
+      const exportFields = includePii
+        ? allFields
+        : allFields.filter(
+            (f) => f.sensitivity !== "pii" && f.sensitivity !== "financial",
+          );
+
+      const page = await listEntities(tx, tenantId, {
+        entityTypeId,
+        ...filters,
+        limit: EXPORT_ROW_LIMIT,
+      });
+
+      return { entityType, fields: exportFields, rows: page.data };
+    });
+
+    const { entityType, fields, rows } = result;
+    const headers = [
+      "ID",
+      "State",
+      "Created At",
+      "Updated At",
+      ...fields.map((f) => f.label),
+    ];
+    const dataRows = rows.map((r) => buildExportRow(r, fields));
+
+    let fileBuffer: Buffer;
+    let contentType: string;
+    let ext: string;
+
+    if (format === "csv") {
+      fileBuffer = renderCsv(headers, dataRows);
+      contentType = "text/csv";
+      ext = "csv";
+    } else if (format === "pdf") {
+      fileBuffer = await renderExportPdf(headers, dataRows, entityType.plural);
+      contentType = "application/pdf";
+      ext = "pdf";
+    } else {
+      fileBuffer = await renderXlsx(headers, dataRows, entityType.plural);
+      contentType =
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+      ext = "xlsx";
+    }
+
+    const storageKey = `exports/${tenantId}/${job.id}.${ext}`;
+
+    await getS3().send(
+      new PutObjectCommand({
+        Bucket: env.S3_BUCKET,
+        Key: storageKey,
+        Body: fileBuffer,
+        ContentType: contentType,
+      }),
+    );
+
+    const downloadUrl = await getSignedUrl(
+      getS3(),
+      new GetObjectCommand({ Bucket: env.S3_BUCKET, Key: storageKey }),
+      { expiresIn: DOWNLOAD_URL_TTL_SECONDS },
+    );
+
+    logger.info(
+      { tenantId, entityTypeId, jobId: job.id, rowCount: rows.length },
+      "export job completed",
+    );
+
+    return { downloadUrl, format, rowCount: rows.length };
+  },
+  {
+    connection,
+    concurrency: 3,
+    removeOnComplete: { age: 3_600 },
+    removeOnFail: { age: 86_400 },
+  },
+);
+
+export function stopExportWorker(): Promise<void> {
+  return exportWorker.close();
+}

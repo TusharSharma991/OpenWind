@@ -11,6 +11,7 @@ import { deleteStateHandler } from "./states/delete-state.js";
 import { createTransitionHandler } from "./transitions/create-transition.js";
 import { updateTransitionHandler } from "./transitions/update-transition.js";
 import { deleteTransitionHandler } from "./transitions/delete-transition.js";
+import { canvasSaveHandler } from "./canvas.js";
 
 const router = new Hono<{ Variables: { auth: AuthContext } }>();
 
@@ -23,6 +24,8 @@ router.delete("/:id", ...deleteWorkflowHandler);
 router.post("/:id/states", ...createStateHandler);
 router.patch("/:id/states/:stateId", ...updateStateHandler);
 router.delete("/:id/states/:stateId", ...deleteStateHandler);
+
+router.put("/:id/canvas", ...canvasSaveHandler);
 
 router.post("/:id/transitions", ...createTransitionHandler);
 router.patch("/:id/transitions/:transitionId", ...updateTransitionHandler);

@@ -202,3 +202,19 @@ describe("PUT /workflows/:id/canvas — initial state deletion guard", () => {
     expect(json.error).toBe("INVALID_OPERATION");
   });
 });
+
+describe("PUT /workflows/:id/canvas — role authorization", () => {
+  it("returns 403 when a non-admin role attempts to save the canvas", async () => {
+    const app = makeApp(TENANT_A, "u-agent", ["agent"]);
+
+    const res = await app.request(`/${workflowIdA}/canvas`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(validCanvasBody()),
+    });
+
+    expect(res.status).toBe(403);
+    const json = (await res.json()) as { error: string };
+    expect(json.error).toBe("FORBIDDEN");
+  });
+});

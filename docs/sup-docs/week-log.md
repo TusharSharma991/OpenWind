@@ -5,6 +5,54 @@
 
 ---
 
+## 2026-06-18 — Track 2D export API + workflow canvas — PR #115 merged (issue #93, #98)
+
+**Session type:** Feature implementation + review cycle (4 rounds)
+**Branch:** `feat/93-98-export-api-workflow-canvas` → PR #115 merged
+
+### Completed this session
+
+**Export API (async BullMQ path)**
+
+- `GET /entity-types/:id/export` — sync path (≤5k rows) returns binary; async path (>5k) enqueues BullMQ job, returns `{ jobId }` with 202
+- `GET /exports/:jobId/download` — polls job state; `requireRole("agent", "admin")`; null-guard on `returnvalue` returns `EXPORT_EXPIRED` after TTL; all responses wrapped in `{ data: T }` envelope; cross-tenant and PII gate enforcement (404 not 403)
+- `apps/worker` export processor: `renderExportPdf` kept local to `apps/api` and `apps/worker` (dependency boundary: `entity-engine → db only`); pdfkit removed from entity-engine
+- `useExport` hook extracted to `apps/admin-ui/src/lib/use-export.ts` and `apps/portal/src/lib/use-export.ts`; 13-test suite covering full polling state machine
+
+**Workflow canvas**
+
+- `PUT /workflows/:id/canvas` — upsert states + transitions in a single transaction; initial-state deletion guard (422); cross-tenant 404
+- `WorkflowCanvas` React component: module-level `_newCounter` moved into `useRef` to fix React 18 StrictMode double-invoke; `isAdmin` wired from real Zitadel JWT roles; `beforeunload` guard when canvas is dirty
+
+**Tests added**
+
+- `canvas.test.ts`: 14 unit tests (create/update/delete states+transitions, initial-state guard, cross-tenant 404, role rejection)
+- `canvas.isolation.test.ts`: 5 isolation tests incl. cross-tenant 404, initial-state guard, non-admin 403
+- `export.isolation.test.ts`: 6 tests — 3 DB-level RLS + 3 HTTP download access-control (cross-tenant, PII gate, allowed case)
+- `download.test.ts`: 10 unit tests incl. EXPORT_EXPIRED null-returnvalue case
+- `use-export.test.ts`: 13 hook state machine tests (added `@testing-library/react` + jsdom to admin-ui)
+
+### Key decisions / gotchas
+
+- `c.json()` cannot return inside `withTenantContext` callback — threw sentinel error with `.code` and caught it outside
+- BullMQ `removeOnComplete: { age: 3600 }` — `job.returnvalue` is `null` after TTL; must null-guard before reading `downloadUrl`
+- commitlint: subjects must be entirely lowercase — no camelCase, PascalCase, or acronyms
+- Lockfile must be committed after any `package.json` change; CI uses `--frozen-lockfile`
+
+### Phase snapshot
+
+| Track                          | Status                   |
+| ------------------------------ | ------------------------ |
+| Track 2D — no-code + reporting | ✅ Done — PR #115 merged |
+| Phase 2                        | ✅ **100% complete**     |
+
+### Next
+
+- Phase 2 is complete. Phase 3 planning required before starting 3A–3D.
+- Carry-over ADR for export async design (#116) and week-log update (#117) remain open per reviewer notes.
+
+---
+
 ## 2026-06-16 — Track 2D Phase 2 — admin-ui automation builder, saved views, export, workflow editor (issue #15, PR #107)
 
 **Session type:** Feature implementation

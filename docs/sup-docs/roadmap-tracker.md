@@ -1,6 +1,6 @@
 # Platform Roadmap Tracker
 
-**Last updated:** 2026-06-16 (Track 2D Phase 2 PR #107 open)
+**Last updated:** 2026-06-18 (Track 2D complete — PR #115 merged)
 **Team model:** AI-first (Claude Code as primary engineering partner)
 **Tracking:** Update `% done` and `Status` each session. Log milestones in [week-log.md](week-log.md).
 
@@ -8,11 +8,11 @@
 
 ## Summary scorecard
 
-| Phase                           | Tracks              | Done           | % Complete | Gate                        |
-| ------------------------------- | ------------------- | -------------- | ---------- | --------------------------- |
-| Phase 1 — Foundation            | 5 tracks + security | 5/5 + security | **100%**   | All phase:1 issues closed   |
-| Phase 2 — First Customer Apps   | 4 tracks            | 3/4 (2D ~88%)  | **~97%**   | Pilot customer onboarding   |
-| Phase 3 — Scale & Extensibility | 5 tracks            | 0/5            | **0%**     | Public launch / marketplace |
+| Phase                           | Tracks              | Done            | % Complete | Gate                        |
+| ------------------------------- | ------------------- | --------------- | ---------- | --------------------------- |
+| Phase 1 — Foundation            | 5 tracks + security | 5/5 + security  | **100%**   | All phase:1 issues closed   |
+| Phase 2 — First Customer Apps   | 4 tracks            | 4/4 + hardening | **100%**   | Pilot customer onboarding   |
+| Phase 3 — Scale & Extensibility | 5 tracks            | 0/5             | **0%**     | Public launch / marketplace |
 
 ---
 
@@ -51,13 +51,13 @@
 **Target:** Week 9–16 from project start (~2026-06-02 to 2026-06-27)
 **Exit test:** Penetration test (tenant isolation) passes before any pilot is onboarded.
 
-| ID    | Feature / Track                            | GH Issue(s)                                   | Owner       | Status         | %   | Notes                                                                                                                                                                                                                                                |
-| ----- | ------------------------------------------ | --------------------------------------------- | ----------- | -------------- | --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 2A    | Platform Services — Novu, files, audit log | [#12](../../issues/12)                        | PrabhuVijit | ✅ Done        | 100 | All phases complete. Tenant lifecycle (PR #86) merged and CI green. Docker build fixed (local driver).                                                                                                                                               |
-| 2B    | Module system + standard module configs    | [#13](../../issues/13)                        | PrabhuVijit | ✅ Done        | 100 | Module registry, seed runner, installModule/uninstallModule API, all 7 module seeds, admin modules UI, view_configs                                                                                                                                  |
-| 2C    | Customer portal + agent UI                 | [#14](../../issues/14)                        | PrabhuVijit | ✅ Done        | 100 | Generic entity list/detail/form in admin-ui + portal, workflow action buttons, view_configs driven field order                                                                                                                                       |
-| 2D    | No-code builders + reporting               | [#15](../../issues/15)                        | PrabhuVijit | 🔄 In progress | 88  | Phase 1 backend done (PR merged). Phase 2 admin-ui PR #107 open: automation wizard, saved views, export split-button, workflow visual editor (drag-reorder, inline edit, SVG arcs). Pending: T5 RLS isolation test + Metabase embed (phase 3 scope). |
-| 2-PRE | Pre-pilot engine hardening                 | [#76](../../issues/76)–[#84](../../issues/84) | PrabhuVijit | ✅ Done        | 100 | ioredis migration, idempotency pre-lock, bulkCreate cache, deleteEntity round-trip, error messages, ActionConfig union, migration renumber, notify async, health endpoint                                                                            |
+| ID    | Feature / Track                            | GH Issue(s)                                   | Owner       | Status  | %   | Notes                                                                                                                                                                                                                                                    |
+| ----- | ------------------------------------------ | --------------------------------------------- | ----------- | ------- | --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2A    | Platform Services — Novu, files, audit log | [#12](../../issues/12)                        | PrabhuVijit | ✅ Done | 100 | All phases complete. Tenant lifecycle (PR #86) merged and CI green. Docker build fixed (local driver).                                                                                                                                                   |
+| 2B    | Module system + standard module configs    | [#13](../../issues/13)                        | PrabhuVijit | ✅ Done | 100 | Module registry, seed runner, installModule/uninstallModule API, all 7 module seeds, admin modules UI, view_configs                                                                                                                                      |
+| 2C    | Customer portal + agent UI                 | [#14](../../issues/14)                        | PrabhuVijit | ✅ Done | 100 | Generic entity list/detail/form in admin-ui + portal, workflow action buttons, view_configs driven field order                                                                                                                                           |
+| 2D    | No-code builders + reporting               | [#15](../../issues/15)                        | PrabhuVijit | ✅ Done | 100 | PR #107 (admin-ui) + PR #115 (export API + workflow canvas) merged. Automation wizard, saved views, export (sync + async BullMQ), workflow visual editor (canvas save, drag-reorder, SVG arcs, initial-state guard). Metabase embed deferred to Phase 3. |
+| 2-PRE | Pre-pilot engine hardening                 | [#76](../../issues/76)–[#84](../../issues/84) | PrabhuVijit | ✅ Done | 100 | ioredis migration, idempotency pre-lock, bulkCreate cache, deleteEntity round-trip, error messages, ActionConfig union, migration renumber, notify async, health endpoint                                                                                |
 
 ### Phase 2 sub-items (2B module seeds)
 

@@ -53,10 +53,15 @@ const ZITADEL_HEALTH_URL = IN_DOCKER
   ? "http://zitadel:8080"
   : `http://localhost:${_ZITADEL_HOST_PORT}`;
 // Browser-accessible URL — shown in PAT instructions and final summary.
-// Always uses localhost (or external domain) with the HOST port, never internal container name.
+// When EXTERNALSECURE=true the subdomain is served over HTTPS by a reverse proxy
+// on the standard port (443) — no port suffix needed.
+const _ZITADEL_EXTERNAL_SECURE =
+  process.env["ZITADEL_EXTERNALSECURE"] === "true";
 const ZITADEL_BROWSER_URL =
   _ZITADEL_EXTERNAL_DOMAIN !== "localhost"
-    ? `http://${_ZITADEL_EXTERNAL_DOMAIN}:${_ZITADEL_HOST_PORT}`
+    ? _ZITADEL_EXTERNAL_SECURE
+      ? `https://${_ZITADEL_EXTERNAL_DOMAIN}`
+      : `http://${_ZITADEL_EXTERNAL_DOMAIN}:${_ZITADEL_HOST_PORT}`
     : `http://localhost:${_ZITADEL_HOST_PORT}`;
 const TOTAL_STEPS = 10;
 

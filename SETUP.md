@@ -1,175 +1,439 @@
 # OpenWind Setup Guide
 
-Get OpenWind running from scratch in about 5 minutes.
+Everything you need to run OpenWind — locally for development, or on a
+production server with a real domain and HTTPS.
 
 ---
 
-## What you need
+## Contents
 
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (includes Docker Compose)
-- Git
-- A terminal (PowerShell, Terminal.app, bash — all work)
-
-No Node.js, pnpm, or anything else required on your machine. Everything runs inside Docker.
+- [Local development](#local-development)
+- [Production deployment](#production-deployment)
+- [What bootstrap does](#what-bootstrap-does)
+- [Accounts and credentials](#accounts-and-credentials)
+- [Common operations](#common-operations)
+- [Troubleshooting](#troubleshooting)
 
 ---
 
-## Step 1 — Clone the repository
+## Local development
+
+### What you need
+
+| Tool    | Version | Install                            |
+| ------- | ------- | ---------------------------------- |
+| Node.js | 22+     | https://nodejs.org                 |
+| pnpm    | 9+      | `npm install -g pnpm`              |
+| Docker  | 24+     | https://docs.docker.com/get-docker |
+
+Docker Desktop must be **running** before you start.
+
+### First-time setup
 
 ```bash
-git clone https://github.com/your-org/openwind.git
-cd openwind
+git clone https://github.com/TusharSharma991/OpenWind.git
+cd OpenWind
+pnpm install
+pnpm bootstrap
+```
+
+That is the entire setup. Bootstrap starts all Docker services, migrates the
+database, configures Zitadel (the identity provider), creates demo users, and
+prints login credentials. No browser steps, no copy-pasting tokens.
+
+When it finishes, open **http://localhost:3001** and log in with
+`owAdmin` / `OpenWind1234!`.
+
+### Reset from scratch
+
+```bash
+docker compose down -v   # stop all containers and wipe volumes
+rm .env.local            # remove generated credentials
+pnpm bootstrap           # full automated setup again
+```
+
+Always use `-v`. Without it the old Postgres/Zitadel data survives and
+conflicts with the new setup.
+
+### Day-to-day commands
+
+```bash
+docker compose up -d                               # start everything
+docker compose down                                # stop (data preserved)
+docker compose logs -f ow-backend                  # tail API logs
+docker compose up -d --build ow-backend            # rebuild after a code change
+docker compose up -d --force-recreate ow-frontend  # restart with fresh env
 ```
 
 ---
 
-## Step 2 — Create your local env file
+## Production deployment
 
-Copy the example env file. The defaults work for local development — you do not need to edit anything.
+Production has one critical requirement local does not: **Zitadel must know it
+is behind HTTPS before its very first boot.** Zitadel writes the issuer URL into
+its own database during `start-from-init`. If it starts with `http://`, that
+issuer is permanent — every browser auth request from an HTTPS page will be
+blocked as mixed content and login will never work. There is no fix short of
+wiping the database and starting over.
+
+Follow these steps **in order**. Do not start any container before Step 3.
+
+### Step 1 — Server prerequisites
+
+- Docker and Docker Compose v2 installed
+- A reverse proxy (nginx, Caddy, Traefik) handling SSL termination and
+  forwarding traffic to container ports — containers run HTTP internally, TLS
+  lives at the proxy layer only
+- Two subdomains with valid TLS certificates:
+  - `openwind.yourdomain.com` → proxy to the frontend container host port
+  - `owzitadel.yourdomain.com` → proxy to the Zitadel container host port
+
+### Step 2 — Clone the repo
 
 ```bash
-cp .env.example .env.local
+git clone https://github.com/TusharSharma991/OpenWind.git ~/openwind
+cd ~/openwind
 ```
 
-> `.env.local` is gitignored. It holds your local overrides and the Zitadel key that bootstrap saves after first run.
+### Step 3 — Create the override file
 
----
+Docker Compose automatically merges `docker-compose.override.yml` into the base
+config. This file holds all server-specific config — real domains, host ports,
+HTTPS flags — and must **never** be committed to git.
 
-## Step 3 — Start the services
+Create `~/openwind/docker-compose.override.yml`:
 
-This starts Postgres, Redis, Zitadel (identity provider), MinIO (file storage), the API, and the admin UI.
+```yaml
+services:
+  zitadel:
+    restart: unless-stopped
+    command: >
+      start-from-init --masterkey "MasterkeyNeedsToHave32Characters"
+      --tlsMode disabled
+    ports:
+      - "10405:8080" # nginx proxies owzitadel.yourdomain.com:443 → this port
+    environment:
+      # !! Must be set BEFORE the very first boot.
+      # Zitadel writes {scheme}://{EXTERNALDOMAIN} as the issuer into its DB at
+      # init time. With EXTERNALSECURE=false the issuer is http:// — permanently,
+      # until the DB is wiped and re-created.
+      ZITADEL_EXTERNALDOMAIN: owzitadel.yourdomain.com
+      ZITADEL_EXTERNALPORT: 443
+      ZITADEL_EXTERNALSECURE: "true"
+    networks:
+      default:
+        aliases:
+          # Lets other containers reach Zitadel by its public hostname
+          # without leaving the Docker network.
+          - owzitadel.yourdomain.com
 
-```bash
-docker compose up -d
+  ow-backend:
+    environment:
+      # Backend contacts Zitadel over the internal Docker network (HTTP is fine
+      # here — TLS is handled by the reverse proxy, not inside Docker).
+      ZITADEL_JWKS_URL: http://owzitadel.yourdomain.com:8080/oauth/v2/keys
+      ZITADEL_INTROSPECTION_URL: http://owzitadel.yourdomain.com:8080/oauth/v2/introspect
+      # Must match the JWT iss claim — the external HTTPS URL.
+      ZITADEL_ISSUER: https://owzitadel.yourdomain.com
+      CORS_ORIGIN: https://openwind.yourdomain.com
+
+  ow-frontend:
+    ports:
+      - "10404:3001" # nginx proxies openwind.yourdomain.com:443 → this port
+
+  postgres:
+    ports:
+      - "54320:5432" # optional: direct Postgres access from the host
 ```
 
-First run pulls images — takes 2–3 minutes. Subsequent starts take about 10 seconds.
+Replace every `yourdomain.com` with your real domain. Pick host ports (`10404`,
+`10405`) that are free on the server.
 
----
+### Step 4 — Create the compose env file
 
-## Step 4 — Run the bootstrap script
+Docker Compose reads `.env` from the project root for `${}` variable
+substitution inside the YAML. Create it:
 
 ```bash
+cat > ~/openwind/.env << 'EOF'
+ZITADEL_EXTERNAL_DOMAIN=owzitadel.yourdomain.com
+ZITADEL_HOST_PORT=10405
+ZITADEL_EXTERNALSECURE=true
+EOF
+```
+
+This tells the bootstrap container to generate `https://` URLs when writing
+credentials to `.env.local`.
+
+### Step 5 — Run bootstrap
+
+```bash
+cd ~/openwind
 docker compose --profile bootstrap run --rm bootstrap
 ```
 
-The script runs inside Docker. It will:
+Bootstrap starts all services, waits up to 90 seconds for Zitadel to finish
+first-boot initialisation, then configures the full identity layer and prints
+login credentials.
 
-1. Wait for all services to be healthy
-2. Run database migrations
-3. Seed a demo tenant
-4. Walk you through a one-time Zitadel setup (see step 5 below)
-5. Create demo users
-6. Print login credentials when done
-
-> On re-runs (after a wipe or on another machine) bootstrap skips everything that's already done.
-
----
-
-## Step 5 — Create a Personal Access Token (one time only)
-
-When bootstrap reaches **step 7**, it pauses and asks you to create a Personal Access Token for the `setup-admin` service user. Follow these steps:
-
-**1.** Open the Zitadel console in your browser: **http://localhost:8080**
-
-**2.** Log in with the system admin account:
-
-- Username: `owZitadelAdmin@openwind.local`
-- Password: `Admin1234!`
-
-**3.** In the left sidebar click **Organization**, then open the **Users** page.
-
-**4.** Click the **Service Users** tab, then click on the **setup-admin** user.
-
-**5.** In the left menu select **Personal Access Tokens**, click **+ New**, leave expiry **empty**, click **Add**.
-
-**6.** Copy the token that appears in the dialog — it is shown **only once**.
-
-**7.** Paste the token into the terminal and press Enter.
-
-The token is saved to `.env.local` automatically as a key JSON. Future bootstrap runs (e.g. after a code update) skip this step entirely and run headless.
-
----
-
-## Step 6 — Restart app containers
-
-After bootstrap finishes it prints credentials and a reminder to restart:
+After it finishes, restart the app containers to load the new credentials:
 
 ```bash
 docker compose restart ow-backend ow-frontend
 ```
 
-This is required because the API and frontend containers started before bootstrap wrote the Zitadel credentials to `.env.local`. The restart picks up the new `ZITADEL_OIDC_CLIENT_ID` and `ZITADEL_AUDIENCE` values — without it the login button throws a `client_id` error.
+### Step 6 — Fix Zitadel console redirect URIs (one-time)
 
----
+Due to a Zitadel quirk, the console app's redirect URIs are sometimes stored as
+`http://...:443` instead of `https://` on first boot. Fix this once — it does
+not recur unless you wipe the database.
 
-## Step 7 — Open OpenWind
-
-Open [http://localhost:3001](http://localhost:3001). Bootstrap printed the credentials:
-
-```
-Login accounts
-
-  OpenWind Admin  (full platform access)
-    Username:  owAdmin
-    Password:  OpenWind1234!
-
-  Portal User  (end-user view)
-    Username:  owUser
-    Password:  OpenWind1234!
+```bash
+# 1. Find the console app ID
+docker exec ow-database psql -U platform -d zitadel \
+  -c "SELECT a.id AS app_id, a.name, oc.client_id
+      FROM projections.apps7 a
+      JOIN projections.apps7_oidc_configs oc ON a.id = oc.app_id;"
 ```
 
-Open [http://localhost:3001](http://localhost:3001) and log in with any of the accounts above.
+Note the `app_id` from the `Management Console` row.
+
+```bash
+# 2. Check what client_id the console frontend expects
+curl -sk https://owzitadel.yourdomain.com/ui/console/assets/environment.json
+# → {"clientid":"XXXXXXXXXXXXXXX", ...}
+```
+
+If `clientid` from `environment.json` differs from `client_id` in the DB,
+align them:
+
+```bash
+docker exec ow-database psql -U platform -d zitadel -c "
+UPDATE projections.apps7_oidc_configs
+  SET client_id = '<clientid from environment.json>'
+  WHERE app_id = '<app_id from step 1>';
+
+UPDATE eventstore.unique_constraints
+  SET unique_field = '<clientid from environment.json>'
+  WHERE unique_field = '<old client_id from DB>';
+"
+```
+
+Then fix the redirect URIs:
+
+```bash
+docker exec ow-database psql -U platform -d zitadel -c "
+UPDATE projections.apps7_oidc_configs
+SET
+  redirect_uris = '{https://owzitadel.yourdomain.com/ui/console/auth/callback}',
+  post_logout_redirect_uris = '{https://owzitadel.yourdomain.com/ui/console/signedout}'
+WHERE app_id = '<app_id from step 1>';
+"
+```
+
+### Step 7 — Verify
+
+| URL                                           | Expected                                                                          |
+| --------------------------------------------- | --------------------------------------------------------------------------------- |
+| `https://openwind.yourdomain.com`             | App loads; log in with `owAdmin` / `OpenWind1234!`                                |
+| `https://owzitadel.yourdomain.com/ui/console` | Zitadel console loads; log in with `owZitadelAdmin@openwind.local` / `Admin1234!` |
+
+### Updating production after a code change
+
+```bash
+cd ~/openwind
+git pull
+docker compose up -d --build ow-backend ow-frontend
+```
+
+Bootstrap does not need to re-run for code-only updates.
+
+### Production reset
+
+```bash
+docker compose stop zitadel     # disconnect active sessions first
+docker exec ow-database psql -U platform -c "DROP DATABASE IF EXISTS zitadel;"
+docker compose down -v
+rm .env.local
+docker compose --profile bootstrap run --rm bootstrap
+docker compose restart ow-backend ow-frontend
+# Repeat Step 6 after reset
+```
 
 ---
 
-## Step 7 — Load module templates
+## What bootstrap does
 
-Module templates (CRM, Helpdesk, HRMS, etc.) auto-seed on the first visit to the **Templates** page — no action needed. If the list appears empty, click **Seed Templates** to trigger it manually.
+Bootstrap is fully automated and idempotent — safe to re-run at any time.
+
+| Step | Action                                                                 | Why                                                         |
+| ---- | ---------------------------------------------------------------------- | ----------------------------------------------------------- |
+| 1    | Check Node 22+, pnpm, Docker (skipped when running inside Docker)      | Fast-fail before any side effects                           |
+| 2    | Copy `.env.example` → `.env.local` if missing                          | File must exist for credential writes                       |
+| 3    | `docker compose up -d` (skipped inside Docker)                         | Start Postgres, Redis, Zitadel                              |
+| 4    | Poll pgbouncer + Zitadel until healthy (up to 90s)                     | Zitadel runs DB setup equivalent on first boot              |
+| 5    | `pnpm install` + build `@platform/config` and `@platform/db`           | Runtime scripts import these packages                       |
+| 6    | Run all SQL migrations via Drizzle                                     | Creates schema, RLS policies, indexes                       |
+| 7    | Create Zitadel project, OIDC app, introspection SA, roles, machine key | Full identity layer; writes all credentials to `.env.local` |
+| 8    | Create demo users (`owAdmin`, `owUser`, `testUser1–5`)                 | Ready-to-use logins                                         |
+| 9    | Note module templates auto-seed on first page visit                    | Nothing to do here                                          |
+| 10   | Print summary of all URLs and credentials                              |                                                             |
+
+**How it authenticates with Zitadel without any browser step:**
+
+1. The compose file sets `ZITADEL_FIRSTINSTANCE_MACHINEKEYPATH` so Zitadel writes
+   a machine key JSON to a shared Docker volume on first boot.
+2. Bootstrap reads that file directly from the mounted volume — no `docker exec`.
+3. Bootstrap fetches the real issuer URL from `/.well-known/openid-configuration`
+   so the JWT `aud` claim matches exactly.
+4. Bootstrap signs a short-lived JWT with the machine key and exchanges it for an
+   access token via the `jwt-bearer` OAuth grant.
+5. All subsequent Zitadel API calls use that token.
 
 ---
 
-## Common commands
+## Accounts and credentials
 
-| Task                            | Command                                                 |
-| ------------------------------- | ------------------------------------------------------- |
-| Start services (after reboot)   | `docker compose up -d`                                  |
-| Stop services                   | `docker compose down`                                   |
-| View logs                       | `docker compose logs -f`                                |
-| Rebuild after code changes      | `docker compose up -d --build`                          |
-| Wipe everything and start fresh | `docker compose down -v` then repeat from Step 3        |
-| Re-run bootstrap only           | `docker compose --profile bootstrap run --rm bootstrap` |
+All passwords below are development defaults. Change them in production.
+
+### App (`http://localhost:3001` or `https://openwind.yourdomain.com`)
+
+| Username                  | Password        | Role  | Access                 |
+| ------------------------- | --------------- | ----- | ---------------------- |
+| `owAdmin`                 | `OpenWind1234!` | admin | Full platform          |
+| `owUser`                  | `OpenWind1234!` | user  | Customer / portal view |
+| `testUser1` – `testUser5` | `OpenWind1234!` | user  | Test accounts          |
+
+Full email format also works: `owAdmin@openwind.local`, `owUser@openwind.local`, etc.
+
+### Zitadel console (`http://localhost:8080` or `https://owzitadel.yourdomain.com/ui/console`)
+
+| Username                        | Password     | Access                  |
+| ------------------------------- | ------------ | ----------------------- |
+| `owZitadelAdmin@openwind.local` | `Admin1234!` | Identity provider admin |
 
 ---
 
-## Ports
+## Common operations
 
-| Service            | URL                   |
-| ------------------ | --------------------- |
-| OpenWind Admin UI  | http://localhost:3001 |
-| API                | http://localhost:3000 |
-| Zitadel (identity) | http://localhost:8080 |
-| MinIO console      | http://localhost:9001 |
+### Force a container to reload env vars
+
+`docker compose restart` reuses the existing container — it does **not** re-read
+`env_file` changes. Use this instead:
+
+```bash
+docker compose up -d --force-recreate ow-backend ow-frontend
+```
+
+### Run migrations manually
+
+```bash
+pnpm db:migrate
+```
+
+### Seed demo data
+
+```bash
+pnpm db:seed       # base tenant (idempotent)
+pnpm seed:demo     # Helpdesk sample tickets and workflow
+```
+
+### Direct database access
+
+```bash
+docker compose exec postgres psql -U platform -d platform
+
+-- All tenants
+SELECT id, slug, status FROM tenants;
+
+-- Applied migrations
+SELECT * FROM drizzle.__drizzle_migrations ORDER BY created_at;
+```
 
 ---
 
 ## Troubleshooting
 
-**Bootstrap says "Zitadel is not ready" and times out**
-Zitadel can take 60–90 seconds on first boot while it initialises its database. Re-run bootstrap: `docker compose --profile bootstrap run --rm bootstrap`.
-
-**"Instance not found" error when pasting the PAT**
-The PAT was created against a different Zitadel instance (e.g. after a volume wipe). Wipe and start fresh: `docker compose down -v` then repeat from Step 3.
-
-**The admin UI shows a blank screen or auth error**
-The API may still be starting. Wait 10 seconds and refresh. If it persists, check `docker compose logs ow-api`.
-
-**Port already in use**
-Another service is using 3001, 3000, or 8080. Stop the conflicting service, or change the ports in `.env.local`:
+### Mixed content error on login
 
 ```
-ADMIN_UI_HOST_PORT=3002
-ZITADEL_HOST_PORT=8081
+Mixed Content: The page at 'https://...' requested an insecure resource 'http://...'
 ```
 
-Then re-run `docker compose up -d`.
+Zitadel initialised with `EXTERNALSECURE=false`. Its issuer URL is permanently
+`http://` in the database. Fix: ensure `ZITADEL_EXTERNALSECURE: "true"` is in
+the override, then wipe and reinitialise:
+
+```bash
+docker compose stop zitadel
+docker exec ow-database psql -U platform -c "DROP DATABASE IF EXISTS zitadel;"
+docker compose up -d --force-recreate zitadel
+# wait ~90s then re-run bootstrap
+```
+
+### `Errors.App.NotFound` on Zitadel console
+
+The console app client_id in `environment.json` does not match the database.
+Follow Step 6 above to align them.
+
+### `redirect_uri missing in client configuration`
+
+The console app's redirect URIs are stored as `http://...:443`. Follow the
+redirect URI update query in Step 6.
+
+### API returns 401 after login
+
+Stale `ZITADEL_AUDIENCE` in the backend container. Fix:
+
+```bash
+docker compose up -d --force-recreate ow-backend
+```
+
+### `DROP DATABASE` fails with active sessions
+
+Stop Zitadel first: `docker compose stop zitadel`, then retry.
+
+### Migration fails with `permission denied`
+
+Migrations need `MIGRATION_DATABASE_URL` (direct Postgres), not `DATABASE_URL`
+(PgBouncer). Check `.env.local` has:
+
+```
+MIGRATION_DATABASE_URL=postgresql://migration_user:migration_user_dev_password@localhost:5432/platform
+```
+
+### Bootstrap times out waiting for Zitadel
+
+Normal on first boot — Zitadel runs its own DB initialisation which takes up to
+90 seconds. Bootstrap waits automatically. If it still fails:
+
+```bash
+docker compose logs ow-identity --tail=50
+```
+
+Common cause: wrong Postgres credentials in the Zitadel environment block.
+
+### Port already in use
+
+```bash
+# macOS / Linux
+lsof -i :3001
+# Windows
+netstat -ano | findstr :3001
+```
+
+Change the host port on the left side of the `ports:` entry. For production,
+set it in `docker-compose.override.yml`.
+
+### Platform notes
+
+**macOS Apple Silicon** — if you see `exec format error`, ensure Docker Desktop
+uses the Apple Silicon VM, not Rosetta.
+
+**Linux** — add your user to the docker group:
+
+```bash
+sudo usermod -aG docker $USER && newgrp docker
+```
+
+**Windows** — run from PowerShell or Git Bash. No WSL2 required.

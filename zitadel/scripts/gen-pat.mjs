@@ -12,7 +12,10 @@
 //   2. PKCE code verifier + challenge
 //   3. GET /oauth/v2/authorize → Login UI v1 loginname form (with cookies)
 //   4. POST /ui/login/loginname  → password form
-//   5. POST /ui/login/password   → 302 redirect to callback with ?code=...
+//   5. POST /ui/login/password   → intermediate pages handled in loop:
+//        • MFA prompt (/ui/login/mfa/prompt) — skipped automatically
+//        • Change password (/ui/login/password/change) — satisfied with same credential
+//      → eventually 302 redirect to callback with ?code=...
 //   6. POST /oauth/v2/token (authorization_code + code_verifier) → access_token
 //   7. GET /auth/v1/users/me → userId
 //   8. POST /management/v1/users/${userId}/pats → PAT token
@@ -245,23 +248,70 @@ ${B}${C}  OpenWind — Zitadel Setup${R}
   ok('Login name accepted')
   console.log()
 
-  // 5. Submit password
+  // 5. Submit password — then handle any intermediate pages Zitadel may show
+  //    (MFA prompt on first login, forced password change on fresh admin user)
   log('  ⏳  Submitting password…')
-  const passwordRes = await followingRequest(
+  let loginRes = await followingRequest(
     'POST', '/ui/login/password',
     { 'Content-Type': 'application/x-www-form-urlencoded' },
     encodeForm({ 'gorilla.csrf.Token': csrf2, authRequestID, password: ADMIN_PASS })
   )
 
-  // The password step should redirect to the callback URI
-  const callbackLocation = passwordRes.callbackLocation ?? passwordRes.headers?.['location'] ?? ''
+  for (let step = 0; step < 5; step++) {
+    const pageText = loginRes.text ?? ''
+
+    // Done — callback URI received
+    if (loginRes.callbackLocation || /[?&]code=/.test(loginRes.headers?.['location'] ?? '')) break
+
+    // MFA prompt — Zitadel offers 2FA setup on first login; skip it
+    if (pageText.includes('/ui/login/mfa/prompt') || pageText.includes('mfa/prompt')) {
+      const csrfMfa  = extractHtmlField(pageText, 'gorilla.csrf.Token')
+      const authMfa  = extractAuthId(pageText) ?? authRequestID
+      if (!csrfMfa) fail('MFA prompt page reached but no CSRF token found')
+      info('Skipping MFA setup prompt…')
+      loginRes = await followingRequest(
+        'POST', '/ui/login/mfa/prompt',
+        { 'Content-Type': 'application/x-www-form-urlencoded' },
+        encodeForm({ 'gorilla.csrf.Token': csrfMfa, authRequestID: authMfa, skip: 'true' })
+      )
+      continue
+    }
+
+    // Forced password change — Zitadel requires this for fresh admin users;
+    // submit the same credential to satisfy the form without rotating the password
+    if (pageText.includes('/ui/login/password/change') || pageText.includes('change-old-password')) {
+      const csrfPw  = extractHtmlField(pageText, 'gorilla.csrf.Token')
+      const authPw  = extractAuthId(pageText) ?? authRequestID
+      if (!csrfPw) fail('Change-password page reached but no CSRF token found')
+      info('Handling forced password change…')
+      loginRes = await followingRequest(
+        'POST', '/ui/login/password/change',
+        { 'Content-Type': 'application/x-www-form-urlencoded' },
+        encodeForm({
+          'gorilla.csrf.Token':        csrfPw,
+          authRequestID:               authPw,
+          'change-old-password':       ADMIN_PASS,
+          'change-new-password':       ADMIN_PASS,
+          'change-password-confirmation': ADMIN_PASS,
+        })
+      )
+      continue
+    }
+
+    // Unknown intermediate page — bail with a useful diagnostic
+    const title  = pageText.match(/<title>([^<]+)<\/title>/i)?.[1] ?? '(no title)'
+    const errMsg = pageText.match(/lgn-error-message">\s*([^<]+)/)?.[1]?.trim() ?? ''
+    fail(`Unexpected login page: "${title}"${errMsg ? ` — ${errMsg}` : ''}\nLocation: ${loginRes.headers?.['location'] ?? '(none)'}`)
+  }
+
+  const callbackLocation = loginRes.callbackLocation ?? loginRes.headers?.['location'] ?? ''
   const codeMatch = /[?&]code=([^&]+)/.exec(callbackLocation)
   if (!codeMatch) {
-    const errMsg = (passwordRes.text ?? '').match(/lgn-error-message">\s*([^<]+)/)?.[1]?.trim() ?? ''
-    fail(`Auth code not found in redirect after password POST.${errMsg ? ` Error: ${errMsg}` : ''}\nLocation: ${callbackLocation}`)
+    const errMsg = (loginRes.text ?? '').match(/lgn-error-message">\s*([^<]+)/)?.[1]?.trim() ?? ''
+    fail(`Auth code not found after login flow.${errMsg ? ` Error: ${errMsg}` : ''}\nLocation: ${callbackLocation}`)
   }
   const authCode = codeMatch[1]
-  ok('Password accepted, auth code received')
+  ok('Login complete, auth code received')
   console.log()
 
   // 6. Exchange code for access token

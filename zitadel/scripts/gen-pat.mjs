@@ -17,9 +17,10 @@
 //        • Change password (/ui/login/password/change) — satisfied with same credential
 //      → eventually 302 redirect to callback with ?code=...
 //   6. POST /oauth/v2/token (authorization_code + code_verifier) → access_token
-//   7. GET /auth/v1/users/me → userId
-//   8. POST /management/v1/users/${userId}/pats → PAT token
-//   9. Print the PAT + the exact command to run in the OpenWind folder
+//   7. POST /management/v1/users/machine → create machine user (PATs are machine-user-only)
+//   8. POST /admin/v1/members → grant IAM_OWNER to machine user
+//   9. POST /management/v1/users/${machineUserId}/pats → PAT token
+//  10. Print the PAT + the exact command to run in the OpenWind folder
 
 import { request as nodeRequest }         from 'node:http'
 import { createHash, randomBytes }        from 'node:crypto'
@@ -331,18 +332,32 @@ ${B}${C}  OpenWind — Zitadel Setup${R}
   ok('Access token obtained')
   console.log()
 
-  // 7. Get admin user ID
-  log('  ⏳  Fetching admin user info…')
-  const meRes = await jsonGet('/auth/v1/users/me', accessToken)
-  const meData = assertOk(meRes, 'Get /auth/v1/users/me')
-  const userId = meData?.user?.id
-  if (!userId) fail(`Could not extract user ID from /auth/v1/users/me: ${meRes.text}`)
-  ok(`Admin user ID: ${userId}`)
+  // 7. Create a machine user — PATs can only be issued to machine users, not humans
+  log('  ⏳  Creating machine user for API access…')
+  const machineRes = await jsonPost('/management/v1/users/machine', accessToken, {
+    userName:        'openwind-api-bot',
+    name:            'OpenWind API Bot',
+    accessTokenType: 'ACCESS_TOKEN_TYPE_BEARER',
+  })
+  const machineData = assertOk(machineRes, 'Create machine user')
+  const machineUserId = machineData?.userId
+  if (!machineUserId) fail(`No userId in machine user response: ${machineRes.text}`)
+  ok(`Machine user created (ID: ${machineUserId})`)
   console.log()
 
-  // 8. Create PAT
+  // 8. Grant IAM_OWNER at instance level so the machine user has full admin access
+  log('  ⏳  Granting IAM_OWNER to machine user…')
+  const memberRes = await jsonPost('/admin/v1/members', accessToken, {
+    userId: machineUserId,
+    roles:  ['IAM_OWNER'],
+  })
+  assertOk(memberRes, 'Grant IAM_OWNER')
+  ok('IAM_OWNER granted')
+  console.log()
+
+  // 9. Create PAT for the machine user
   log('  ⏳  Creating Personal Access Token…')
-  const patRes = await jsonPost(`/management/v1/users/${userId}/pats`, accessToken, {
+  const patRes = await jsonPost(`/management/v1/users/${machineUserId}/pats`, accessToken, {
     expirationDate: PAT_EXPIRY,
   })
   const { token: pat } = assertOk(patRes, 'Create PAT')

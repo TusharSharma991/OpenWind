@@ -41,7 +41,11 @@ export function App(): React.ReactElement {
         dataProvider={dataProvider}
         routerProvider={routerProvider}
         resources={[
-          { name: "dashboard", list: "/", meta: { label: "Dashboard" } },
+          {
+            name: "dashboard",
+            list: "/dashboard",
+            meta: { label: "Dashboard" },
+          },
           { name: "modules", list: "/modules", meta: { label: "Templates" } },
           {
             name: "records",
@@ -77,7 +81,8 @@ export function App(): React.ReactElement {
             }
           >
             {/* Admin / Agent routes */}
-            <Route index element={<Dashboard />} />
+            <Route index element={<Navigate to="/dashboard" replace />} />
+            <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/modules" element={<Modules />} />
 
             {/* Records — workflow cards; card click goes to /records/:typeSlug */}

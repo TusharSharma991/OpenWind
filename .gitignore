@@ -60,3 +60,12 @@ coverage/
 INTERNAL.md
 INTEGRATION.md
 logs.md
+
+# Local tunnel scripts
+db-bridge.bat
+
+# Env profiles — prod.env has real credentials, never commit it
+envs/prod.env
+
+# Local env switching script (Windows only, not cross-platform)
+switch-env.bat

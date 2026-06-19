@@ -24,7 +24,6 @@ import { execSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync, copyFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createInterface } from "node:readline";
 import { createSign } from "node:crypto";
 import { request as nodeHttpRequest } from "node:http";
 
@@ -141,17 +140,7 @@ function runCapture(cmd: string): string {
   }
 }
 
-// ── Input helpers ─────────────────────────────────────────────────────────────
-
-async function ask(prompt: string): Promise<string> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise<string>((resolve) => {
-    rl.question(prompt, (answer) => {
-      rl.close();
-      resolve(answer.trim());
-    });
-  });
-}
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -475,46 +464,6 @@ async function generateAndSaveKeyJson(token: string): Promise<void> {
   ok("ZITADEL_KEY_JSON + ZITADEL_SERVICE_ACCOUNT_KEY saved to .env.local");
 }
 
-async function readMachineKeyFromContainer(): Promise<ZitadelKeyJson | null> {
-  // Primary: read from the shared named volume mounted at /zitadel-machinekey
-  // (docker-compose mounts zitadel_machinekey into both ow-identity and bootstrap).
-  // Fallback: docker exec via the socket (requires docker-cli in the image).
-  const volumePath = "/zitadel-machinekey/zitadel-admin-sa.json";
-  const containerName = "ow-identity";
-  const containerPath = "/machinekey/zitadel-admin-sa.json";
-
-  let raw = "";
-
-  if (existsSync(volumePath)) {
-    try {
-      raw = readFileSync(volumePath, "utf8").trim();
-    } catch {
-      // fall through to docker exec
-    }
-  }
-
-  if (!raw) {
-    raw = runCapture(`docker exec ${containerName} cat ${containerPath}`);
-  }
-
-  if (!raw || raw.includes("No such file") || raw.includes("not found")) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(raw) as ZitadelKeyJson;
-    if (!parsed.keyId || !parsed.key || !parsed.userId) return null;
-    writeEnvVars({
-      ZITADEL_KEY_JSON: Buffer.from(raw).toString("base64"),
-      ZITADEL_SERVICE_ACCOUNT_KEY: raw,
-    });
-    ok("Machine key read from Zitadel volume — fully headless");
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
 async function getAdminToken(): Promise<string> {
   // Fast path — saved key from a previous run (stored in .env.local after first setup)
   const keyJson = readKeyJsonFromEnv();
@@ -529,81 +478,36 @@ async function getAdminToken(): Promise<string> {
     }
   }
 
-  // Auto-read machine key — wait up to 90s for Zitadel to write it on first boot
-  info("Reading machine key from Zitadel container...");
-  let containerKey: ZitadelKeyJson | null = null;
-  for (let attempt = 1; attempt <= 18; attempt++) {
-    containerKey = await readMachineKeyFromContainer();
-    if (containerKey) break;
-    if (attempt < 18) {
-      info(
-        `Machine key not ready yet, retrying in 5s… (${attempt * 5}s / 90s)`,
-      );
-      await sleep(5_000);
-    }
-  }
-  if (containerKey) {
-    try {
-      const token = await getTokenFromKeyJson(containerKey);
-      ok("Authenticated via Zitadel container machine key — fully headless");
-      return token;
-    } catch (e) {
-      warn(`Container key auth failed: ${String(e)}`);
-    }
-  }
-
-  // Manual PAT — one-time step on first boot. After setup a service account
-  // key is generated and saved to .env.local so all future runs skip this.
-  console.log(`
-${BOLD}${YELLOW}  ┌─────────────────────────────────────────────────────────────┐
-  │  One-time setup step  —  takes about 60 seconds             │
-  └─────────────────────────────────────────────────────────────┘${RESET}
-
-  You need to create a Personal Access Token in Zitadel.
-  This happens ${BOLD}once${RESET} — the key is then saved for all future runs.
-
-  ${BOLD}Step 1${RESET}  Open the Zitadel console in your browser:
-
-           ${CYAN}${BOLD}${ZITADEL_BROWSER_URL}${RESET}
-
-  ${BOLD}Step 2${RESET}  Log in with the system admin account:
-
-           Username:  ${YELLOW}owZitadelAdmin@openwind.local${RESET}
-           Password:  ${YELLOW}Admin1234!${RESET}
-
-  ${BOLD}Step 3${RESET}  In the left sidebar click ${BOLD}"Organization"${RESET}
-           then open the ${BOLD}"Users"${RESET} page
-
-  ${BOLD}Step 4${RESET}  Click the ${BOLD}"Service Users"${RESET} tab
-           then click on the ${BOLD}setup-admin${RESET} user
-
-  ${BOLD}Step 5${RESET}  In the left menu select ${BOLD}"Personal Access Tokens"${RESET}
-           click ${BOLD}"+ New"${RESET}, leave expiry ${BOLD}empty${RESET}, click ${BOLD}"Add"${RESET}
-           then ${BOLD}copy the token${RESET} that appears in the dialog
-
-  ${DIM}The token is shown only once — copy it before closing the dialog.${RESET}
-`);
-
-  let pat = "";
-  while (!pat || pat.trim().length < 20) {
-    pat = (await ask(`  ${BOLD}Paste your PAT here:${RESET} `)).trim();
-    if (!pat) {
-      warn("No input received — please paste the token and press Enter.");
-    } else if (pat.length < 20) {
-      warn("Token looks too short — make sure you copied the full token.");
-    }
-  }
-
-  info("Generating service account key for future headless runs...");
-  try {
-    await generateAndSaveKeyJson(pat);
-  } catch (e) {
-    warn(
-      `Could not generate key JSON: ${String(e)} — future runs will still need a PAT`,
+  // First-run path — PAT generated by `zitadel/setup.bat` (ow-zita-setup container)
+  // and passed in via ZITADEL_SETUP_PAT env var when running `openwind/setup.bat --pat <token>`.
+  const setupPat = process.env["ZITADEL_SETUP_PAT"]?.trim();
+  if (setupPat && setupPat.length > 20) {
+    ok(
+      "Using PAT from ZITADEL_SETUP_PAT — generating key JSON for future headless runs...",
     );
+    try {
+      await generateAndSaveKeyJson(setupPat);
+    } catch (e) {
+      warn(
+        `Could not save key JSON (${String(e)}) — this run will succeed but next run may need a new PAT`,
+      );
+    }
+    return setupPat;
   }
 
-  return pat;
+  fail(`No Zitadel credentials found.
+
+  Run the Zitadel setup first to generate a PAT:
+
+    ${CYAN}cd zitadel${RESET}
+    ${CYAN}setup.bat${RESET}          (Windows)
+    ${CYAN}./setup.sh${RESET}         (Linux / Mac)
+
+  Then re-run OpenWind setup with the printed PAT:
+
+    ${CYAN}setup.bat --pat <token>${RESET}    (Windows)
+    ${CYAN}./setup.sh --pat <token>${RESET}   (Linux / Mac)
+`);
 }
 
 // ── Zitadel setup (mirrors setup-dev-auth.ts but returns projectId) ───────────
@@ -1088,16 +992,14 @@ async function main(): Promise<void> {
   // env_file and the environment: block, recreating the container if anything changed.
   info("Recreating api and frontend containers with updated credentials...");
   try {
-    execSync("docker compose up -d --force-recreate api admin-ui", {
+    execSync("docker compose up -d --force-recreate ow-backend ow-frontend", {
       stdio: "ignore",
       cwd: ROOT,
     });
-    ok(
-      "API and frontend containers recreated (ZITADEL_AUDIENCE + OIDC client ID applied)",
-    );
+    ok("ow-backend and ow-frontend recreated with updated credentials");
   } catch {
     warn(
-      "Could not recreate containers — run `docker compose up -d api admin-ui` manually",
+      "Could not recreate containers — run `docker compose up -d --force-recreate ow-backend ow-frontend` manually",
     );
   }
 

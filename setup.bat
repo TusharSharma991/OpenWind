@@ -39,7 +39,7 @@ echo  (First run takes 2-5 minutes)
 echo.
 
 :: Start infra (postgres, pgbouncer, redis) — bootstrap depends_on handles health
-docker compose up -d ow-database ow-pgbouncer ow-cache
+docker compose up -d postgres pgbouncer redis
 if %errorlevel% neq 0 (
   echo.
   echo  ERROR: Failed to start infrastructure containers.

@@ -60,6 +60,8 @@ services:
       ZITADEL_EXTERNALDOMAIN: "${ZITADEL_EXTERNALDOMAIN:-localhost}"
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: owZitadelAdmin@openwind.local
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: Admin1234!
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORDCHANGEREQUIRED: "false"
+      ZITADEL_DEFAULTINSTANCE_LOGINPOLICY_FORCEMFA: "false"
       ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_REQUIRED: "false"
       # Token Exchange (RFC 8693) lets gen-pat.mjs convert a session token into
       # an OAuth access token without a browser — needed for headless PAT generation.

@@ -38,6 +38,9 @@ echo " Starting infrastructure and running bootstrap..."
 echo " (First run takes 2-5 minutes)"
 echo ""
 
+# Ensure .env.local exists as a file so Docker does not create it as a directory
+touch .env.local
+
 # Start infra — bootstrap depends_on handles health checks
 docker compose up -d postgres pgbouncer redis
 

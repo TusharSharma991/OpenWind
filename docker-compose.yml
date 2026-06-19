@@ -57,6 +57,8 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5433:5432" # direct postgres for pnpm db:migrate from host
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U platform -d platform"]
       interval: 5s
@@ -187,54 +189,6 @@ services:
   #       echo 'MinIO bucket initialized'
   #     "
 
-  # ── Zitadel (Identity provider) ────────────────────────────────────────────
-  zitadel:
-    container_name: ow-identity
-    image: ghcr.io/zitadel/zitadel:latest
-    restart: unless-stopped
-    command: start-from-init --masterkey "MasterkeyNeedsToHave32Characters" --tlsMode disabled
-    environment:
-      ZITADEL_DATABASE_POSTGRES_HOST: postgres
-      ZITADEL_DATABASE_POSTGRES_PORT: 5432
-      ZITADEL_DATABASE_POSTGRES_DATABASE: zitadel
-      ZITADEL_DATABASE_POSTGRES_USER_USERNAME: platform
-      ZITADEL_DATABASE_POSTGRES_USER_PASSWORD: platform_dev_password
-      ZITADEL_DATABASE_POSTGRES_USER_SSL_MODE: disable
-      ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME: platform
-      ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD: platform_dev_password
-      ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE: disable
-      ZITADEL_EXTERNALSECURE: "false"
-      ZITADEL_EXTERNALPORT: "${ZITADEL_HOST_PORT:-8080}"
-      ZITADEL_EXTERNALDOMAIN: "${ZITADEL_EXTERNAL_DOMAIN:-localhost}"
-      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: owZitadelAdmin@openwind.local
-      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: Admin1234!
-      # Machine user — key is printed to stdout on first boot.
-      # bootstrap reads it from container logs via the mounted docker socket.
-      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_USERNAME: setup-admin
-      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_NAME: Setup Admin
-      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINEKEY_TYPE: 1
-      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINEKEY_EXPIRATIONDATE: "2040-01-01T00:00:00Z"
-      # Write the machine key to the shared volume so bootstrap can read it
-      # without needing docker exec or a Docker socket.
-      ZITADEL_FIRSTINSTANCE_MACHINEKEYPATH: /machinekey/zitadel-admin-sa.json
-      # Disable Login V2 (the new SPA login) — it requires a separately hosted
-      # frontend that isn't bundled in the Docker image, causing 404 in dev.
-      # With this off, the console falls back to the built-in Login V1 HTML UI.
-      ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_REQUIRED: "false"
-    volumes:
-      - zitadel_machinekey:/machinekey
-    ports:
-      - "${ZITADEL_HOST_PORT:-8080}:8080" # Zitadel UI + API → http://localhost:8080
-    depends_on:
-      postgres:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "/app/zitadel", "ready"]
-      interval: 10s
-      timeout: 5s
-      retries: 30
-      start_period: 60s
-
   # ── Novu (Notifications) — profile:notifications ───────────────────────────
   # Not started by default. Run with: docker compose --profile notifications up -d
   novu-api:
@@ -336,14 +290,16 @@ services:
     environment:
       DATABASE_URL: postgres://app_user:app_user_dev_password@pgbouncer:5432/platform
       REDIS_URL: redis://redis:6379
-      # Zitadel routes by Host header — must match EXTERNALDOMAIN (localhost).
-      # We connect via the internal service name (zitadel:8080) but the auth
-      # package overrides the Host header to match EXTERNALDOMAIN=localhost.
+      # Zitadel runs as a separate compose project (../zitadel/).
+      # ow-backend reaches it via the shared openwind_zitadel Docker network.
       ZITADEL_JWKS_URL: http://zitadel:8080/oauth/v2/keys
       ZITADEL_INTROSPECTION_URL: http://zitadel:8080/oauth/v2/introspect
       # OPENBAO_ADDR: http://openbao:8200  # uncomment when openbao service is enabled
       # S3_ENDPOINT: http://minio:9000      # uncomment when minio service is enabled
     restart: unless-stopped
+    networks:
+      - default
+      - openwind_zitadel
     depends_on:
       pgbouncer:
         condition: service_healthy
@@ -390,23 +346,28 @@ services:
       ZITADEL_EXTERNAL_DOMAIN: "${ZITADEL_EXTERNAL_DOMAIN:-localhost}"
       ZITADEL_HOST_PORT: "${ZITADEL_HOST_PORT:-8080}"
       ZITADEL_EXTERNALSECURE: "${ZITADEL_EXTERNALSECURE:-false}"
+      # Passed in by setup.bat/setup.sh via: docker compose run -e ZITADEL_SETUP_PAT=<token>
+      # Used on first boot only — after bootstrap saves ZITADEL_KEY_JSON this is no longer needed.
+      ZITADEL_SETUP_PAT: "${ZITADEL_SETUP_PAT:-}"
     volumes:
       - ./.env.local:/app/.env.local
       - /var/run/docker.sock:/var/run/docker.sock
-      - zitadel_machinekey:/zitadel-machinekey:ro
+    networks:
+      - default
+      - openwind_zitadel
     depends_on:
       pgbouncer:
         condition: service_healthy
-      zitadel:
-        condition: service_started
     restart: "no"
 
 # ─────────────────────────────────────────────────────────────────────────────
 volumes:
   postgres_data:
   redis_data:
-  zitadel_machinekey:
   novu_mongo_data:
   mailhog_data:
   # minio_data:    # uncomment when minio service is enabled
-  # OpenBao has no volume — dev mode data is ephemeral by design
+networks:
+  openwind_zitadel:
+    external: true # created by the zitadel compose project (../zitadel/)
+    name: openwind_zitadel

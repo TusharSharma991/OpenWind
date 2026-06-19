@@ -2,77 +2,150 @@
 // gen-pat.mjs — runs inside the ow-zita-setup container.
 //
 // How it works:
-//   Zitadel creates a machine user (ow-setup-bot) with a PAT at first boot via
-//   ZITADEL_FIRSTINSTANCE_ORG_MACHINE_* env vars. The PAT token is logged by
-//   Zitadel during initialisation. This script waits for Zitadel to be healthy,
-//   reads the PAT from the container's logs via the Docker Engine API (unix socket),
-//   then prints the exact command the user should run in the OpenWind folder.
+//   Automates the Zitadel Login UI v1 form flow (the same steps a human takes in
+//   a browser) to obtain an OAuth2 access token for the admin user, then uses the
+//   Management API to create a Personal Access Token (PAT). No Docker socket,
+//   no Sessions API auth chicken-and-egg problem.
+//
+//   Flow:
+//   1. GET /ui/console/assets/environment.json → console clientId
+//   2. PKCE code verifier + challenge
+//   3. GET /oauth/v2/authorize → Login UI v1 loginname form (with cookies)
+//   4. POST /ui/login/loginname  → password form
+//   5. POST /ui/login/password   → 302 redirect to callback with ?code=...
+//   6. POST /oauth/v2/token (authorization_code + code_verifier) → access_token
+//   7. GET /auth/v1/users/me → userId
+//   8. POST /management/v1/users/${userId}/pats → PAT token
+//   9. Print the PAT + the exact command to run in the OpenWind folder
 
-import { request as nodeRequest } from 'node:http'
-import { createConnection }       from 'node:net'
+import { request as nodeRequest }         from 'node:http'
+import { createHash, randomBytes }        from 'node:crypto'
 
-const ZITADEL_HOST     = 'zitadel'
-const ZITADEL_PORT     = 8080
-const ZITADEL_CTR_NAME = 'zitadel'
-const DOCKER_SOCKET    = '/var/run/docker.sock'
+const ZITADEL_HOST  = 'zitadel'
+const ZITADEL_PORT  = 8080
+const HOST_HEADER   = process.env.ZITADEL_EXTERNALDOMAIN ?? 'localhost'
+const ADMIN_LOGIN   = 'owZitadelAdmin@openwind.local'
+const ADMIN_PASS    = 'Admin1234!'
+const PAT_EXPIRY    = '2030-01-01T00:00:00Z'
+const REDIRECT_URI  = `http://${HOST_HEADER}:${ZITADEL_PORT}/ui/console/auth/callback`
 
 // ── ANSI colours ─────────────────────────────────────────────────────────────
 const G = '\x1b[32m', Y = '\x1b[33m', C = '\x1b[36m', B = '\x1b[1m', R = '\x1b[0m', D = '\x1b[2m'
-function log(msg)  { console.log(msg) }
-function ok(msg)   { console.log(`  ${G}✓${R}  ${msg}`) }
-function info(msg) { console.log(`  ${D}→${R}  ${msg}`) }
-function fail(msg) { console.error(`  \x1b[31m✗\x1b[0m  ${msg}`); process.exit(1) }
+function log(msg)   { console.log(msg) }
+function ok(msg)    { console.log(`  ${G}✓${R}  ${msg}`) }
+function info(msg)  { console.log(`  ${D}→${R}  ${msg}`) }
+function fail(msg)  { console.error(`\n  \x1b[31m✗\x1b[0m  ${msg}\n`); process.exit(1) }
 
-// ── HTTP over unix socket ─────────────────────────────────────────────────────
+// ── Cookie jar ────────────────────────────────────────────────────────────────
 
-function dockerRequest(method, path) {
-  return new Promise((resolve, reject) => {
-    const socket = createConnection(DOCKER_SOCKET)
-    let raw = ''
-    socket.on('connect', () => {
-      socket.write(`${method} ${path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n`)
-    })
-    socket.on('data', (chunk) => { raw += chunk.toString('binary') })
-    socket.on('end', () => {
-      const [head, ...bodyParts] = raw.split('\r\n\r\n')
-      const statusLine = head.split('\r\n')[0]
-      const status = parseInt(statusLine.split(' ')[1], 10)
-      // Docker log endpoint uses chunked transfer — reassemble plain text
-      const body = bodyParts.join('\r\n\r\n')
-      resolve({ status, body })
-    })
-    socket.on('error', reject)
-    socket.setTimeout(30_000, () => socket.destroy(new Error('Docker socket timeout')))
-  })
+const cookies = new Map()   // name → value
+
+function storeCookies(setCookieHeaders) {
+  if (!setCookieHeaders) return
+  const list = Array.isArray(setCookieHeaders) ? setCookieHeaders : [setCookieHeaders]
+  for (const header of list) {
+    const parts = header.split(';')[0].trim()
+    const eq = parts.indexOf('=')
+    if (eq > 0) cookies.set(parts.slice(0, eq).trim(), parts.slice(eq + 1).trim())
+  }
 }
 
-// ── HTTP to Zitadel ───────────────────────────────────────────────────────────
+function cookieString() {
+  return [...cookies.entries()].map(([k, v]) => `${k}=${v}`).join('; ')
+}
 
-function httpGet(path) {
+// ── HTTP helper ───────────────────────────────────────────────────────────────
+
+async function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
+
+function rawRequest(method, path, extraHeaders, body) {
   return new Promise((resolve, reject) => {
+    const bodyBuf = body ? Buffer.from(body, 'utf8') : null
     const req = nodeRequest(
-      { hostname: ZITADEL_HOST, port: ZITADEL_PORT, path, method: 'GET',
-        headers: { Host: 'localhost' } },
+      {
+        hostname: ZITADEL_HOST,
+        port: ZITADEL_PORT,
+        path,
+        method,
+        headers: {
+          Host: HOST_HEADER,
+          Cookie: cookieString(),
+          ...extraHeaders,
+          ...(bodyBuf ? { 'Content-Length': String(bodyBuf.length) } : {}),
+        },
+      },
       (res) => {
+        const setCookieHdr = res.headers['set-cookie']
+        storeCookies(setCookieHdr)
         let data = ''
-        res.on('data', (c) => { data += c })
-        res.on('end', () => resolve({ status: res.statusCode, text: data }))
+        res.on('data', c => { data += c })
+        res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, text: data }))
       }
     )
-    req.setTimeout(10_000, () => req.destroy(new Error('Zitadel HTTP timeout')))
+    req.setTimeout(20_000, () => req.destroy(new Error('Request timed out')))
     req.on('error', reject)
+    if (bodyBuf) req.write(bodyBuf)
     req.end()
   })
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// Follow redirects, but STOP and return the location when we hit the callback URI
+async function followingRequest(method, path, extraHeaders, body, maxRedirects = 10) {
+  let currentMethod = method
+  let currentPath   = path
+  let currentBody   = body
+  let currentHeaders = extraHeaders
+  let depth = 0
 
-async function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
+  while (depth < maxRedirects) {
+    const res = await rawRequest(currentMethod, currentPath, currentHeaders, currentBody)
+    if (res.status === 301 || res.status === 302 || res.status === 303 || res.status === 307) {
+      const location = res.headers['location'] ?? ''
+      // If Zitadel is redirecting to the callback URI, we have the auth code — stop
+      if (location.includes('/auth/callback') || location.includes('code=')) {
+        return { ...res, callbackLocation: location }
+      }
+      // Follow the redirect (303 always becomes GET)
+      currentMethod  = (res.status === 303 || res.status === 302) ? 'GET' : currentMethod
+      currentBody    = (currentMethod === 'GET') ? null : currentBody
+      currentHeaders = (currentMethod === 'GET') ? {} : currentHeaders
+      currentPath    = location.startsWith('http') ? new URL(location).pathname + new URL(location).search
+                                                    : location
+      depth++
+      continue
+    }
+    return res
+  }
+  throw new Error('Too many redirects')
+}
+
+function jsonPost(path, token, body) {
+  return rawRequest('POST', path, {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  }, JSON.stringify(body))
+}
+
+function jsonGet(path, token) {
+  return rawRequest('GET', path, {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  }, null)
+}
+
+function assertOk(res, label) {
+  if (res.status < 200 || res.status >= 300) {
+    throw new Error(`${label} — HTTP ${res.status}: ${res.text}`)
+  }
+  return JSON.parse(res.text)
+}
+
+// ── Health wait ───────────────────────────────────────────────────────────────
 
 async function waitForHealth() {
   for (let i = 1; i <= 80; i++) {
     try {
-      const res = await httpGet('/healthz')
+      const res = await rawRequest('GET', '/healthz', {}, null)
       if (res.status < 500) return
     } catch { /* not ready yet */ }
     if (i % 5 === 0) log(`  Still waiting for Zitadel… (${i * 3}s elapsed)`)
@@ -81,52 +154,30 @@ async function waitForHealth() {
   fail('Zitadel did not become healthy after 4 minutes.')
 }
 
-function extractPat(logText) {
-  // Zitadel v4 logs the machine user PAT with a line like:
-  //   "machine user pat created" pat="eyJ..."
-  // or in structured JSON log format:
-  //   {"level":"info","msg":"machine user pat created","pat":"eyJ..."}
-  // We try both formats.
-  const patterns = [
-    /"pat"\s*:\s*"([A-Za-z0-9_\-\.]+)"/,       // JSON field
-    /\bpat=["']?([A-Za-z0-9_\-\.]{20,})["']?/,  // key=value
-  ]
-  for (const re of patterns) {
-    const m = logText.match(re)
-    if (m && m[1]) return m[1]
-  }
-  return null
+// ── HTML parsing helpers ──────────────────────────────────────────────────────
+
+function extractHtmlField(html, name) {
+  const re = new RegExp(`name="${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"\\s+value="([^"]*)"`)
+  const alt = new RegExp(`value="([^"]*)"[^>]*name="${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`)
+  const m = re.exec(html) ?? alt.exec(html)
+  return m ? m[1] : null
 }
 
-async function getContainerId(name) {
-  const { status, body } = await dockerRequest('GET', `/containers/json?all=1&filters=${encodeURIComponent(JSON.stringify({ name: [name] }))}`)
-  if (status !== 200) fail(`Docker API error (${status}) looking up container "${name}"`)
-  // Body may be chunked-encoded — strip chunk sizes (hex length lines)
-  const clean = body.replace(/^[0-9a-fA-F]+\r\n/gm, '').replace(/\r\n0\r\n.*/s, '').trim()
-  const list = JSON.parse(clean)
-  if (!list.length) fail(`Container "${name}" not found. Is Zitadel running?`)
-  return list[0].Id
+function extractAuthId(html) {
+  const m = /authRequestID[="](\d+)/i.exec(html) ?? /authRequestID" value="(\d+)"/i.exec(html)
+  return m ? m[1] : null
 }
 
-async function fetchLogs(containerId) {
-  // timestamps=false, stdout=1, stderr=1 — get all logs since container start
-  const { status, body } = await dockerRequest(
-    'GET',
-    `/containers/${containerId}/logs?stdout=1&stderr=1&timestamps=false&tail=5000`
-  )
-  if (status !== 200) fail(`Docker logs API returned ${status}`)
-  // Docker multiplexed stream: each frame has an 8-byte header (stream type + length)
-  // Strip these and return raw text.
-  const buf = Buffer.from(body, 'binary')
-  let text = ''
-  let i = 0
-  while (i + 8 <= buf.length) {
-    const size = buf.readUInt32BE(i + 4)
-    const payload = buf.slice(i + 8, i + 8 + size)
-    text += payload.toString('utf8')
-    i += 8 + size
-  }
-  return text
+// ── PKCE ──────────────────────────────────────────────────────────────────────
+
+function generatePKCE() {
+  const verifier  = randomBytes(32).toString('base64url')
+  const challenge = createHash('sha256').update(verifier).digest('base64url')
+  return { verifier, challenge }
+}
+
+function encodeForm(obj) {
+  return Object.entries(obj).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&')
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -137,46 +188,119 @@ ${B}${C}  OpenWind — Zitadel Setup${R}
   ${'─'.repeat(40)}
 `)
 
-  // 1. Wait for Zitadel HTTP health
+  // 1. Wait for Zitadel to be healthy
   log('  ⏳  Waiting for Zitadel to be healthy…')
   await waitForHealth()
   ok('Zitadel is up')
-  info('Waiting 20s for first-boot setup to write PAT to logs…')
-  await sleep(20_000)
+  info('Waiting 15s for first-boot internal setup to complete…')
+  await sleep(15_000)
   console.log()
 
-  // 2. Find Zitadel container via Docker API
-  log('  ⏳  Reading Zitadel startup logs…')
-  const containerId = await getContainerId(ZITADEL_CTR_NAME)
-  info(`Container ID: ${containerId.slice(0, 12)}`)
-
-  // 3. Poll logs until PAT appears (first boot may still be writing)
-  let pat = null
-  for (let attempt = 1; attempt <= 20; attempt++) {
-    const logs = await fetchLogs(containerId)
-    pat = extractPat(logs)
-    if (pat) break
-    if (attempt % 5 === 0) info(`Still waiting for PAT in logs… (${attempt * 3}s)`)
-    await sleep(3000)
-  }
-
-  if (!pat) {
-    fail(`Could not find the machine user PAT in Zitadel's startup logs.
-
-  Possible causes:
-  • Zitadel was restarted after first boot — the PAT is only logged once.
-    To regenerate: docker compose down -v && setup.bat (wipes Zitadel data)
-  • The PAT was already used for a previous bootstrap.
-    If you have a working .env.local with ZITADEL_KEY_JSON, just run:
-      cd ../OpenWind && docker compose up -d
-
-  Full Zitadel logs: docker compose logs zitadel`)
-  }
-
-  ok('PAT found in Zitadel startup logs')
+  // 2. Get console client ID (available without auth from the UI bundle)
+  log('  ⏳  Fetching console client ID…')
+  const envRes = await rawRequest('GET', '/ui/console/assets/environment.json', {}, null)
+  if (envRes.status !== 200) fail(`Could not fetch environment.json — HTTP ${envRes.status}`)
+  const { clientid } = JSON.parse(envRes.text)
+  if (!clientid) fail('No clientid in environment.json')
+  ok(`Console client ID: ${clientid}`)
   console.log()
 
-  // 4. Print result
+  // 3. OIDC Authorization Code + PKCE flow
+  log('  ⏳  Starting OIDC login flow…')
+  const { verifier, challenge } = generatePKCE()
+  const scope     = 'openid email urn:zitadel:iam:org:project:id:zitadel:aud'
+  const authorizeQS = encodeForm({
+    client_id:             clientid,
+    response_type:         'code',
+    redirect_uri:          REDIRECT_URI,
+    scope,
+    code_challenge:        challenge,
+    code_challenge_method: 'S256',
+    nonce:                 randomBytes(8).toString('hex'),
+    state:                 randomBytes(8).toString('hex'),
+  })
+
+  const loginPageRes = await followingRequest('GET', `/oauth/v2/authorize?${authorizeQS}`, {}, null)
+  if (!loginPageRes.text) fail('Could not reach Zitadel login page')
+
+  const authRequestID = extractAuthId(loginPageRes.text)
+  const csrf1         = extractHtmlField(loginPageRes.text, 'gorilla.csrf.Token')
+  if (!authRequestID) fail(`Could not find authRequestID in login page HTML`)
+  if (!csrf1)         fail(`Could not find CSRF token in login page HTML`)
+  ok(`Login page loaded (authRequestID=${authRequestID})`)
+  console.log()
+
+  // 4. Submit login name
+  log('  ⏳  Submitting login name…')
+  const loginnameRes = await followingRequest(
+    'POST', '/ui/login/loginname',
+    { 'Content-Type': 'application/x-www-form-urlencoded' },
+    encodeForm({ 'gorilla.csrf.Token': csrf1, authRequestID, loginName: ADMIN_LOGIN })
+  )
+  const csrf2 = extractHtmlField(loginnameRes.text ?? '', 'gorilla.csrf.Token')
+  if (!csrf2) {
+    const errMsg = (loginnameRes.text ?? '').match(/lgn-error-message">\s*([^<]+)/)?.[1]?.trim() ?? ''
+    fail(`Password form not reached after loginname POST.${errMsg ? ` Error: ${errMsg}` : ''}\nFull URL: ${loginnameRes.headers?.['location'] ?? '(no redirect)'}`)
+  }
+  ok('Login name accepted')
+  console.log()
+
+  // 5. Submit password
+  log('  ⏳  Submitting password…')
+  const passwordRes = await followingRequest(
+    'POST', '/ui/login/password',
+    { 'Content-Type': 'application/x-www-form-urlencoded' },
+    encodeForm({ 'gorilla.csrf.Token': csrf2, authRequestID, password: ADMIN_PASS })
+  )
+
+  // The password step should redirect to the callback URI
+  const callbackLocation = passwordRes.callbackLocation ?? passwordRes.headers?.['location'] ?? ''
+  const codeMatch = /[?&]code=([^&]+)/.exec(callbackLocation)
+  if (!codeMatch) {
+    const errMsg = (passwordRes.text ?? '').match(/lgn-error-message">\s*([^<]+)/)?.[1]?.trim() ?? ''
+    fail(`Auth code not found in redirect after password POST.${errMsg ? ` Error: ${errMsg}` : ''}\nLocation: ${callbackLocation}`)
+  }
+  const authCode = codeMatch[1]
+  ok('Password accepted, auth code received')
+  console.log()
+
+  // 6. Exchange code for access token
+  log('  ⏳  Exchanging code for access token…')
+  const tokenRes = await rawRequest(
+    'POST', '/oauth/v2/token',
+    { 'Content-Type': 'application/x-www-form-urlencoded' },
+    encodeForm({
+      grant_type:    'authorization_code',
+      code:          authCode,
+      redirect_uri:  REDIRECT_URI,
+      client_id:     clientid,
+      code_verifier: verifier,
+    })
+  )
+  const { access_token: accessToken } = assertOk(tokenRes, 'Token exchange')
+  ok('Access token obtained')
+  console.log()
+
+  // 7. Get admin user ID
+  log('  ⏳  Fetching admin user info…')
+  const meRes = await jsonGet('/auth/v1/users/me', accessToken)
+  const meData = assertOk(meRes, 'Get /auth/v1/users/me')
+  const userId = meData?.user?.id
+  if (!userId) fail(`Could not extract user ID from /auth/v1/users/me: ${meRes.text}`)
+  ok(`Admin user ID: ${userId}`)
+  console.log()
+
+  // 8. Create PAT
+  log('  ⏳  Creating Personal Access Token…')
+  const patRes = await jsonPost(`/management/v1/users/${userId}/pats`, accessToken, {
+    expirationDate: PAT_EXPIRY,
+  })
+  const { token: pat } = assertOk(patRes, 'Create PAT')
+  if (!pat) fail(`No token field in PAT response: ${patRes.text}`)
+  ok('PAT created')
+  console.log()
+
+  // 9. Print result
   const line = '═'.repeat(58)
   console.log(`\n  ${B}${G}${line}${R}`)
   console.log(`  ${B}${G}✅  PAT generated — copy the command below${R}`)
@@ -187,7 +311,7 @@ ${B}${C}  OpenWind — Zitadel Setup${R}
   console.log(`\n  ${B}${G}${line}${R}\n`)
 }
 
-main().catch((err) => {
+main().catch(err => {
   console.error(`\n  \x1b[31m✗\x1b[0m  ${err.message}\n`)
   process.exit(1)
 })

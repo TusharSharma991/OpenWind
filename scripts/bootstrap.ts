@@ -434,7 +434,7 @@ async function generateAndSaveKeyJson(token: string): Promise<void> {
       queries: [
         {
           userNameQuery: {
-            userName: "setup-admin",
+            userName: "openwind-api-bot",
             method: "TEXT_QUERY_METHOD_EQUALS",
           },
         },
@@ -444,7 +444,9 @@ async function generateAndSaveKeyJson(token: string): Promise<void> {
 
   const userId = search.result?.[0]?.id;
   if (!userId) {
-    warn("Could not find setup-admin user — skipping key JSON generation");
+    warn(
+      "Could not find openwind-api-bot machine user — skipping key JSON generation",
+    );
     return;
   }
 

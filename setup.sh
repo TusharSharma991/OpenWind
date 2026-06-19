@@ -39,7 +39,7 @@ echo " (First run takes 2-5 minutes)"
 echo ""
 
 # Start infra — bootstrap depends_on handles health checks
-docker compose up -d ow-database ow-pgbouncer ow-cache
+docker compose up -d postgres pgbouncer redis
 
 # Run bootstrap with the PAT injected as env var
 docker compose --profile bootstrap run -e "ZITADEL_SETUP_PAT=${PAT}" --rm bootstrap

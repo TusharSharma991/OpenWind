@@ -64,11 +64,9 @@ services:
       # Token Exchange (RFC 8693) lets gen-pat.mjs convert a session token into
       # an OAuth access token without a browser — needed for headless PAT generation.
       ZITADEL_DEFAULTINSTANCE_FEATURES_TOKENEXCHANGE: "true"
-      # Machine user created at first boot — PAT is printed in Zitadel startup logs.
-      # gen-pat.mjs (ow-zita-setup) reads it via Docker logs API (socket mounted below).
-      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_USERNAME: "ow-setup-bot"
-      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_NAME: "OpenWind Setup Bot"
-      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_PAT_EXPIRATIONDATE: "2030-01-01T00:00:00Z"
+      # No machine user env vars needed — gen-pat.mjs authenticates via the
+      # Login UI v1 form flow (same steps as a browser login) to get an
+      # OAuth2 access token, then creates a PAT via the Management API.
     ports:
       - "${ZITADEL_HOST_PORT:-8080}:8080"
     depends_on:
@@ -101,7 +99,6 @@ services:
     working_dir: /app
     volumes:
       - ./scripts:/app/scripts:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
     command: node /app/scripts/gen-pat.mjs
     environment:
       ZITADEL_EXTERNALDOMAIN: "${ZITADEL_EXTERNALDOMAIN:-localhost}"

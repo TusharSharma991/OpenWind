@@ -20,10 +20,11 @@
 //   7. POST /management/v1/users/machine → create machine user (PATs are machine-user-only)
 //   8. POST /admin/v1/members → grant IAM_OWNER to machine user
 //   9. POST /management/v1/users/${machineUserId}/pats → PAT token
-//  10. Print the PAT + the exact command to run in the OpenWind folder
+//  10. Write PAT to /app/output/pat.txt for the host setup script to read
 
 import { request as nodeRequest }         from 'node:http'
 import { createHash, randomBytes }        from 'node:crypto'
+import { writeFileSync, mkdirSync }       from 'node:fs'
 
 const ZITADEL_HOST  = 'zitadel'
 const ZITADEL_PORT  = 8080
@@ -365,15 +366,11 @@ ${B}${C}  OpenWind — Zitadel Setup${R}
   ok('PAT created')
   console.log()
 
-  // 9. Print result
-  const line = '═'.repeat(58)
-  console.log(`\n  ${B}${G}${line}${R}`)
-  console.log(`  ${B}${G}✅  PAT generated — copy the command below${R}`)
-  console.log(`  ${B}${G}${line}${R}\n`)
-  console.log(`  ${B}Run this in the ${C}OpenWind${R}${B} folder:${R}\n`)
-  console.log(`  ${Y}Windows :${R}  setup.bat --pat ${B}${pat}${R}`)
-  console.log(`  ${Y}Linux/Mac:${R}  ./setup.sh --pat ${B}${pat}${R}`)
-  console.log(`\n  ${B}${G}${line}${R}\n`)
+  // 10. Write PAT to output file — setup script reads it from the host
+  mkdirSync('/app/output', { recursive: true })
+  writeFileSync('/app/output/pat.txt', pat, { encoding: 'utf8' })
+  ok('PAT written to output — handing control back to setup script…')
+  console.log()
 }
 
 main().catch(err => {

@@ -310,6 +310,7 @@ function KanbanColumn({
   records,
   fields,
   typeSlug,
+  entityTypeId,
   workflowId,
   transitions,
   allRecords,
@@ -320,6 +321,7 @@ function KanbanColumn({
   records: EntityInstance[];
   fields: EntityField[];
   typeSlug: string;
+  entityTypeId: string;
   workflowId: string;
   transitions: Transition[];
   allRecords: EntityInstance[];
@@ -498,9 +500,12 @@ function KanbanColumn({
         <button
           className="kb-add-btn"
           onClick={() =>
-            navigate(`/records/${typeSlug}/new`, {
-              state: { workflowId, initialState: state?.name },
-            })
+            navigate(
+              typeSlug
+                ? `/records/${typeSlug}/new`
+                : `/entity-types/${entityTypeId}/records/new`,
+              { state: { workflowId, initialState: state?.name } },
+            )
           }
         >
           <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
@@ -855,8 +860,16 @@ export function WorkflowRecords(): React.ReactElement {
             </svg>
             Settings
           </Link>
-          {typeSlug && (
-            <Link to={`/records/${typeSlug}/new`} className="kb-new-btn">
+          {entityTypeId && (
+            <Link
+              to={
+                typeSlug
+                  ? `/records/${typeSlug}/new`
+                  : `/entity-types/${entityTypeId}/records/new`
+              }
+              state={{ workflowId }}
+              className="kb-new-btn"
+            >
               <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
                 <path
                   d="M6.5 1v11M1 6.5h11"
@@ -894,6 +907,7 @@ export function WorkflowRecords(): React.ReactElement {
                 records={recs}
                 fields={fields}
                 typeSlug={typeSlug}
+                entityTypeId={entityTypeId}
                 workflowId={workflowId}
                 transitions={transitions}
                 allRecords={records}

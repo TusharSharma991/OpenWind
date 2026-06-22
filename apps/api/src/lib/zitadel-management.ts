@@ -39,8 +39,11 @@ let _tokenExpiresAt = 0;
 
 let _cachedRoles: string[] | null = null;
 let _rolesExpiresAt = 0;
-let _cachedUsers: OrgUser[] | null = null;
-let _usersExpiresAt = 0;
+interface UserCacheEntry {
+  users: OrgUser[];
+  expiresAt: number;
+}
+const _usersCache = new Map<string, UserCacheEntry>();
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
 // ── URL helpers ───────────────────────────────────────────────────────────────
@@ -106,6 +109,63 @@ function httpPost(
   });
 }
 
+function httpGet(
+  url: string,
+  host: string,
+  headers: Record<string, string>,
+): Promise<{ status: number; text: string }> {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const req = nodeHttpRequest(
+      {
+        hostname: parsed.hostname,
+        port: parsed.port ? parseInt(parsed.port, 10) : 80,
+        path: parsed.pathname + parsed.search,
+        method: "GET",
+        headers: {
+          ...headers,
+          Host: host,
+        },
+      },
+      (res) => {
+        let data = "";
+        res.on("data", (chunk: Buffer) => {
+          data += chunk.toString();
+        });
+        res.on("end", () =>
+          resolve({ status: res.statusCode ?? 0, text: data }),
+        );
+      },
+    );
+    req.setTimeout(10_000, () => req.destroy(new Error("timeout")));
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+let _discoveredIssuer: string | null = null;
+
+async function discoverIssuer(): Promise<string> {
+  if (_discoveredIssuer) return _discoveredIssuer;
+  try {
+    const url = `${internalBase()}/.well-known/openid-configuration`;
+    const res = await httpGet(url, issuerHost(), {});
+    if (res.status === 200) {
+      const data = JSON.parse(res.text) as { issuer: string };
+      if (data.issuer) {
+        _discoveredIssuer = data.issuer;
+        return _discoveredIssuer;
+      }
+    }
+  } catch (err) {
+    logger.warn(
+      { err },
+      "Failed to discover Zitadel issuer dynamically, falling back to ZITADEL_ISSUER",
+    );
+  }
+  return env.ZITADEL_ISSUER;
+}
+
 // ── Parse service account key ─────────────────────────────────────────────────
 // Tries ZITADEL_SERVICE_ACCOUNT_KEY (raw JSON) first, then ZITADEL_KEY_JSON
 // (base64-encoded JSON written by bootstrap).
@@ -141,19 +201,25 @@ async function getAccessToken(): Promise<string | null> {
   try {
     // Zitadel may return PKCS#1 ("BEGIN RSA PRIVATE KEY") or PKCS#8 ("BEGIN PRIVATE KEY").
     // importPKCS8 only handles PKCS#8 — normalise via Node's createPrivateKey which accepts both.
-    const keyPem = keyConfig.key.includes("BEGIN PRIVATE KEY")
+    const exportedKey = keyConfig.key.includes("BEGIN PRIVATE KEY")
       ? keyConfig.key
-      : (createPrivateKey(keyConfig.key).export({
+      : createPrivateKey(keyConfig.key).export({
           type: "pkcs8",
           format: "pem",
-        }) as string);
+        });
+    // exportedKey is string when input is already PKCS#8, Buffer otherwise
+    const keyPem =
+      typeof exportedKey === "string"
+        ? exportedKey
+        : (exportedKey as Buffer).toString("utf8");
+    const issuer = await discoverIssuer();
     const privateKey = await importPKCS8(keyPem, "RS256");
     const assertion = await new SignJWT({})
       .setProtectedHeader({ alg: "RS256", kid: keyConfig.keyId })
       .setIssuedAt()
       .setIssuer(keyConfig.userId)
       .setSubject(keyConfig.userId)
-      .setAudience(env.ZITADEL_ISSUER)
+      .setAudience(issuer)
       .setExpirationTime("1h")
       .sign(privateKey);
 
@@ -237,9 +303,11 @@ export async function listProjectRoles(): Promise<string[]> {
 
 // ── List org users ────────────────────────────────────────────────────────────
 
-export async function listOrgUsers(): Promise<OrgUser[]> {
+export async function listOrgUsers(orgId?: string): Promise<OrgUser[]> {
+  const cacheKey = orgId ?? "_default_";
   const now = Date.now();
-  if (_cachedUsers && now < _usersExpiresAt) return _cachedUsers;
+  const cached = _usersCache.get(cacheKey);
+  if (cached && now < cached.expiresAt) return cached.users;
 
   const token = await getAccessToken();
   if (!token) return [];
@@ -247,17 +315,23 @@ export async function listOrgUsers(): Promise<OrgUser[]> {
   try {
     // Use v2 UserService endpoint (gRPC-gateway) — returns active human users in the org
     const url = `${internalBase()}/zitadel.user.v2.UserService/ListUsers`;
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    };
+
+    const payload: Record<string, unknown> = {
+      query: { limit: 500, asc: true },
+    };
+    if (orgId) {
+      payload["queries"] = [{ organizationIdQuery: { organizationId: orgId } }];
+    }
+
     const result = await httpPost(
       url,
       issuerHost(),
-      {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      JSON.stringify({
-        query: { limit: 500, asc: true },
-        queries: [{ stateQuery: { states: ["USER_STATE_ACTIVE"] } }],
-      }),
+      headers,
+      JSON.stringify(payload),
     );
 
     if (result.status < 200 || result.status >= 300) {
@@ -273,6 +347,7 @@ export async function listOrgUsers(): Promise<OrgUser[]> {
       username?: string;
       preferredLoginName?: string;
       loginNames?: string[];
+      state?: string;
       human?: {
         profile?: {
           displayName?: string;
@@ -285,7 +360,7 @@ export async function listOrgUsers(): Promise<OrgUser[]> {
 
     const data = JSON.parse(result.text) as { result?: ZitadelUser[] };
     const users: OrgUser[] = (data.result ?? [])
-      .filter((u) => u.human !== undefined)
+      .filter((u) => u.human !== undefined && u.state === "USER_STATE_ACTIVE")
       .map((u) => {
         const profile = u.human?.profile ?? {};
         const nameParts = [profile.givenName, profile.familyName].filter(
@@ -304,8 +379,7 @@ export async function listOrgUsers(): Promise<OrgUser[]> {
       })
       .sort((a, b) => a.displayName.localeCompare(b.displayName));
 
-    _cachedUsers = users;
-    _usersExpiresAt = now + CACHE_TTL_MS;
+    _usersCache.set(cacheKey, { users, expiresAt: now + CACHE_TTL_MS });
     return users;
   } catch (err) {
     logger.error({ err }, "Failed to list Zitadel org users");
@@ -316,6 +390,5 @@ export async function listOrgUsers(): Promise<OrgUser[]> {
 // ── Cache invalidation ────────────────────────────────────────────────────────
 
 export function invalidateUserCache(): void {
-  _cachedUsers = null;
-  _usersExpiresAt = 0;
+  _usersCache.clear();
 }

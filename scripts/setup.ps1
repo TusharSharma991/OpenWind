@@ -77,7 +77,12 @@ Info "(Migrations, seed data, Zitadel OIDC config, demo users)"
 Write-Host ""
 
 if (-not (Test-Path '.env.local' -PathType Leaf)) {
-    New-Item -ItemType File '.env.local' | Out-Null
+    if (Test-Path '.env.example') {
+        Copy-Item '.env.example' '.env.local'
+        Ok "Created .env.local from .env.example"
+    } else {
+        New-Item -ItemType File '.env.local' | Out-Null
+    }
 }
 
 docker compose up -d postgres pgbouncer redis

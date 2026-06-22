@@ -162,7 +162,9 @@ banner "Step 3/4  Running OpenWind bootstrap"
 info "(Migrations, seed data, Zitadel OIDC config, demo users)"
 echo ""
 
-touch .env.local
+if [[ ! -f ".env.local" ]]; then
+  [[ -f ".env.example" ]] && cp ".env.example" ".env.local" || touch ".env.local"
+fi
 
 docker compose up -d postgres pgbouncer redis \
   || fail "Failed to start infrastructure containers"

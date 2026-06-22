@@ -63,7 +63,12 @@ logs.md
 db-bridge.bat
 
 # Env profiles — prod.env has real credentials, never commit it
-envs/prod.env
+envs/
+
+# Leftover empty files created by failed docker compose commands
+ow-database
+pgbouncer
+prod
 
 # Local env switching script (Windows only, not cross-platform)
 switch-env.bat

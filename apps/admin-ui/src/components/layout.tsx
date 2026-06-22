@@ -3,7 +3,7 @@ import { useLogout, useGetIdentity } from "@refinedev/core";
 import { Link, useLocation } from "react-router-dom";
 import { userManager } from "../authProvider.js";
 
-// ── Admin nav items ──────────────────────────────────────────────────────────
+// â”€â”€ Admin nav items â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 // Nav shown to super-admins only
 const SUPER_ADMIN_NAV_EXTRA = [
@@ -105,6 +105,25 @@ const ADMIN_NAV = [
       </svg>
     ),
   },
+  {
+    route: "/records",
+    label: "Records",
+    icon: (
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        fill="none"
+        viewBox="0 0 24 24"
+        strokeWidth="2"
+        stroke="currentColor"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 00-1.883 2.542l.857 6a2.25 2.25 0 002.227 1.932H19.05a2.25 2.25 0 002.227-1.932l.857-6a2.25 2.25 0 00-1.883-2.542m-16.5 0V6A2.25 2.25 0 016 3.75h3.879a1.5 1.5 0 011.06.44l2.122 2.12a1.5 1.5 0 001.06.44H18A2.25 2.25 0 0120.25 9v.776"
+        />
+      </svg>
+    ),
+  },
 ];
 
 const SETTINGS_NAV = {
@@ -132,7 +151,7 @@ const SETTINGS_NAV = {
   ),
 };
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function getRolesFromProfile(
   profile: Record<string, unknown> | undefined,
@@ -143,7 +162,7 @@ function getRolesFromProfile(
   return Object.keys(rolesMap);
 }
 
-// ── Layout ───────────────────────────────────────────────────────────────────
+// â”€â”€ Layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export function Layout({
   children,
@@ -187,9 +206,9 @@ export function Layout({
   }, []);
 
   // RBAC tiers:
-  //   admin  = super admin — full access including Users page
-  //   agent  = workflow admin — Workflows + Templates + Records, no Users/Dashboard
-  //   user   = record assignee — Records + Templates only (portal-like view)
+  //   admin  = super admin â€” full access including Users page
+  //   agent  = workflow admin â€” Workflows + Templates + Records, no Users/Dashboard
+  //   user   = record assignee â€” Records + Templates only (portal-like view)
   const isAdmin = roles.includes("admin");
   const isAgent = roles.includes("agent") && !isAdmin;
   const isCustomer =
@@ -224,14 +243,14 @@ export function Layout({
     );
   }
 
-  // ── Shared topnav ───────────────────────────────────────────────────────
+  // â”€â”€ Shared topnav â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const topnav = (
     <header className="main-header">
       <div className="header-title-section">
         <button
           className="admin-hamburger"
           onClick={() => {
-            // On mobile (≤640px) only drive the overlay drawer
+            // On mobile (â‰¤640px) only drive the overlay drawer
             if (window.innerWidth <= 640) {
               setMobileNavOpen((o) => !o);
             } else {
@@ -443,7 +462,7 @@ export function Layout({
     </header>
   );
 
-  // ── Customer / user layout ──────────────────────────────────────────────
+  // â”€â”€ Customer / user layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   if (isCustomer) {
     return (
       <div className="app-container">
@@ -467,7 +486,7 @@ export function Layout({
                 gap: "2px",
               }}
             >
-              {/* Records — shows cards where user has assigned tickets */}
+              {/* Records â€” shows cards where user has assigned tickets */}
               <Link
                 to="/records"
                 className={`menu-item ${!sidebarOpen && !mobileNavOpen ? "menu-item-icon-only" : ""} ${isActive("/records") ? "active" : ""}`}
@@ -489,7 +508,7 @@ export function Layout({
                 {(sidebarOpen || mobileNavOpen) && <span>Records</span>}
               </Link>
 
-              {/* Templates — users can browse / fork workflows */}
+              {/* Templates â€” users can browse / fork workflows */}
               <Link
                 to="/modules"
                 className={`menu-item ${!sidebarOpen && !mobileNavOpen ? "menu-item-icon-only" : ""} ${isActive("/modules") ? "active" : ""}`}
@@ -532,9 +551,9 @@ export function Layout({
   // Super admin gets all ADMIN_NAV + SUPER_ADMIN_NAV_EXTRA (Users)
   const sidebarNav = isAdmin
     ? [...ADMIN_NAV, ...SUPER_ADMIN_NAV_EXTRA]
-    : ADMIN_NAV; // agents see same nav as admin minus dashboard (dashboard requires admin role — handled by page itself)
+    : ADMIN_NAV; // agents see same nav as admin minus dashboard (dashboard requires admin role â€” handled by page itself)
 
-  // ── Admin / Agent layout ────────────────────────────────────────────────
+  // â”€â”€ Admin / Agent layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   return (
     <div className="app-container">
       {topnav}

@@ -2,172 +2,86 @@
 
 **Single requirement: Docker Desktop (must be running)**
 
-No Node.js, no pnpm, no tooling on your host machine. Everything runs in containers.
+No Node.js, no pnpm, no extra tooling. Everything runs in containers.
 
 ---
 
 ## First-time setup
 
-### Step 1 — Start Zitadel and generate a setup token
-
 ```
-cd zitadel
+git clone https://github.com/TusharSharma991/OpenWind.git
+cd OpenWind
+
 setup.bat          ← Windows
 ./setup.sh         ← Linux / Mac
 ```
 
-This starts the identity provider (`ow-zita`, `ow-zita-db`) and automatically
-generates a Personal Access Token for the initial bootstrap. At the end it prints:
-
-```
-  setup.bat --pat eyJhbGci...
-```
-
-Copy that full command.
+That's it. One command. It takes 3–5 minutes on first run.
 
 ---
 
-### Step 2 — Start OpenWind
+## What the script does
 
-Paste the command from Step 1 into the OpenWind folder:
+| Phase                        | What happens                                                                                                                                                                |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **1 — Zitadel provisioning** | Creates `../zitadel/` next to the repo, writes a `docker-compose.yml` using the official `ghcr.io/zitadel/zitadel:v4.15.1` image, starts the identity provider              |
+| **2 — PAT generation**       | Runs a one-time Node.js container that logs into Zitadel headlessly, creates a machine user (`openwind-api-bot`), and generates a Personal Access Token — all automatically |
+| **3 — Bootstrap**            | Runs DB migrations, seeds dev data, configures Zitadel OIDC (project, app, roles), creates demo users, and converts the PAT to a secure key JSON stored in `.env.local`     |
+| **4 — App start**            | Starts `ow-backend` and `ow-frontend` with the generated credentials                                                                                                        |
 
-```
-cd ../OpenWind
-setup.bat --pat eyJhbGci...          ← Windows
-./setup.sh --pat eyJhbGci...         ← Linux / Mac
-```
-
-This starts the database, cache, API, and frontend; runs all DB migrations;
-configures Zitadel (project, OIDC app, roles, demo users); and saves the
-credentials to `.env.local`.
-
-First run takes **2–5 minutes**.
+The PAT is **never written to disk** — it lives in memory only, passed directly into the bootstrap container.
 
 ---
 
-### Done
+## After setup
 
-Open **http://localhost:3001** in your browser.
+Open **http://localhost:3001**
 
-| Username                  | Password        | Role  |
-| ------------------------- | --------------- | ----- |
-| `owAdmin`                 | `OpenWind1234!` | Admin |
-| `owUser`                  | `OpenWind1234!` | User  |
-| `testUser1` – `testUser5` | `OpenWind1234!` | User  |
+| Account    | Username                | Password        | Role          |
+| ---------- | ----------------------- | --------------- | ------------- |
+| Admin      | `owAdmin`               | `OpenWind1234!` | Full access   |
+| User       | `owUser`                | `OpenWind1234!` | Portal access |
+| Test users | `testUser1`–`testUser5` | `OpenWind1234!` | Portal access |
 
-Zitadel console: **http://localhost:8080**
-Login: `owZitadelAdmin@openwind.local` / `Admin1234!`
+Zitadel console (identity provider): **http://localhost:8080**
+Username: `owZitadelAdmin@openwind.local` / Password: `Admin1234!`
 
 ---
 
-## Day-to-day commands
+## Re-running / resetting
 
 ```bash
-# Start everything (after a machine restart)
-cd zitadel   && docker compose up -d
-cd ../OpenWind && docker compose up -d
+# Restart everything (keeps data)
+docker compose restart
 
-# Stop everything (data is preserved)
-cd zitadel   && docker compose down
-cd ../OpenWind && docker compose down
-
-# Tail API logs
-cd OpenWind && docker compose logs -f ow-backend
-
-# Rebuild after a code change
-cd OpenWind && docker compose up -d --build ow-backend ow-frontend
-
-# Force-reload env vars into a container
-cd OpenWind && docker compose up -d --force-recreate ow-backend
+# Full reset — wipes all data and re-bootstraps
+docker compose down -v
+cd ../zitadel && docker compose down -v && cd -
+setup.bat   # or ./setup.sh
 ```
 
 ---
 
-## Reset from scratch
+## Directory layout after setup
 
-```bash
-cd zitadel   && docker compose down -v
-cd ../OpenWind && docker compose down -v
-del .env.local       # Windows
-rm  .env.local       # Linux / Mac
 ```
-
-Then run the two setup commands again from Step 1.
-
----
-
-## Running order matters
-
-Always start Zitadel **before** OpenWind. `ow-backend` connects to Zitadel
-on startup to verify JWKS. If Zitadel isn't running, the backend will restart
-loop until it is.
-
----
-
-## Containers reference
-
-| Project  | Container    | Purpose                  | Port        |
-| -------- | ------------ | ------------------------ | ----------- |
-| zitadel  | ow-zita      | Identity provider (OIDC) | 8080        |
-| zitadel  | ow-zita-db   | Zitadel's own Postgres   | (internal)  |
-| OpenWind | ow-database  | App Postgres             | 5433 (host) |
-| OpenWind | ow-pgbouncer | Connection pooler        | 6432        |
-| OpenWind | ow-cache     | Redis                    | (internal)  |
-| OpenWind | ow-backend   | Hono API server          | 3000        |
-| OpenWind | ow-frontend  | React admin UI           | 3001        |
+<parent>/
+  OpenWind/        ← this repo
+    .env.local     ← written by bootstrap (gitignored)
+    setup.bat
+    setup.sh
+  zitadel/         ← created at runtime by setup script (not in git)
+    docker-compose.yml
+    output/        ← temp folder, cleaned after setup
+```
 
 ---
 
 ## Troubleshooting
 
-**API returns 401 after login**
-Stale credentials — recreate the backend:
-
-```bash
-docker compose up -d --force-recreate ow-backend
-```
-
-**`setup.bat --pat` fails with "No Zitadel credentials"**
-Zitadel may not be running. Start it first:
-
-```bash
-cd zitadel && docker compose up -d
-```
-
-**Port already in use**
-Change the left-side port in the relevant `ports:` entry in `docker-compose.yml`.
-Default ports: `3001` (frontend), `3000` (API), `8080` (Zitadel), `6432` (PgBouncer), `5433` (Postgres direct).
-
-**`setup.bat` fails with "network openwind_zitadel not found"**
-The Zitadel project creates this shared network. Run `cd zitadel && docker compose up -d` first.
-
-**Container keeps restarting**
-Check logs: `docker compose logs -f <container-name>`
-
----
-
-## Production deployment
-
-For production, Zitadel must know it is behind HTTPS **before its very first boot**
-(the issuer URL is written to the database at init time and cannot be changed without
-wiping the database).
-
-Create `zitadel/.env` on the server before starting:
-
-```
-ZITADEL_EXTERNALDOMAIN=owzitadel.yourdomain.com
-ZITADEL_EXTERNALPORT=443
-ZITADEL_EXTERNALSECURE=true
-ZITADEL_HOST_PORT=10405
-```
-
-Create `OpenWind/.env` on the server:
-
-```
-ZITADEL_EXTERNAL_DOMAIN=owzitadel.yourdomain.com
-ZITADEL_HOST_PORT=10405
-ZITADEL_EXTERNALSECURE=true
-ADMIN_UI_HOST_PORT=10404
-```
-
-Then run the same two-command setup. Bootstrap will generate HTTPS URLs automatically.
+| Problem                  | Fix                                                                    |
+| ------------------------ | ---------------------------------------------------------------------- |
+| Zitadel won't start      | `docker compose logs zitadel` inside the `../zitadel/` folder          |
+| Bootstrap failed         | Check the output — it prints the failing step                          |
+| App not loading          | `docker compose logs ow-backend` in the repo folder                    |
+| Port 8080 already in use | Stop the conflicting container or change `ZITADEL_HOST_PORT` in `.env` |

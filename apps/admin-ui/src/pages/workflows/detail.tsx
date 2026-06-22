@@ -94,7 +94,7 @@ type AddTransitionForm = {
   fromState: string;
   toState: string;
   label: string;
-  allowedRoles: string;
+  allowedRoles: string[];
   requiresComment: boolean;
 };
 
@@ -111,7 +111,7 @@ const EMPTY_TRANSITION: AddTransitionForm = {
   fromState: "",
   toState: "",
   label: "",
-  allowedRoles: "",
+  allowedRoles: [],
   requiresComment: false,
 };
 
@@ -539,6 +539,19 @@ export function WorkflowDetail(): React.ReactElement {
   const [assignedTo, setAssignedTo] = useState<string | null>(null);
   const [savingAssign, setSavingAssign] = useState(false);
 
+  // Available roles from Zitadel (for transition role picker)
+  const [availableRoles, setAvailableRoles] = useState<string[]>([]);
+
+  useEffect(() => {
+    fetchWithAuth(`${API_URL}/roles`)
+      .then((res) => {
+        setAvailableRoles((res as { data?: string[] }).data ?? []);
+      })
+      .catch(() => {
+        setAvailableRoles(["admin", "agent", "user"]);
+      });
+  }, []);
+
   useEffect(() => {
     fetchWithAuth(`${API_URL}/users`)
       .then((res) => {
@@ -764,17 +777,16 @@ export function WorkflowDetail(): React.ReactElement {
     setSavingTrans(true);
     setTransError(null);
     try {
-      const allowedRoles = transForm.allowedRoles
-        .split(",")
-        .map((r) => r.trim())
-        .filter(Boolean);
       await fetchWithAuth(`${API_URL}/workflows/${id}/transitions`, {
         method: "POST",
         body: JSON.stringify({
           fromState: transForm.fromState.trim(),
           toState: transForm.toState.trim(),
           label: transForm.label.trim() || undefined,
-          allowedRoles: allowedRoles.length > 0 ? allowedRoles : undefined,
+          allowedRoles:
+            transForm.allowedRoles.length > 0
+              ? transForm.allowedRoles
+              : undefined,
           requiresComment: transForm.requiresComment,
         }),
       });
@@ -813,17 +825,13 @@ export function WorkflowDetail(): React.ReactElement {
     setSavingTrans(true);
     setTransError(null);
     try {
-      const allowedRoles = transForm.allowedRoles
-        .split(",")
-        .map((r) => r.trim())
-        .filter(Boolean);
       await fetchWithAuth(
         `${API_URL}/workflows/${id}/transitions/${editingTransition.id}`,
         {
           method: "PATCH",
           body: JSON.stringify({
             label: transForm.label.trim() || null,
-            allowedRoles: allowedRoles.length > 0 ? allowedRoles : [],
+            allowedRoles: transForm.allowedRoles,
             requiresComment: transForm.requiresComment,
           }),
         },
@@ -1742,7 +1750,7 @@ export function WorkflowDetail(): React.ReactElement {
                                   fromState: t.fromState,
                                   toState: t.toState,
                                   label: t.label,
-                                  allowedRoles: t.allowedRoles.join(", "),
+                                  allowedRoles: [...t.allowedRoles],
                                   requiresComment: t.requiresComment,
                                 });
                                 setTransError(null);
@@ -2352,19 +2360,53 @@ export function WorkflowDetail(): React.ReactElement {
                 </div>
                 <div className="form-group">
                   <label className="form-label">
-                    Allowed Roles (comma-separated, blank = any)
+                    Allowed Roles (blank = any role)
                   </label>
-                  <input
-                    className="form-input"
-                    placeholder="e.g. admin, agent"
-                    value={transForm.allowedRoles}
-                    onChange={(e) =>
-                      setTransForm((f) => ({
-                        ...f,
-                        allowedRoles: e.target.value,
-                      }))
-                    }
-                  />
+                  {availableRoles.length === 0 ? (
+                    <p style={{ fontSize: "13px", color: "#6b7280" }}>
+                      Loading roles…
+                    </p>
+                  ) : (
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "6px",
+                        maxHeight: "160px",
+                        overflowY: "auto",
+                        border: "1px solid #e5e7eb",
+                        borderRadius: "6px",
+                        padding: "8px",
+                      }}
+                    >
+                      {availableRoles.map((role) => (
+                        <label
+                          key={role}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                            fontSize: "14px",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={transForm.allowedRoles.includes(role)}
+                            onChange={(e) =>
+                              setTransForm((f) => ({
+                                ...f,
+                                allowedRoles: e.target.checked
+                                  ? [...f.allowedRoles, role]
+                                  : f.allowedRoles.filter((r) => r !== role),
+                              }))
+                            }
+                          />
+                          {role}
+                        </label>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <label className="form-checkbox">
                   <input
@@ -2705,19 +2747,53 @@ export function WorkflowDetail(): React.ReactElement {
                 </div>
                 <div className="form-group">
                   <label className="form-label">
-                    Allowed Roles (comma-separated, blank = any)
+                    Allowed Roles (blank = any role)
                   </label>
-                  <input
-                    className="form-input"
-                    placeholder="e.g. admin, agent"
-                    value={transForm.allowedRoles}
-                    onChange={(e) =>
-                      setTransForm((f) => ({
-                        ...f,
-                        allowedRoles: e.target.value,
-                      }))
-                    }
-                  />
+                  {availableRoles.length === 0 ? (
+                    <p style={{ fontSize: "13px", color: "#6b7280" }}>
+                      Loading roles…
+                    </p>
+                  ) : (
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "6px",
+                        maxHeight: "160px",
+                        overflowY: "auto",
+                        border: "1px solid #e5e7eb",
+                        borderRadius: "6px",
+                        padding: "8px",
+                      }}
+                    >
+                      {availableRoles.map((role) => (
+                        <label
+                          key={role}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                            fontSize: "14px",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={transForm.allowedRoles.includes(role)}
+                            onChange={(e) =>
+                              setTransForm((f) => ({
+                                ...f,
+                                allowedRoles: e.target.checked
+                                  ? [...f.allowedRoles, role]
+                                  : f.allowedRoles.filter((r) => r !== role),
+                              }))
+                            }
+                          />
+                          {role}
+                        </label>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <label className="form-checkbox">
                   <input

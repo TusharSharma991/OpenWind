@@ -183,9 +183,18 @@ export function CustomerRecordCreate(): React.ReactElement {
 
   const [fields, setFields] = useState<EntityField[]>([]);
   const [workflows, setWorkflows] = useState<WorkflowDef[]>([]);
+  const [users, setUsers] = useState<
+    Array<{
+      userId: string;
+      displayName: string;
+      loginName: string;
+      email?: string;
+    }>
+  >([]);
   const [fieldValues, setFieldValues] = useState<Record<string, unknown>>({});
   const [workflowId, setWorkflowId] = useState("");
   const [currentState, setCurrentState] = useState("");
+  const [assignedTo, setAssignedTo] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -219,8 +228,9 @@ export function CustomerRecordCreate(): React.ReactElement {
       fetchWithAuth(
         `${API_URL}/workflows?${new URLSearchParams({ entityTypeId }).toString()}`,
       ),
+      fetchWithAuth(`${API_URL}/users`),
     ])
-      .then(([fieldsRes, wfRes]) => {
+      .then(([fieldsRes, wfRes, usersRes]) => {
         const fs = (fieldsRes as { data: EntityField[] }).data.filter(
           (f) => !f.isSystem,
         );
@@ -228,6 +238,19 @@ export function CustomerRecordCreate(): React.ReactElement {
         const wfs = (wfRes as { data?: WorkflowDef[] }).data ?? [];
         setWorkflows(wfs);
         if (wfs.length === 1 && wfs[0]) setWorkflowId(wfs[0].id);
+
+        const usrs =
+          (
+            usersRes as {
+              data?: Array<{
+                userId: string;
+                displayName: string;
+                loginName: string;
+                email?: string;
+              }>;
+            }
+          ).data ?? [];
+        setUsers(usrs);
       })
       .catch((err: unknown) =>
         setError(err instanceof Error ? err.message : "Failed to load"),
@@ -247,6 +270,7 @@ export function CustomerRecordCreate(): React.ReactElement {
       };
       if (workflowId) payload["workflowId"] = workflowId;
       if (currentState) payload["currentState"] = currentState;
+      if (assignedTo) payload["assignedTo"] = assignedTo;
       const res = await fetchWithAuth(`${API_URL}/entities`, {
         method: "POST",
         body: JSON.stringify(payload),
@@ -311,6 +335,23 @@ export function CustomerRecordCreate(): React.ReactElement {
             </select>
           </div>
         )}
+        <div className="portal-field-group">
+          <label className="portal-field-label">Assigned To</label>
+          <select
+            className="portal-input"
+            value={assignedTo}
+            onChange={(e) => setAssignedTo(e.target.value)}
+          >
+            <option value="">Unassigned</option>
+            {users.map((u) => (
+              <option key={u.userId} value={u.userId}>
+                {u.loginName
+                  ? `${u.loginName} (${u.email ?? u.userId})`
+                  : u.displayName}
+              </option>
+            ))}
+          </select>
+        </div>
         {fields.map((field) => (
           <div key={field.id} className="portal-field-group">
             <label className="portal-field-label">

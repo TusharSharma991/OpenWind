@@ -310,8 +310,8 @@ function KanbanColumn({
   records,
   fields,
   typeSlug,
-  entityTypeId,
-  workflowId,
+  entityTypeId: _entityTypeId,
+  workflowId: _workflowId,
   transitions,
   allRecords,
   onCardDrop,
@@ -328,7 +328,6 @@ function KanbanColumn({
   onCardDrop: (recordId: string, toStateName: string) => void;
   onColumnDrop: (fromStateName: string, toStateName: string) => void;
 }): React.ReactElement {
-  const navigate = useNavigate();
   const [dropState, setDropState] = useState<ColDropState>("idle");
   const enterCount = useRef(0);
 
@@ -494,31 +493,6 @@ function KanbanColumn({
           <div className="kb-reorder-zone">Insert column here</div>
         )}
       </div>
-
-      {/* Footer */}
-      <div className="kb-col-footer">
-        <button
-          className="kb-add-btn"
-          onClick={() =>
-            navigate(
-              typeSlug
-                ? `/records/${typeSlug}/new`
-                : `/entity-types/${entityTypeId}/records/new`,
-              { state: { workflowId, initialState: state?.name } },
-            )
-          }
-        >
-          <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-            <path
-              d="M5.5 1v9M1 5.5h9"
-              stroke="currentColor"
-              strokeWidth="1.6"
-              strokeLinecap="round"
-            />
-          </svg>
-          Add item
-        </button>
-      </div>
     </div>
   );
 }
@@ -527,6 +501,7 @@ function KanbanColumn({
 
 export function WorkflowRecords(): React.ReactElement {
   const { workflowSlug } = useParams<{ workflowSlug: string }>();
+  const navigate = useNavigate();
   const { getTypeById } = useEntityTypes();
 
   const [workflowId, setWorkflowId] = useState<string>("");
@@ -814,6 +789,22 @@ export function WorkflowRecords(): React.ReactElement {
       {/* Top bar */}
       <div className="kb-topbar">
         <div className="kb-topbar-left">
+          <button
+            type="button"
+            className="kb-back-btn"
+            onClick={() => navigate(-1)}
+            title="Go back"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path
+                d="M10 13L5 8l5-5"
+                stroke="currentColor"
+                strokeWidth="1.75"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
           <h1 className="kb-heading">
             {displayIcon && (
               <span className="kb-heading-icon">{displayIcon}</span>
@@ -839,27 +830,6 @@ export function WorkflowRecords(): React.ReactElement {
               ⚠ {transError}
             </span>
           )}
-          <Link
-            to={`/workflows/${workflowName ? toWorkflowSlug(workflowName) : ""}`}
-            className="kb-settings-btn"
-          >
-            <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-              <circle
-                cx="6.5"
-                cy="6.5"
-                r="2"
-                stroke="currentColor"
-                strokeWidth="1.5"
-              />
-              <path
-                d="M6.5 1v1.5M6.5 10.5V12M1 6.5h1.5M10.5 6.5H12"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              />
-            </svg>
-            Settings
-          </Link>
           {entityTypeId && (
             <Link
               to={
@@ -995,7 +965,18 @@ export function WorkflowRecords(): React.ReactElement {
           transition: background var(--transition-fast), color var(--transition-fast);
           white-space: nowrap;
         }
-        .kb-settings-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+        .kb-back-btn {
+          display: inline-flex; align-items: center; justify-content: center;
+          width: 32px; height: 32px; padding: 0;
+          border-radius: var(--radius-sm);
+          background: var(--bg-secondary);
+          border: 1px solid var(--border-color);
+          color: var(--text-secondary);
+          cursor: pointer;
+          transition: background var(--transition-fast), color var(--transition-fast);
+          flex-shrink: 0;
+        }
+        .kb-back-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); }
 
         .kb-new-btn {
           display: inline-flex; align-items: center; gap: 6px;

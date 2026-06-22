@@ -2,14 +2,14 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { eq, and } from "drizzle-orm";
 import { requireAuth } from "@platform/auth";
-import { db, entityInstances, withTenantContext } from "@platform/db";
+import { entityInstances, tenantUsers, withTenantContext } from "@platform/db";
 import { updateEntity } from "@platform/entity-engine";
 import { factory } from "./factory.js";
 import { handleEntityError } from "../../lib/handle-entity-error.js";
 
 const UpdateEntitySchema = z.object({
   fields: z.record(z.unknown()).optional(),
-  assignedTo: z.string().uuid().nullable().optional(),
+  assignedTo: z.string().nullable().optional(),
   currentState: z.string().optional(),
 });
 
@@ -21,10 +21,10 @@ export const updateEntityHandler = factory.createHandlers(
     const { tenantId, userId, roles } = c.get("auth");
     const input = c.req.valid("json");
 
-    const isAdmin = roles.includes("admin") || roles.includes("agent");
+    const isAdminOrAgent = roles.includes("admin") || roles.includes("agent");
 
-    // `user` role may edit entities assigned to them — fetch to verify assignment
-    if (!isAdmin) {
+    // Non-admin/agent users may only edit records assigned to them
+    if (!isAdminOrAgent) {
       const [row] = await withTenantContext(tenantId, (tx) =>
         tx
           .select({ assignedTo: entityInstances.assignedTo })
@@ -47,14 +47,41 @@ export const updateEntityHandler = factory.createHandlers(
     }
 
     try {
-      const instance = await updateEntity(db, tenantId, id, {
-        ...input,
-        actorId: userId,
-        actorType: "user",
-      });
+      const [dbUser] = await withTenantContext(tenantId, (tx) =>
+        tx
+          .select({
+            displayName: tenantUsers.displayName,
+            email: tenantUsers.email,
+          })
+          .from(tenantUsers)
+          .where(
+            and(
+              eq(tenantUsers.userId, userId),
+              eq(tenantUsers.tenantId, tenantId),
+            ),
+          )
+          .limit(1),
+      );
+      const actorName =
+        dbUser?.displayName && dbUser.displayName !== userId
+          ? dbUser.displayName
+          : dbUser?.email && dbUser.email !== userId
+            ? dbUser.email
+            : null;
+
+      const instance = await withTenantContext(tenantId, (tx) =>
+        updateEntity(tx, tenantId, id, {
+          ...input,
+          actorId: userId,
+          actorType: "user",
+          actorName,
+        }),
+      );
       return c.json({ data: instance });
     } catch (err) {
       return handleEntityError(c, err);
     }
   },
 );
+
+export const updateEntityUserHandler = updateEntityHandler;

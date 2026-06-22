@@ -21,11 +21,34 @@ if (envLocalPath) {
   loadDotenv({ path: envLocalPath, override: false });
 }
 
+// Derive individual URL vars from ZITADEL_URL / APP_URL if not already set.
+// This lets .env.local use just two base vars and have everything flow from them.
+// Individual vars still take priority when set explicitly (??= never overwrites).
+const _raw = process.env as Record<string, string | undefined>;
+if (_raw["ZITADEL_URL"]) {
+  const z = _raw["ZITADEL_URL"];
+  _raw["ZITADEL_ISSUER"] ??= z;
+  _raw["ZITADEL_INTROSPECTION_URL"] ??= `${z}/oauth/v2/introspect`;
+  _raw["ZITADEL_JWKS_URL"] ??= `${z}/oauth/v2/keys`;
+}
+if (_raw["APP_URL"]) {
+  _raw["CORS_ORIGIN"] ??= _raw["APP_URL"];
+}
+
 const EnvSchema = z
   .object({
     NODE_ENV: z
       .enum(["development", "test", "production"])
       .default("development"),
+    // ── Base URL vars (new — set these in .env.local instead of the derived vars below) ──
+    // ZITADEL_URL: single source for all Zitadel endpoints (issuer, JWKS, introspection).
+    //   Local dev default: http://localhost:10405 (or http://zitadel:8080 inside Docker)
+    //   Production:        https://owzitadel.yourcompany.com
+    ZITADEL_URL: z.string().url().optional(),
+    // APP_URL: the URL the frontend is served from. Drives CORS_ORIGIN.
+    //   Local dev default: http://localhost:3001
+    //   Production:        https://openwind.yourcompany.com
+    APP_URL: z.string().url().optional(),
     DATABASE_URL: z.string().url(),
     DATABASE_POOL_MIN: z.coerce.number().int().min(1).default(2),
     DATABASE_POOL_MAX: z.coerce.number().int().min(1).default(10),

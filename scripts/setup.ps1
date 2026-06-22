@@ -41,9 +41,9 @@ if (-not (Test-Path $zitaDir)) {
 $genPatSrcFwd = $genPatSrc -replace '\\', '/'
 $outputDirFwd = $outputDir -replace '\\', '/'
 
-$composeYml = (Get-Content $template -Raw) `
-    -replace '__GEN_PAT_SRC__', $genPatSrcFwd `
-    -replace '__OUTPUT_DIR__',  $outputDirFwd
+$composeYml = Get-Content $template -Raw
+$composeYml = $composeYml -replace '__GEN_PAT_SRC__', $genPatSrcFwd
+$composeYml = $composeYml -replace '__OUTPUT_DIR__', $outputDirFwd
 
 $composePath = Join-Path $zitaDir 'docker-compose.yml'
 Set-Content -Path $composePath -Value $composeYml -Encoding utf8

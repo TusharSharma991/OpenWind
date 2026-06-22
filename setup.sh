@@ -169,7 +169,7 @@ fi
 docker compose up -d postgres pgbouncer redis \
   || fail "Failed to start infrastructure containers"
 
-docker compose --profile bootstrap run -e "ZITADEL_SETUP_PAT=${PAT}" --rm bootstrap \
+docker compose --profile bootstrap run --build -e "ZITADEL_SETUP_PAT=${PAT}" --rm bootstrap \
   || fail "Bootstrap failed — check the output above"
 
 # Clear PAT — bootstrap has converted it to key JSON in .env.local

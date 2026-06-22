@@ -88,7 +88,7 @@ if (-not (Test-Path '.env.local' -PathType Leaf)) {
 docker compose up -d postgres pgbouncer redis
 if ($LASTEXITCODE -ne 0) { Fail "Failed to start infrastructure containers" }
 
-docker compose --profile bootstrap run -e "ZITADEL_SETUP_PAT=$pat" --rm bootstrap
+docker compose --profile bootstrap run --build -e "ZITADEL_SETUP_PAT=$pat" --rm bootstrap
 if ($LASTEXITCODE -ne 0) { Fail "Bootstrap failed -- check the output above" }
 
 $pat = ''

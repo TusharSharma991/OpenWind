@@ -1,6 +1,14 @@
 import React, { useEffect, useState } from "react";
 import { fetchWithAuth, API_URL } from "../lib/api.js";
 
+declare const window: Window & { __CONFIG__?: Record<string, string> };
+const ZITADEL_ISSUER =
+  window.__CONFIG__?.ZITADEL_ISSUER ?? "http://localhost:8080";
+
+function zitadelUserUrl(userId: string): string {
+  return `${ZITADEL_ISSUER}/ui/console/users/${userId}`;
+}
+
 interface User {
   userId: string;
   displayName: string;
@@ -143,99 +151,177 @@ export function UsersPage(): React.ReactElement {
       )}
 
       {!loading && !error && filtered.length > 0 && (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
-            gap: "12px",
-          }}
-        >
-          {filtered.map((u) => {
-            const color = avatarColor(u.userId);
-            return (
-              <div
-                key={u.userId}
-                className="data-panel"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "14px",
-                  padding: "16px",
-                }}
-              >
-                <div
-                  style={{
-                    width: "44px",
-                    height: "44px",
-                    borderRadius: "50%",
-                    background: color,
-                    color: "#fff",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: "15px",
-                    fontWeight: 700,
-                    flexShrink: 0,
-                  }}
-                >
-                  {initials(u.displayName)}
-                </div>
-                <div style={{ minWidth: 0 }}>
-                  <div
+        <div className="data-panel" style={{ overflow: "hidden" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                {["Name", "Email", "Login", "User ID", ""].map((h) => (
+                  <th
+                    key={h}
                     style={{
-                      fontSize: "14px",
-                      fontWeight: 600,
-                      color: "var(--text-primary)",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {u.displayName}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: "12px",
-                      color: "var(--text-muted)",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                      marginTop: "2px",
-                    }}
-                  >
-                    {u.email || u.loginName}
-                  </div>
-                  <div
-                    style={{
+                      textAlign: "left",
+                      padding: "10px 16px",
                       fontSize: "11px",
+                      fontWeight: 600,
                       color: "var(--text-muted)",
-                      fontFamily: "monospace",
-                      opacity: 0.6,
-                      marginTop: "2px",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.05em",
+                      background: "var(--surface-secondary, var(--bg-subtle))",
                     }}
                   >
-                    {u.userId}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {!loading && !error && filtered.length > 0 && (
-        <div
-          style={{
-            marginTop: "16px",
-            fontSize: "12px",
-            color: "var(--text-muted)",
-          }}
-        >
-          {filtered.length} user{filtered.length !== 1 ? "s" : ""}
-          {query ? ` matching "${query}"` : " total"}
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((u, i) => {
+                const color = avatarColor(u.userId);
+                return (
+                  <tr
+                    key={u.userId}
+                    style={{
+                      borderBottom:
+                        i < filtered.length - 1
+                          ? "1px solid var(--border)"
+                          : "none",
+                    }}
+                    onMouseEnter={(e) => {
+                      (
+                        e.currentTarget as HTMLTableRowElement
+                      ).style.background = "var(--bg-subtle)";
+                    }}
+                    onMouseLeave={(e) => {
+                      (
+                        e.currentTarget as HTMLTableRowElement
+                      ).style.background = "";
+                    }}
+                  >
+                    <td style={{ padding: "12px 16px" }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "10px",
+                        }}
+                      >
+                        <div
+                          style={{
+                            width: "32px",
+                            height: "32px",
+                            borderRadius: "50%",
+                            background: color,
+                            color: "#fff",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontSize: "12px",
+                            fontWeight: 700,
+                            flexShrink: 0,
+                          }}
+                        >
+                          {initials(u.displayName)}
+                        </div>
+                        <span
+                          style={{
+                            fontSize: "14px",
+                            fontWeight: 500,
+                            color: "var(--text-primary)",
+                          }}
+                        >
+                          {u.displayName}
+                        </span>
+                      </div>
+                    </td>
+                    <td
+                      style={{
+                        padding: "12px 16px",
+                        fontSize: "13px",
+                        color: "var(--text-secondary)",
+                      }}
+                    >
+                      {u.email}
+                    </td>
+                    <td
+                      style={{
+                        padding: "12px 16px",
+                        fontSize: "13px",
+                        color: "var(--text-secondary)",
+                      }}
+                    >
+                      {u.loginName}
+                    </td>
+                    <td
+                      style={{
+                        padding: "12px 16px",
+                        fontSize: "11px",
+                        color: "var(--text-muted)",
+                        fontFamily: "monospace",
+                      }}
+                    >
+                      {u.userId}
+                    </td>
+                    <td style={{ padding: "12px 16px", textAlign: "right" }}>
+                      <a
+                        href={zitadelUserUrl(u.userId)}
+                        target="_blank"
+                        rel="noreferrer"
+                        title="Open in Zitadel"
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          width: "28px",
+                          height: "28px",
+                          borderRadius: "6px",
+                          color: "var(--text-muted)",
+                          textDecoration: "none",
+                          transition: "background 0.15s, color 0.15s",
+                        }}
+                        onMouseEnter={(e) => {
+                          const el = e.currentTarget as HTMLAnchorElement;
+                          el.style.background = "var(--bg-subtle)";
+                          el.style.color = "var(--accent, #6366f1)";
+                        }}
+                        onMouseLeave={(e) => {
+                          const el = e.currentTarget as HTMLAnchorElement;
+                          el.style.background = "";
+                          el.style.color = "var(--text-muted)";
+                        }}
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="14"
+                          height="14"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"
+                          />
+                        </svg>
+                      </a>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <div
+            style={{
+              padding: "10px 16px",
+              fontSize: "12px",
+              color: "var(--text-muted)",
+              borderTop: "1px solid var(--border)",
+            }}
+          >
+            {filtered.length} user{filtered.length !== 1 ? "s" : ""}
+            {query ? ` matching "${query}"` : " total"}
+          </div>
         </div>
       )}
     </div>

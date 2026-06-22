@@ -290,10 +290,12 @@ services:
     environment:
       DATABASE_URL: postgres://app_user:app_user_dev_password@pgbouncer:5432/platform
       REDIS_URL: redis://redis:6379
-      # Zitadel runs as a separate compose project (../zitadel/).
-      # ow-backend reaches it via the shared openwind_zitadel Docker network.
-      ZITADEL_JWKS_URL: http://zitadel:8080/oauth/v2/keys
-      ZITADEL_INTROSPECTION_URL: http://zitadel:8080/oauth/v2/introspect
+      # Zitadel connection — if ZITADEL_URL is set in .env.local (production / custom deploy)
+      # the backend uses that public URL for JWKS and introspection.
+      # Without ZITADEL_URL the default falls back to the shared Docker network name
+      # (http://zitadel:8080) so local dev continues to work with no extra config.
+      ZITADEL_JWKS_URL: ${ZITADEL_URL:-http://zitadel:8080}/oauth/v2/keys
+      ZITADEL_INTROSPECTION_URL: ${ZITADEL_URL:-http://zitadel:8080}/oauth/v2/introspect
       # OPENBAO_ADDR: http://openbao:8200  # uncomment when openbao service is enabled
       # S3_ENDPOINT: http://minio:9000      # uncomment when minio service is enabled
     restart: unless-stopped

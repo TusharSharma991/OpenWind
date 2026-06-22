@@ -17,7 +17,6 @@ import { AuthCallback } from "./pages/callback.js";
 import { Dashboard } from "./pages/dashboard.js";
 import { Modules } from "./pages/modules.js";
 import { EntityTypeDetail } from "./pages/entity-types/detail.js";
-import { EntityInstanceDetail } from "./pages/entity-types/instance-detail.js";
 import { EntityInstanceCreate } from "./pages/entity-types/instance-create.js";
 import { Workflows } from "./pages/workflows/index.js";
 import { WorkflowDetail } from "./pages/workflows/detail.js";
@@ -93,10 +92,6 @@ export function App(): React.ReactElement {
             <Route
               path="/entity-types/:id/records/new"
               element={<EntityInstanceCreate />}
-            />
-            <Route
-              path="/entity-types/:id/records/:instanceId"
-              element={<EntityInstanceDetail />}
             />
 
             {/* Workflows */}

@@ -92,5 +92,6 @@ export function extractAuthContext(
     roles,
     email: claims.email ?? "",
     displayName,
+    orgId,
   };
 }

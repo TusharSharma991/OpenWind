@@ -37,30 +37,41 @@ usersRouter.get(
     // Build a lookup of DB-enriched display names (set on login)
     const dbByUserId = new Map(dbRows.map((r) => [r.userId, r]));
 
-    // Merge: Zitadel is source of truth for user list; DB provides local overrides
+    // Merge: Zitadel is source of truth for names; DB only enriches when it has
+    // a *real* display name (not the userId placeholder stored when JWT has no claims).
+    const zitadelByUserId = new Map(zitadelUsers.map((u) => [u.userId, u]));
     const merged = zitadelUsers.map((u) => {
       const dbRow = dbByUserId.get(u.userId);
+      // DB display name is only useful when it differs from the userId (i.e. a real name was stored)
+      const dbDisplayName =
+        dbRow?.displayName && dbRow.displayName !== u.userId
+          ? dbRow.displayName
+          : null;
       return {
         userId: u.userId,
         email: dbRow?.email ?? u.email,
-        displayName: dbRow?.displayName ?? u.displayName,
+        displayName: dbDisplayName ?? u.displayName,
         loginName: u.loginName,
       };
     });
 
-    // If Zitadel is unreachable fall back to DB-only list
-    const list =
-      merged.length > 0
-        ? merged
-        : dbRows.map((r) => ({
-            userId: r.userId,
-            email: r.email ?? "",
-            displayName: r.displayName ?? r.email ?? r.userId,
-            loginName: r.email ?? r.userId,
-          }));
+    // Also include DB users not returned by Zitadel (e.g. instance admin in default org)
+    for (const r of dbRows) {
+      if (!zitadelByUserId.has(r.userId)) {
+        // displayName stored as userId means no real name — use email if available
+        const realName =
+          r.displayName && r.displayName !== r.userId ? r.displayName : null;
+        merged.push({
+          userId: r.userId,
+          email: r.email ?? "",
+          displayName: realName ?? r.email ?? r.userId,
+          loginName: r.email ?? r.userId,
+        });
+      }
+    }
 
-    list.sort((a, b) => a.displayName.localeCompare(b.displayName));
+    merged.sort((a, b) => a.displayName.localeCompare(b.displayName));
 
-    return c.json({ data: list });
+    return c.json({ data: merged });
   },
 );

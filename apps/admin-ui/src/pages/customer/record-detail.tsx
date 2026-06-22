@@ -43,6 +43,7 @@ type WorkflowEvent = {
   fromState: string | null;
   toState: string;
   actorId: string;
+  actorDisplayName?: string | null;
   comment: string | null;
   triggeredAt: string;
   metadata?: Record<string, unknown>;
@@ -377,13 +378,19 @@ export function CustomerRecordDetail(): React.ReactElement {
   const [transError, setTransError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [editValues, setEditValues] = useState<Record<string, unknown>>({});
+  const [editAssignedTo, setEditAssignedTo] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [allStates, setAllStates] = useState<WorkflowState[]>([]);
   const [allTransitions, setAllTransitions] = useState<Transition[]>([]);
   const [currentState, setCurrentState] = useState("");
   const [users, setUsers] = useState<
-    Array<{ userId: string; email: string; displayName: string | null }>
+    Array<{
+      userId: string;
+      email: string;
+      displayName: string | null;
+      loginName?: string;
+    }>
   >([]);
 
   const getFieldLabel = (fieldName: string): string => {
@@ -396,7 +403,8 @@ export function CustomerRecordDetail(): React.ReactElement {
   const getActorName = (actorId: string | null): string => {
     if (!actorId) return "System";
     const u = users.find((user) => user.userId === actorId);
-    return u?.displayName ?? u?.email ?? actorId.slice(0, 8) + "…";
+    if (!u) return actorId.slice(0, 8) + "…";
+    return u.displayName ?? u.loginName ?? u.email;
   };
 
   function loadRecord(): Promise<void> {
@@ -487,7 +495,11 @@ export function CustomerRecordDetail(): React.ReactElement {
     try {
       await fetchWithAuth(`${API_URL}/entities/${id}`, {
         method: "PATCH",
-        body: JSON.stringify({ fields: editValues, currentState }),
+        body: JSON.stringify({
+          fields: editValues,
+          currentState,
+          assignedTo: editAssignedTo || null,
+        }),
       });
       setEditing(false);
       setLoading(true);
@@ -638,6 +650,7 @@ export function CustomerRecordDetail(): React.ReactElement {
             onClick={() => {
               setEditValues(record.fields);
               setCurrentState(record.currentState ?? "");
+              setEditAssignedTo(record.assignedTo ?? "");
               setEditing(true);
               setSaveError(null);
             }}
@@ -703,6 +716,7 @@ export function CustomerRecordDetail(): React.ReactElement {
                   onClick={() => {
                     setEditValues(record.fields);
                     setCurrentState(record.currentState ?? "");
+                    setEditAssignedTo(record.assignedTo ?? "");
                     setEditing(true);
                     setSaveError(null);
                   }}
@@ -743,6 +757,21 @@ export function CustomerRecordDetail(): React.ReactElement {
                       </select>
                     </div>
                   )}
+                  <div className="portal-field-group portal-field-full">
+                    <label className="portal-field-label">Assigned To</label>
+                    <select
+                      className="portal-input"
+                      value={editAssignedTo}
+                      onChange={(e) => setEditAssignedTo(e.target.value)}
+                    >
+                      <option value="">Unassigned</option>
+                      {users.map((u) => (
+                        <option key={u.userId} value={u.userId}>
+                          {u.displayName ?? u.email}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                   {fields.map((f) => (
                     <div
                       key={f.id}
@@ -786,6 +815,25 @@ export function CustomerRecordDetail(): React.ReactElement {
               </div>
             ) : (
               <div className="rcd-fields">
+                <div className="rcd-field-row">
+                  <div className="rcd-field-label">Assigned To</div>
+                  <div className="rcd-field-value">
+                    {record.assignedTo ? (
+                      <span>
+                        {(() => {
+                          const u = users.find(
+                            (u) => u.userId === record.assignedTo,
+                          );
+                          return u
+                            ? (u.displayName ?? u.loginName ?? u.email)
+                            : record.assignedTo;
+                        })()}
+                      </span>
+                    ) : (
+                      <span className="rcd-muted">Unassigned</span>
+                    )}
+                  </div>
+                </div>
                 {fields.map((f) => (
                   <div key={f.id} className="rcd-field-row">
                     <div className="rcd-field-label">{f.label}</div>
@@ -850,7 +898,9 @@ export function CustomerRecordDetail(): React.ReactElement {
                           <div className="rcd-tl-title">
                             Record created
                             <span className="rcd-tl-actor">
-                              by {getActorName(event.actorId)}
+                              by{" "}
+                              {event.actorDisplayName ??
+                                getActorName(event.actorId)}
                             </span>
                           </div>
                         ) : isUpdate ? (
@@ -858,7 +908,9 @@ export function CustomerRecordDetail(): React.ReactElement {
                             <div className="rcd-tl-title">
                               Record updated
                               <span className="rcd-tl-actor">
-                                by {getActorName(event.actorId)}
+                                by{" "}
+                                {event.actorDisplayName ??
+                                  getActorName(event.actorId)}
                               </span>
                             </div>
                             {"changed" in (meta as Record<string, unknown>) &&
@@ -885,8 +937,24 @@ export function CustomerRecordDetail(): React.ReactElement {
                                       <strong>
                                         {getFieldLabel(fieldName)}
                                       </strong>
-                                      : {String(change["old"] ?? "—")} →{" "}
-                                      {String(change["new"] ?? "—")}
+                                      :{" "}
+                                      {fieldName === "assignedTo"
+                                        ? ((change["oldName"] as
+                                            | string
+                                            | null) ??
+                                          getActorName(
+                                            change["old"] as string | null,
+                                          ))
+                                        : String(change["old"] ?? "—")}{" "}
+                                      →{" "}
+                                      {fieldName === "assignedTo"
+                                        ? ((change["newName"] as
+                                            | string
+                                            | null) ??
+                                          getActorName(
+                                            change["new"] as string | null,
+                                          ))
+                                        : String(change["new"] ?? "—")}
                                     </li>
                                   ))}
                                 </ul>
@@ -919,7 +987,9 @@ export function CustomerRecordDetail(): React.ReactElement {
                               {event.toState}
                             </span>
                             <span className="rcd-tl-actor">
-                              by {getActorName(event.actorId)}
+                              by{" "}
+                              {event.actorDisplayName ??
+                                getActorName(event.actorId)}
                             </span>
                           </div>
                         )}

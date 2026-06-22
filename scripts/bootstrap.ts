@@ -613,8 +613,9 @@ async function runZitadelSetup(
   let oidcClientId: string;
   let oidcClientSecret: string;
 
-  // Include CORS_ORIGIN (production domain) in redirect URIs when set
-  const corsOrigin = process.env["CORS_ORIGIN"];
+  // Include APP_URL / CORS_ORIGIN in redirect URIs when set.
+  // APP_URL is the new base var; CORS_ORIGIN is the legacy alias — check both.
+  const corsOrigin = process.env["APP_URL"] ?? process.env["CORS_ORIGIN"];
   const extraOrigins: string[] = corsOrigin ? [corsOrigin] : [];
   const oidcPayload = {
     redirectUris: [
@@ -778,6 +779,9 @@ async function runZitadelSetup(
   // VITE_ prefixed copies are needed because Vite only exposes VITE_* vars
   // to import.meta.env in the dev server.
   writeEnvVars({
+    // Base URL vars — set these and the derived vars below are optional.
+    ZITADEL_URL: ZITADEL_BROWSER_URL,
+    // Keep explicit derived vars so existing setups that read them directly still work.
     ZITADEL_ISSUER: ZITADEL_BROWSER_URL,
     ZITADEL_AUDIENCE: projectId,
     ZITADEL_INTROSPECTION_URL: `${ZITADEL_BROWSER_URL}/oauth/v2/introspect`,

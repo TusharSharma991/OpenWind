@@ -1,4 +1,5 @@
 import { request as nodeHttpRequest } from "node:http";
+import { createPrivateKey } from "node:crypto";
 import { importPKCS8, SignJWT } from "jose";
 import { z } from "zod";
 import { env } from "@platform/config";
@@ -138,7 +139,15 @@ async function getAccessToken(): Promise<string | null> {
   if (!keyConfig) return null;
 
   try {
-    const privateKey = await importPKCS8(keyConfig.key, "RS256");
+    // Zitadel may return PKCS#1 ("BEGIN RSA PRIVATE KEY") or PKCS#8 ("BEGIN PRIVATE KEY").
+    // importPKCS8 only handles PKCS#8 — normalise via Node's createPrivateKey which accepts both.
+    const keyPem = keyConfig.key.includes("BEGIN PRIVATE KEY")
+      ? keyConfig.key
+      : (createPrivateKey(keyConfig.key).export({
+          type: "pkcs8",
+          format: "pem",
+        }) as string);
+    const privateKey = await importPKCS8(keyPem, "RS256");
     const assertion = await new SignJWT({})
       .setProtectedHeader({ alg: "RS256", kid: keyConfig.keyId })
       .setIssuedAt()

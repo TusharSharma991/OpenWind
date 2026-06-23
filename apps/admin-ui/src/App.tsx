@@ -102,6 +102,12 @@ export function App(): React.ReactElement {
 
             <Route path="/modules" element={<Modules />} />
 
+            {/* Workflow detail — access checked inside component (admin or workflow assignee) */}
+            <Route
+              path="/workflows/:workflowSlug"
+              element={<WorkflowDetail />}
+            />
+
             {/* Admin-only routes */}
             <Route element={<RequireAdmin />}>
               <Route path="/users" element={<UsersPage />} />
@@ -112,10 +118,6 @@ export function App(): React.ReactElement {
               />
               <Route path="/workflows" element={<Workflows />} />
               <Route path="/workflows/new" element={<CreateWorkflow />} />
-              <Route
-                path="/workflows/:workflowSlug"
-                element={<WorkflowDetail />}
-              />
             </Route>
 
             <Route path="/home" element={<Navigate to="/records" replace />} />

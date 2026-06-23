@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useOne } from "@refinedev/core";
-import { useParams, Link, useNavigate } from "react-router-dom";
+import { useParams, Link, useNavigate, Navigate } from "react-router-dom";
 import { fetchWithAuth, API_URL } from "../../lib/api.js";
 import { useEntityTypes } from "../../entity-type-context.js";
 import { UserPicker } from "../../components/user-picker.js";
 import type { UserOption } from "../../components/user-picker.js";
+import { userManager } from "../../authProvider.js";
 
 function toWorkflowSlug(name: string): string {
   return name
@@ -534,6 +535,25 @@ export function WorkflowDetail(): React.ReactElement {
 
   const [togglingActive, setTogglingActive] = useState(false);
 
+  // Current user identity for access control
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [currentUserRoles, setCurrentUserRoles] = useState<string[]>([]);
+  useEffect(() => {
+    userManager
+      .getUser()
+      .then((u) => {
+        if (!u) return;
+        setCurrentUserId(u.profile.sub);
+        const roleClaim = u.profile["urn:zitadel:iam:org:project:roles"] as
+          | Record<string, unknown>
+          | undefined;
+        setCurrentUserRoles(roleClaim ? Object.keys(roleClaim) : []);
+      })
+      .catch(() => {
+        /* leave defaults */
+      });
+  }, []);
+
   // User assignment
   const [orgUsers, setOrgUsers] = useState<UserOption[]>([]);
   const [assignedTo, setAssignedTo] = useState<string | null>(null);
@@ -887,6 +907,16 @@ export function WorkflowDetail(): React.ReactElement {
         </Link>
       </div>
     );
+  }
+
+  // Access check: only admin role or the assigned workflow admin can view this page
+  const isAdmin = currentUserRoles.includes("admin");
+  const isWorkflowAdmin =
+    currentUserId !== null &&
+    workflow.assignedTo !== null &&
+    currentUserId === workflow.assignedTo;
+  if (currentUserId !== null && !isAdmin && !isWorkflowAdmin) {
+    return <Navigate to="/dashboard" replace />;
   }
 
   const sortedStates = [...workflow.states].sort(

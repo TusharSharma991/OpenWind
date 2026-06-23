@@ -19,6 +19,9 @@ ZITADEL_EXTERNALSECURE="${ZITADEL_EXTERNALSECURE:-false}"
 # ZITADEL_EXTERNAL_PORT is the public port browsers use (443 for HTTPS behind a
 # reverse proxy, same as ZITADEL_HOST_PORT for direct HTTP deployments).
 ZITADEL_EXTERNAL_PORT="${ZITADEL_EXTERNAL_PORT:-${ZITADEL_HOST_PORT}}"
+# tlsMode: "disabled" for local dev (no reverse proxy), "external" when nginx/caddy
+# terminates TLS in front of Zitadel. Must be "external" for EXTERNALSECURE=true to work.
+ZITADEL_TLS_MODE="${ZITADEL_TLS_MODE:-disabled}"
 
 # Browser-accessible Zitadel URL — shown in summary and used in OIDC config
 if [[ "$ZITADEL_EXTERNALSECURE" == "true" ]]; then
@@ -87,7 +90,7 @@ services:
     container_name: zitadel
     image: ghcr.io/zitadel/zitadel:v4.15.1
     restart: unless-stopped
-    command: start-from-init --masterkey "MasterkeyNeedsToHave32Characters" --tlsMode disabled
+    command: start-from-init --masterkey "MasterkeyNeedsToHave32Characters" --tlsMode ${ZITADEL_TLS_MODE}
     environment:
       ZITADEL_DATABASE_POSTGRES_HOST: zitadel-db
       ZITADEL_DATABASE_POSTGRES_PORT: 5432

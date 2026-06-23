@@ -24,7 +24,7 @@ services:
     container_name: zitadel
     image: ghcr.io/zitadel/zitadel:v4.15.1
     restart: unless-stopped
-    command: start-from-init --masterkey "MasterkeyNeedsToHave32Characters" --tlsMode disabled
+    command: start-from-init --masterkey "MasterkeyNeedsToHave32Characters" --tlsMode ${ZITADEL_TLS_MODE:-disabled}
     environment:
       ZITADEL_DATABASE_POSTGRES_HOST: zitadel-db
       ZITADEL_DATABASE_POSTGRES_PORT: 5432

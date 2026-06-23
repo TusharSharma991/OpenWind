@@ -35,9 +35,9 @@ services:
       ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME: zitadel
       ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD: zitadel_dev_password
       ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE: disable
-      ZITADEL_EXTERNALSECURE: "false"
-      ZITADEL_EXTERNALPORT: "8080"
-      ZITADEL_EXTERNALDOMAIN: "localhost"
+      ZITADEL_EXTERNALSECURE: "${ZITADEL_EXTERNALSECURE:-false}"
+      ZITADEL_EXTERNALPORT: "${ZITADEL_EXTERNAL_PORT:-8080}"
+      ZITADEL_EXTERNALDOMAIN: "${ZITADEL_EXTERNAL_DOMAIN:-localhost}"
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: owZitadelAdmin@openwind.local
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: Admin1234!
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORDCHANGEREQUIRED: "false"
@@ -45,7 +45,7 @@ services:
       ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_REQUIRED: "false"
       ZITADEL_DEFAULTINSTANCE_FEATURES_TOKENEXCHANGE: "true"
     ports:
-      - "8080:8080"
+      - "${ZITADEL_HOST_PORT:-8080}:8080"
     depends_on:
       zitadel-db:
         condition: service_healthy
@@ -69,7 +69,8 @@ services:
       - __OUTPUT_DIR__:/app/output
     command: node /app/scripts/gen-pat.mjs
     environment:
-      ZITADEL_EXTERNALDOMAIN: "localhost"
+      ZITADEL_EXTERNALDOMAIN: "${ZITADEL_EXTERNAL_DOMAIN:-localhost}"
+      ZITADEL_EXTERNALSECURE: "${ZITADEL_EXTERNALSECURE:-false}"
     networks:
       - openwind_zitadel
     depends_on:

@@ -10,6 +10,27 @@ OUTPUT_DIR="$ZITA_DIR/output"
 PAT_FILE="$OUTPUT_DIR/pat.txt"
 GEN_PAT_SRC="$OW_DIR/scripts/gen-pat.mjs"
 
+# ── Deployment config — override via environment for hosted deployments ────────
+# Set these in .env.server (gitignored) and source it before running this script.
+# Defaults produce the standard local dev setup (localhost, HTTP).
+ZITADEL_EXTERNAL_DOMAIN="${ZITADEL_EXTERNAL_DOMAIN:-localhost}"
+ZITADEL_HOST_PORT="${ZITADEL_HOST_PORT:-8080}"
+ZITADEL_EXTERNALSECURE="${ZITADEL_EXTERNALSECURE:-false}"
+# ZITADEL_EXTERNAL_PORT is the public port browsers use (443 for HTTPS behind a
+# reverse proxy, same as ZITADEL_HOST_PORT for direct HTTP deployments).
+ZITADEL_EXTERNAL_PORT="${ZITADEL_EXTERNAL_PORT:-${ZITADEL_HOST_PORT}}"
+
+# Browser-accessible Zitadel URL — shown in summary and used in OIDC config
+if [[ "$ZITADEL_EXTERNALSECURE" == "true" ]]; then
+  ZITADEL_BROWSER_URL="https://${ZITADEL_EXTERNAL_DOMAIN}"
+elif [[ "$ZITADEL_EXTERNAL_DOMAIN" != "localhost" ]]; then
+  ZITADEL_BROWSER_URL="http://${ZITADEL_EXTERNAL_DOMAIN}:${ZITADEL_HOST_PORT}"
+else
+  ZITADEL_BROWSER_URL="http://localhost:${ZITADEL_HOST_PORT}"
+fi
+
+OPENWIND_URL="${APP_URL:-http://localhost:${ADMIN_UI_HOST_PORT:-3001}}"
+
 # ── Colours ───────────────────────────────────────────────────────────────────
 C='\033[0;36m'; G='\033[0;32m'; Y='\033[0;33m'; R='\033[0m'; DIM='\033[2m'
 banner() { echo -e "\n  ${C}$1${R}"; }
@@ -77,9 +98,9 @@ services:
       ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME: zitadel
       ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD: zitadel_dev_password
       ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE: disable
-      ZITADEL_EXTERNALSECURE: "false"
-      ZITADEL_EXTERNALPORT: "8080"
-      ZITADEL_EXTERNALDOMAIN: "localhost"
+      ZITADEL_EXTERNALSECURE: "${ZITADEL_EXTERNALSECURE}"
+      ZITADEL_EXTERNALPORT: "${ZITADEL_EXTERNAL_PORT}"
+      ZITADEL_EXTERNALDOMAIN: "${ZITADEL_EXTERNAL_DOMAIN}"
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: owZitadelAdmin@openwind.local
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: Admin1234!
       ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORDCHANGEREQUIRED: "false"
@@ -87,7 +108,7 @@ services:
       ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_REQUIRED: "false"
       ZITADEL_DEFAULTINSTANCE_FEATURES_TOKENEXCHANGE: "true"
     ports:
-      - "8080:8080"
+      - "${ZITADEL_HOST_PORT}:8080"
     depends_on:
       zitadel-db:
         condition: service_healthy
@@ -111,7 +132,8 @@ services:
       - $OUTPUT_DIR:/app/output
     command: node /app/scripts/gen-pat.mjs
     environment:
-      ZITADEL_EXTERNALDOMAIN: "localhost"
+      ZITADEL_EXTERNALDOMAIN: "${ZITADEL_EXTERNAL_DOMAIN}"
+      ZITADEL_EXTERNALSECURE: "${ZITADEL_EXTERNALSECURE}"
     networks:
       - openwind_zitadel
     depends_on:
@@ -185,7 +207,10 @@ ok "App containers started"
 
 echo ""
 echo "  ============================================="
-echo "   Done!  Open http://localhost:3001"
+echo "   Done!"
+echo ""
+echo "   OpenWind:  $OPENWIND_URL"
+echo "   Zitadel:   $ZITADEL_BROWSER_URL"
 echo "  ============================================="
 echo ""
 echo "   owAdmin / OpenWind1234!   (admin)"

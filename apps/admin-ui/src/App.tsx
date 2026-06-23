@@ -30,6 +30,7 @@ import { CustomerRecordCreate } from "./pages/customer/record-create.js";
 import { CustomerRecordDetail } from "./pages/customer/record-detail.js";
 import { Automations } from "./pages/automations/index.js";
 import { AutomationWizard } from "./pages/automations/wizard/wizard.js";
+import { RequireAdmin } from "./components/require-admin.js";
 import "./index.css";
 
 export function App(): React.ReactElement {
@@ -79,28 +80,10 @@ export function App(): React.ReactElement {
               </Authenticated>
             }
           >
-            {/* Admin / Agent routes */}
+            {/* All authenticated users */}
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/modules" element={<Modules />} />
-
-            {/* Records — workflow cards; card click goes to /records/:typeSlug */}
             <Route path="/records" element={<AdminRecords />} />
-
-            {/* Entity types — still accessible from workflow detail "Manage Fields" link */}
-            <Route path="/entity-types/:id" element={<EntityTypeDetail />} />
-            <Route
-              path="/entity-types/:id/records/new"
-              element={<EntityInstanceCreate />}
-            />
-
-            {/* Workflows */}
-            <Route path="/workflows" element={<Workflows />} />
-            <Route path="/workflows/new" element={<CreateWorkflow />} />
-            <Route
-              path="/workflows/:workflowSlug"
-              element={<WorkflowDetail />}
-            />
             <Route
               path="/workflows/:workflowSlug/records"
               element={<WorkflowRecords />}
@@ -114,11 +97,8 @@ export function App(): React.ReactElement {
               element={<AutomationWizard />}
             />
 
-            <Route path="/users" element={<UsersPage />} />
-            <Route path="/settings" element={<Settings />} />
 
             {/* Customer routes */}
-            <Route path="/home" element={<Navigate to="/records" replace />} />
             <Route path="/records/:typeSlug" element={<CustomerRecordList />} />
             <Route
               path="/records/:typeSlug/new"
@@ -128,6 +108,26 @@ export function App(): React.ReactElement {
               path="/records/:typeSlug/:id"
               element={<CustomerRecordDetail />}
             />
+
+            {/* Admin-only routes */}
+            <Route element={<RequireAdmin />}>
+              <Route path="/modules" element={<Modules />} />
+              <Route path="/users" element={<UsersPage />} />
+              <Route path="/settings" element={<Settings />} />
+              <Route path="/entity-types/:id" element={<EntityTypeDetail />} />
+              <Route
+                path="/entity-types/:id/records/new"
+                element={<EntityInstanceCreate />}
+              />
+              <Route path="/workflows" element={<Workflows />} />
+              <Route path="/workflows/new" element={<CreateWorkflow />} />
+              <Route
+                path="/workflows/:workflowSlug"
+                element={<WorkflowDetail />}
+              />
+            </Route>
+
+            <Route path="/home" element={<Navigate to="/records" replace />} />
           </Route>
         </Routes>
       </Refine>

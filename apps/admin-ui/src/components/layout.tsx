@@ -237,7 +237,8 @@ export function Layout({
   }
 
   function isActive(route: string): boolean {
-    if (route === "/") return location.pathname === "/";
+    if (route === "/")
+      return location.pathname === "/" || location.pathname === "/dashboard";
     return (
       location.pathname === route || location.pathname.startsWith(route + "/")
     );

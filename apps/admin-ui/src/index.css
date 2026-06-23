@@ -2473,8 +2473,9 @@ select.form-input {
 .rcd-error-close { background: none; border: none; cursor: pointer; font-size: 18px; color: inherit; padding: 0 4px; line-height: 1; }
 
 /* Two-column layout */
-.rcd-layout { display: grid; grid-template-columns: 1fr 280px; gap: 20px; align-items: start; }
+.rcd-layout { display: grid; grid-template-columns: 1fr 280px; gap: 20px; align-items: stretch; }
 .rcd-main { display: flex; flex-direction: column; gap: 20px; }
+.rcd-main > .rcd-panel { flex: 1; }
 .rcd-sidebar { display: flex; flex-direction: column; gap: 16px; }
 
 /* Panel */
@@ -2950,3 +2951,75 @@ select.form-input {
 .cmt-reply-btn:hover { color: var(--accent-primary); background: hsla(250,84%,60%,.08); }
 .cmt-inline-reply { margin-top: 10px; }
 .cmt-replies { border-left: 2px solid hsla(250,84%,60%,.15); margin-left: 14px; margin-top: 4px; }
+
+/* ── Full-width activity section (History / Comments) ── */
+.rcd-activity-section {
+  margin-top: 24px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.rcd-activity-section .rcd-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  padding: 0 20px;
+}
+.rcd-activity-section .rcd-tab {
+  padding: 14px 20px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-3);
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: color 0.15s, border-color 0.15s;
+}
+.rcd-activity-section .rcd-tab:hover { color: var(--text); }
+.rcd-activity-section .rcd-tab-active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.rcd-activity-section .rcd-tab-count {
+  background: var(--accent-light);
+  color: var(--accent);
+  border-radius: 10px;
+  padding: 1px 7px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+.rcd-activity-body {
+  padding: 24px;
+  background: var(--surface);
+}
+.rcd-timeline-wide .rcd-tl-item {
+  padding-bottom: 20px;
+}
+.rcd-activity-body.cmt-tab { padding: 20px 24px; }
+
+/* Circular pencil edit icon on details panel */
+.rcd-panel-edit-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--border-color);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+}
+.rcd-panel-edit-icon:hover {
+  background: var(--accent-light);
+  color: var(--accent-primary);
+  border-color: var(--accent-primary);
+}

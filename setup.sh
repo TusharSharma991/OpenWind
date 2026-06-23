@@ -162,6 +162,10 @@ info "(First boot takes 60-90s while Zitadel initialises)"
 echo ""
 
 cd "$ZITA_DIR"
+# Temporarily unset COMPOSE_FILE so zitadel docker compose commands don't
+# pick up the openwind compose file list (e.g. docker-compose.server.yml).
+OW_COMPOSE_FILE="${COMPOSE_FILE:-}"
+unset COMPOSE_FILE
 
 docker compose up -d || fail "Failed to start Zitadel containers"
 
@@ -172,6 +176,8 @@ docker compose --profile setup run --rm ow-zita-setup \
   || fail "PAT generation failed — check: docker compose logs zitadel"
 
 cd "$OW_DIR"
+# Restore COMPOSE_FILE for openwind docker compose commands
+[[ -n "$OW_COMPOSE_FILE" ]] && export COMPOSE_FILE="$OW_COMPOSE_FILE" || true
 
 [[ -f "$PAT_FILE" ]] || fail "PAT file not found at $PAT_FILE — gen-pat.mjs did not complete"
 PAT="$(cat "$PAT_FILE" | tr -d '[:space:]')"

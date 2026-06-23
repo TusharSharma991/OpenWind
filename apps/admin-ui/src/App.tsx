@@ -100,9 +100,10 @@ export function App(): React.ReactElement {
 
             <Route path="/settings" element={<Settings />} />
 
+            <Route path="/modules" element={<Modules />} />
+
             {/* Admin-only routes */}
             <Route element={<RequireAdmin />}>
-              <Route path="/modules" element={<Modules />} />
               <Route path="/users" element={<UsersPage />} />
               <Route path="/entity-types/:id" element={<EntityTypeDetail />} />
               <Route

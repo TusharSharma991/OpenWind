@@ -23,6 +23,12 @@ packages/*/src/**/*.d.ts.map
 # Local Docker overrides
 docker-compose.override.yml
 
+# Server deployment files — hosted config for rokkalabs.com, not for open-source
+.env.server
+docker-compose.server.yml
+setup.server.sh
+server-up.sh
+
 # Database
 *.db
 *.sqlite

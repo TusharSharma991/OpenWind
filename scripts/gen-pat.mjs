@@ -26,13 +26,18 @@ import { request as nodeRequest }         from 'node:http'
 import { createHash, randomBytes }        from 'node:crypto'
 import { writeFileSync, mkdirSync }       from 'node:fs'
 
-const ZITADEL_HOST  = 'zitadel'
-const ZITADEL_PORT  = 8080
-const HOST_HEADER   = process.env.ZITADEL_EXTERNALDOMAIN ?? 'localhost'
-const ADMIN_LOGIN   = 'owZitadelAdmin@openwind.local'
-const ADMIN_PASS    = 'Admin1234!'
-const PAT_EXPIRY    = '2030-01-01T00:00:00Z'
-const REDIRECT_URI  = `http://${HOST_HEADER}:${ZITADEL_PORT}/ui/console/auth/callback`
+const ZITADEL_HOST   = 'zitadel'
+const ZITADEL_PORT   = 8080
+const HOST_HEADER    = process.env.ZITADEL_EXTERNALDOMAIN ?? 'localhost'
+// When ExternalSecure=true the public URL is HTTPS on the standard port (443) via a
+// reverse proxy — the redirect URI must match what Zitadel exposes to browsers.
+const ZITADEL_SECURE = process.env.ZITADEL_EXTERNALSECURE === 'true'
+const ADMIN_LOGIN    = 'owZitadelAdmin@openwind.local'
+const ADMIN_PASS     = 'Admin1234!'
+const PAT_EXPIRY     = '2030-01-01T00:00:00Z'
+const REDIRECT_URI   = ZITADEL_SECURE
+  ? `https://${HOST_HEADER}/ui/console/auth/callback`
+  : `http://${HOST_HEADER}:${ZITADEL_PORT}/ui/console/auth/callback`
 
 // ── ANSI colours ─────────────────────────────────────────────────────────────
 const G = '\x1b[32m', Y = '\x1b[33m', C = '\x1b[36m', B = '\x1b[1m', R = '\x1b[0m', D = '\x1b[2m'

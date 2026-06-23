@@ -36,15 +36,15 @@ const IN_DOCKER = process.env["RUNNING_IN_DOCKER"] === "true";
 const _ZITADEL_EXTERNAL_DOMAIN =
   process.env["ZITADEL_EXTERNAL_DOMAIN"] ?? "localhost";
 const _ZITADEL_HOST_PORT = process.env["ZITADEL_HOST_PORT"] ?? "8080";
-// ZITADEL_BASE is used for API calls — Zitadel routes by Host header so the
-// URL must match EXTERNALDOMAIN for instance lookup to succeed.
-// Inside Docker the container always listens on :8080 regardless of host port.
+// ZITADEL_BASE is used for API calls from within the bootstrap container.
+// When IN_DOCKER, always connect via Docker service name (zitadel:8080) regardless
+// of the external domain — the httpPost/httpGet helpers set the Host header separately
+// so Zitadel's instance routing still works. This avoids routing through the public
+// internet when ExternalDomain is a real hostname (e.g. owzitadel.rokkalabs.com).
 const ZITADEL_BASE =
   process.env["ZITADEL_BOOTSTRAP_URL"] ??
   (IN_DOCKER
-    ? _ZITADEL_EXTERNAL_DOMAIN !== "localhost"
-      ? `http://${_ZITADEL_EXTERNAL_DOMAIN}:8080`
-      : "http://zitadel:8080"
+    ? "http://zitadel:8080"
     : `http://localhost:${_ZITADEL_HOST_PORT}`);
 // Health check always uses the internal container address — no Host header
 // routing needed, and it works regardless of EXTERNALSECURE setting.

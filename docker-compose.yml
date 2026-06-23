@@ -348,6 +348,10 @@ services:
       ZITADEL_EXTERNAL_DOMAIN: "${ZITADEL_EXTERNAL_DOMAIN:-localhost}"
       ZITADEL_HOST_PORT: "${ZITADEL_HOST_PORT:-8080}"
       ZITADEL_EXTERNALSECURE: "${ZITADEL_EXTERNALSECURE:-false}"
+      # APP_URL is the public base URL of the OpenWind UI (e.g. https://openwind.rokkalabs.com).
+      # Bootstrap uses it to register the correct OIDC redirect URIs in Zitadel.
+      # Leave empty for local dev — localhost:3001 redirect URIs are always registered.
+      APP_URL: "${APP_URL:-}"
       # Passed in by setup.bat/setup.sh via: docker compose run -e ZITADEL_SETUP_PAT=<token>
       # Used on first boot only — after bootstrap saves ZITADEL_KEY_JSON this is no longer needed.
       ZITADEL_SETUP_PAT: "${ZITADEL_SETUP_PAT:-}"

@@ -5,6 +5,39 @@
 
 ---
 
+## 2026-06-23 — External review; doc reconciliation
+
+**Session type:** Documentation / planning
+**Branch:** `main`, clean
+
+### Completed this session
+
+- Received three-lens external review (CTO architecture + risk, Product capability, UX adoption) dated 2026-06-23.
+- Reconciled CLAUDE.md, VISION.md, db-conventions.md with code reality (Phase 2 was 100% complete but docs still showed 0%/95%).
+- Identified pre-Phase 3 hardening items (10 issues, no code changed yet — see CLAUDE.md Current Focus).
+
+### Key findings (external review)
+
+- **Engineering health: 6.5/10.** Well-architected core; dragged down by untested RLS guarantee, unbounded automation recursion, and dev-grade ops.
+- **Product capability: ~80% of platform engine built.** Gaps: notification delivery is a stub, `entity.created`/`entity.assigned` triggers never fire, `setEntityState` is an unguarded side-door, 6 of 7 module seeds have no automations.
+- **UX adoption: 7/10.** Strong admin experience; portal field inputs for `file`/`user_ref`/`entity_ref`/`formula`/`lookup` fall back to plain text inputs. No a11y floor on modals, no i18n, no demo seed data.
+- **Docs were stale:** CLAUDE.md showed 2B as "0% done", VISION.md showed 2A as "95%". Both corrected.
+- **Dangerous doc:** `db-conventions.md` said "no query needs WHERE tenant_id" — corrected to require both explicit filters AND RLS.
+
+### Phase snapshot
+
+| Track   | Status           |
+| ------- | ---------------- |
+| Phase 2 | ✅ 100% complete |
+| Phase 3 | 🔴 Not started   |
+
+### Next
+
+- Human planning sign-off required before Phase 3 (3A) starts.
+- Pre-Phase 3 hardening sprint recommended (10 items in CLAUDE.md) before pilot goes live.
+
+---
+
 ## 2026-06-18 — Track 2D export API + workflow canvas — PR #115 merged (issue #93, #98)
 
 **Session type:** Feature implementation + review cycle (4 rounds)

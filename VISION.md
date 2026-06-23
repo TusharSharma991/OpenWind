@@ -18,39 +18,31 @@ We are NOT building a generic CRUD framework, a no-code toy, or a mono-product S
 
 ## What we are NOT building
 
-- **Per-module TypeScript.** Modules are seed SQL only. If an agent or engineer writes TypeScript inside `modules/`, something is wrong.
+- **Per-module domain TypeScript.** Modules are seed SQL + minimal stub index files. Any business logic in TypeScript inside `modules/` is wrong — that belongs in an engine feature.
 - **Bespoke integrations.** Connectors use the connector SDK — no custom HTTP clients scattered across routes.
-- **Hand-rolled multi-tenancy.** All isolation is via RLS. Never add `WHERE tenant_id = ?` clauses to compensate for a missing policy.
+- **Relying on RLS alone without explicit tenant filters.** RLS (`app.tenant_id` GUC) is the second line of defence; explicit `WHERE tenant_id = ?` in engine queries is the first. Both must be present. `withTenantContext` sets the GUC but does not change the DB role — RLS enforcement depends on the connection role. Do not remove explicit tenant filters under the assumption that RLS alone is sufficient.
 - **Parallel approval in Phase 2.** Explicitly deferred. Sequential approval only for pilot.
 - **A chatbot.** AI features (classification, RAG replies, automation generation) are assistants — humans review before any irreversible action.
 
 ---
 
-## Current milestone — Phase 2 (2026-Q2)
+## Current milestone — Phase 3 (planning required before 3A starts)
 
-### Track 2A — Platform Services `95% done`
+### Phase 2 — ✅ Complete (2026-06-18)
 
-Files, notifications, audit, view_configs, OpenAPI spec. Pending: CI green on the full Docker test suite.
+All four tracks merged. Full status in [roadmap-tracker.md](docs/sup-docs/roadmap-tracker.md).
 
-**Acceptance criteria:**
+- 2A — Platform services (files, notifications, audit, view_configs, OpenAPI): ✅ Done
+- 2B — Module system + 7 module seeds: ✅ Done
+- 2C — Customer portal + agent UI: ✅ Done
+- 2D — No-code builders + export + workflow canvas: ✅ Done
 
-- [ ] `pnpm test` passes in Docker (all packages)
-- [ ] `pnpm test:isolation` passes (RLS for files, audit_log, view_configs, user_prefs)
-- [ ] `pnpm typecheck && pnpm lint` clean
-- [ ] 2A PR merged into main
+### Phase 3 tracks (not started — human planning sign-off required)
 
-### Track 2B — Module system + standard module configs `0% done`
-
-Module registry, seed runner, 7 module seed files (helpdesk, CRM, HRMS, reimbursements, projects, invoicing, procurement). This is the config-first test in action: zero TypeScript changes outside `packages/*` and `apps/*`.
-
-**Acceptance criteria:**
-
-- [ ] Module registry table + seed runner in `packages/db`
-- [ ] All 7 module seed files runnable via `pnpm db:seed --module=<name>`
-- [ ] Each module: entity types, field defs, workflow states + transitions, initial automation rules
-- [ ] Helpdesk SLA timer fires on ticket created; escalation automation triggers
-- [ ] RLS isolation tests for module-seeded entity types pass
-- [ ] Config-first test passes: zero new TypeScript files in `modules/`
+- 3A — Integration layer: connector runtime, webhook gateway, marketplace
+- 3B — Plugin system: Module Federation, slot registry, lifecycle service
+- 3C — AI layer: automation gen, workflow suggestion, RAG, usage metering
+- 3D — Observability + compliance: OTel, Prometheus, GDPR, audit
 
 ---
 

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { fetchWithAuth, API_URL } from "../../lib/api.js";
 import { useEntityTypes, toTypeSlug } from "../../entity-type-context.js";
+import { userManager } from "../../authProvider.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -507,6 +508,11 @@ export function WorkflowRecords(): React.ReactElement {
   const [workflowId, setWorkflowId] = useState<string>("");
   const [entityTypeId, setEntityTypeId] = useState<string>("");
   const [workflowName, setWorkflowName] = useState<string>("");
+  const [workflowAssignedTo, setWorkflowAssignedTo] = useState<string | null>(
+    null,
+  );
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [currentUserRoles, setCurrentUserRoles] = useState<string[]>([]);
   const [fields, setFields] = useState<EntityField[]>([]);
   const [records, setRecords] = useState<EntityInstance[]>([]);
   const [states, setStates] = useState<WorkflowState[]>([]);
@@ -523,6 +529,17 @@ export function WorkflowRecords(): React.ReactElement {
     toStateName: string;
     transition: Transition;
   } | null>(null);
+
+  useEffect(() => {
+    void userManager.getUser().then((u) => {
+      if (!u) return;
+      setCurrentUserId(u.profile.sub);
+      const roleClaim = u.profile["urn:zitadel:iam:org:project:roles"] as
+        | Record<string, unknown>
+        | undefined;
+      setCurrentUserRoles(roleClaim ? Object.keys(roleClaim) : []);
+    });
+  }, []);
 
   useEffect(() => {
     if (!workflowSlug) return;
@@ -558,6 +575,7 @@ export function WorkflowRecords(): React.ReactElement {
               id: string;
               name: string;
               entityTypeId: string;
+              assignedTo: string | null;
               states: WorkflowState[];
               transitions: Transition[];
             };
@@ -567,6 +585,7 @@ export function WorkflowRecords(): React.ReactElement {
         setWorkflowId(wf.id);
         setWorkflowName(wf.name);
         setEntityTypeId(wf.entityTypeId);
+        setWorkflowAssignedTo(wf.assignedTo ?? null);
 
         const loadedStates = wf.states as WorkflowState[];
         const loadedTransitions = wf.transitions as Transition[];
@@ -604,6 +623,11 @@ export function WorkflowRecords(): React.ReactElement {
   const typeSlug = entityType
     ? toTypeSlug(entityType.plural || entityType.name)
     : "";
+
+  const showSettings =
+    currentUserId !== null &&
+    (currentUserRoles.includes("admin") ||
+      (workflowAssignedTo !== null && currentUserId === workflowAssignedTo));
 
   const orderedStates: WorkflowState[] = colOrder
     .map((name) => states.find((s) => s.name === name))
@@ -830,6 +854,30 @@ export function WorkflowRecords(): React.ReactElement {
               ⚠ {transError}
             </span>
           )}
+          {showSettings && workflowSlug && (
+            <Link
+              to={`/workflows/${workflowSlug}`}
+              className="kb-settings-btn"
+              title="Workflow Settings"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <circle
+                  cx="7"
+                  cy="7"
+                  r="2"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                />
+                <path
+                  d="M7 1v1.5M7 11.5V13M1 7h1.5M11.5 7H13M2.636 2.636l1.06 1.06M10.304 10.304l1.06 1.06M11.364 2.636l-1.06 1.06M3.696 10.304l-1.06 1.06"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+              </svg>
+              Workflow Settings
+            </Link>
+          )}
           {entityTypeId && (
             <Link
               to={
@@ -977,6 +1025,18 @@ export function WorkflowRecords(): React.ReactElement {
           flex-shrink: 0;
         }
         .kb-back-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+
+        .kb-settings-btn {
+          display: inline-flex; align-items: center; gap: 6px;
+          font-size: 13px; font-weight: 500; padding: 7px 14px;
+          border-radius: var(--radius-sm);
+          background: var(--bg-secondary); color: var(--text-secondary);
+          border: 1px solid var(--border-primary);
+          text-decoration: none;
+          transition: background var(--transition-fast), color var(--transition-fast);
+          white-space: nowrap;
+        }
+        .kb-settings-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); }
 
         .kb-new-btn {
           display: inline-flex; align-items: center; gap: 6px;

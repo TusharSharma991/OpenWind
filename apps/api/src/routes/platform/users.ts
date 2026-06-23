@@ -16,7 +16,7 @@ export const usersRouter = new Hono<AppVars>();
 usersRouter.get(
   "/",
   requireAuth(db),
-  requireRole("admin", "agent"),
+  requireRole("admin", "agent", "user"),
   async (c) => {
     const { tenantId } = c.get("auth");
 

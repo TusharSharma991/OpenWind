@@ -98,11 +98,12 @@ export function App(): React.ReactElement {
               element={<CustomerRecordDetail />}
             />
 
+            <Route path="/settings" element={<Settings />} />
+
             {/* Admin-only routes */}
             <Route element={<RequireAdmin />}>
               <Route path="/modules" element={<Modules />} />
               <Route path="/users" element={<UsersPage />} />
-              <Route path="/settings" element={<Settings />} />
               <Route path="/entity-types/:id" element={<EntityTypeDetail />} />
               <Route
                 path="/entity-types/:id/records/new"

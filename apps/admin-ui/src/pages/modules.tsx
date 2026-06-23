@@ -80,6 +80,27 @@ const MODULE_FEATURES: Record<string, string[]> = {
   ],
 };
 
+function SectionLabel({
+  children,
+}: {
+  children: React.ReactNode;
+}): React.ReactElement {
+  return (
+    <div
+      style={{
+        fontSize: "11px",
+        fontWeight: 700,
+        color: "var(--text-muted)",
+        textTransform: "uppercase",
+        letterSpacing: "0.07em",
+        marginBottom: "10px",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
 const MODULE_COLOR: Record<string, string> = {
   helpdesk: "hsl(211,100%,45%)",
   crm: "hsl(265,84%,60%)",
@@ -200,6 +221,67 @@ const MODULE_FIELDS: Record<string, Array<{ label: string; type: string }>> = {
     { label: "Amount", type: "currency" },
     { label: "Required By", type: "date" },
     { label: "Justification", type: "longtext" },
+  ],
+};
+
+const MODULE_TRANSITIONS: Record<
+  string,
+  Array<{ from: string; to: string; label: string }>
+> = {
+  helpdesk: [
+    { from: "New", to: "Open", label: "Assign" },
+    { from: "Open", to: "In Progress", label: "Start" },
+    { from: "In Progress", to: "Pending Customer", label: "Await reply" },
+    { from: "Pending Customer", to: "In Progress", label: "Customer replied" },
+    { from: "In Progress", to: "Resolved", label: "Resolve" },
+    { from: "Resolved", to: "Closed", label: "Close" },
+    { from: "Resolved", to: "Open", label: "Reopen" },
+  ],
+  crm: [
+    { from: "Prospect", to: "Qualified", label: "Qualify" },
+    { from: "Qualified", to: "Proposal Sent", label: "Send proposal" },
+    { from: "Proposal Sent", to: "Negotiation", label: "Negotiate" },
+    { from: "Negotiation", to: "Won", label: "Close won" },
+    { from: "Negotiation", to: "Lost", label: "Close lost" },
+    { from: "Qualified", to: "Lost", label: "Disqualify" },
+  ],
+  hrms: [
+    { from: "Draft", to: "Submitted", label: "Submit" },
+    { from: "Submitted", to: "Manager Review", label: "Review" },
+    { from: "Manager Review", to: "HR Review", label: "Approve" },
+    { from: "Manager Review", to: "Rejected", label: "Reject" },
+    { from: "HR Review", to: "Approved", label: "Approve" },
+    { from: "HR Review", to: "Rejected", label: "Reject" },
+  ],
+  reimbursements: [
+    { from: "Draft", to: "Submitted", label: "Submit" },
+    { from: "Submitted", to: "Finance Review", label: "Review" },
+    { from: "Finance Review", to: "Approved", label: "Approve" },
+    { from: "Finance Review", to: "Rejected", label: "Reject" },
+    { from: "Approved", to: "Paid", label: "Mark paid" },
+  ],
+  projects: [
+    { from: "Backlog", to: "To Do", label: "Plan" },
+    { from: "To Do", to: "In Progress", label: "Start" },
+    { from: "In Progress", to: "Review", label: "Submit for review" },
+    { from: "Review", to: "Done", label: "Approve" },
+    { from: "Review", to: "In Progress", label: "Request changes" },
+    { from: "To Do", to: "Cancelled", label: "Cancel" },
+  ],
+  invoicing: [
+    { from: "Draft", to: "Sent", label: "Send" },
+    { from: "Sent", to: "Partially Paid", label: "Partial payment" },
+    { from: "Partially Paid", to: "Paid", label: "Full payment" },
+    { from: "Sent", to: "Paid", label: "Mark paid" },
+    { from: "Sent", to: "Void", label: "Void" },
+  ],
+  procurement: [
+    { from: "Draft", to: "Pending Approval", label: "Submit" },
+    { from: "Pending Approval", to: "Approved", label: "Approve" },
+    { from: "Pending Approval", to: "Cancelled", label: "Reject" },
+    { from: "Approved", to: "Ordered", label: "Place order" },
+    { from: "Ordered", to: "Delivered", label: "Confirm delivery" },
+    { from: "Ordered", to: "Cancelled", label: "Cancel" },
   ],
 };
 
@@ -519,78 +601,151 @@ export function Modules(): React.ReactElement {
                 padding: "20px 24px",
                 display: "flex",
                 flexDirection: "column",
-                gap: "20px",
+                gap: "24px",
               }}
             >
-              {/* States */}
+              {/* ── States ── */}
               <div>
-                <div
-                  style={{
-                    fontSize: "11px",
-                    fontWeight: 700,
-                    color: "var(--text-muted)",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.07em",
-                    marginBottom: "10px",
-                  }}
-                >
-                  Workflow States
-                </div>
+                <SectionLabel>Workflow States</SectionLabel>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-                  {(MODULE_STATES[previewTarget.slug] ?? []).map((s, i) => (
-                    <span
-                      key={s.name}
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: "5px",
-                        padding: "4px 10px",
-                        borderRadius: "20px",
-                        fontSize: "12px",
-                        fontWeight: 500,
-                        background: s.terminal
-                          ? "var(--bg-tertiary)"
-                          : `${MODULE_COLOR[previewTarget.slug] ?? "var(--accent-primary)"}15`,
-                        border: `1px solid ${s.terminal ? "var(--border-color)" : `${MODULE_COLOR[previewTarget.slug] ?? "var(--accent-primary)"}40`}`,
-                        color: s.terminal
-                          ? "var(--text-muted)"
-                          : (MODULE_COLOR[previewTarget.slug] ??
-                            "var(--accent-primary)"),
-                      }}
-                    >
-                      <span style={{ fontSize: "10px", opacity: 0.6 }}>
-                        {i + 1}
-                      </span>
-                      {s.name}
-                      {s.terminal && (
-                        <span style={{ fontSize: "10px", opacity: 0.5 }}>
-                          · end
+                  {(MODULE_STATES[previewTarget.slug] ?? []).map((s, i) => {
+                    const accent =
+                      MODULE_COLOR[previewTarget.slug] ??
+                      "var(--accent-primary)";
+                    return (
+                      <span
+                        key={s.name}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "5px",
+                          padding: "5px 12px",
+                          borderRadius: "20px",
+                          fontSize: "12px",
+                          fontWeight: 500,
+                          background: s.terminal
+                            ? "var(--bg-tertiary)"
+                            : `${accent}15`,
+                          border: `1px solid ${s.terminal ? "var(--border-color)" : `${accent}40`}`,
+                          color: s.terminal ? "var(--text-muted)" : accent,
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: "10px",
+                            opacity: 0.5,
+                            minWidth: "12px",
+                          }}
+                        >
+                          {i + 1}
                         </span>
-                      )}
-                    </span>
-                  ))}
+                        {s.name}
+                        {s.terminal && (
+                          <span
+                            style={{
+                              fontSize: "9px",
+                              opacity: 0.55,
+                              fontWeight: 400,
+                            }}
+                          >
+                            END
+                          </span>
+                        )}
+                      </span>
+                    );
+                  })}
                 </div>
               </div>
 
-              {/* Fields */}
-              <div>
-                <div
-                  style={{
-                    fontSize: "11px",
-                    fontWeight: 700,
-                    color: "var(--text-muted)",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.07em",
-                    marginBottom: "10px",
-                  }}
-                >
-                  Fields
+              {/* ── Transitions ── */}
+              {(MODULE_TRANSITIONS[previewTarget.slug] ?? []).length > 0 && (
+                <div>
+                  <SectionLabel>Transitions</SectionLabel>
+                  <div
+                    style={{
+                      borderRadius: "var(--radius-sm)",
+                      overflow: "hidden",
+                      border: "1px solid var(--border-color)",
+                    }}
+                  >
+                    {(MODULE_TRANSITIONS[previewTarget.slug] ?? []).map(
+                      (t, i) => (
+                        <div
+                          key={`${t.from}-${t.to}`}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "10px",
+                            padding: "9px 14px",
+                            background:
+                              i % 2 === 0
+                                ? "var(--bg-primary)"
+                                : "var(--bg-tertiary)",
+                            fontSize: "12px",
+                          }}
+                        >
+                          <span
+                            style={{
+                              color: "var(--text-primary)",
+                              fontWeight: 500,
+                              flex: 1,
+                              minWidth: 0,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {t.from}
+                          </span>
+                          <span
+                            style={{
+                              color: "var(--text-muted)",
+                              fontSize: "11px",
+                              background: "var(--bg-tertiary)",
+                              border: "1px solid var(--border-color)",
+                              borderRadius: "4px",
+                              padding: "2px 8px",
+                              whiteSpace: "nowrap",
+                              flexShrink: 0,
+                            }}
+                          >
+                            {t.label}
+                          </span>
+                          <span
+                            style={{
+                              color: "var(--text-muted)",
+                              fontSize: "14px",
+                              flexShrink: 0,
+                            }}
+                          >
+                            →
+                          </span>
+                          <span
+                            style={{
+                              color: "var(--text-primary)",
+                              fontWeight: 500,
+                              flex: 1,
+                              minWidth: 0,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                              textAlign: "right",
+                            }}
+                          >
+                            {t.to}
+                          </span>
+                        </div>
+                      ),
+                    )}
+                  </div>
                 </div>
+              )}
+
+              {/* ── Fields ── */}
+              <div>
+                <SectionLabel>Fields</SectionLabel>
                 <div
                   style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "1px",
                     borderRadius: "var(--radius-sm)",
                     overflow: "hidden",
                     border: "1px solid var(--border-color)",
@@ -636,20 +791,9 @@ export function Modules(): React.ReactElement {
                 </div>
               </div>
 
-              {/* Included features */}
+              {/* ── What's Included ── */}
               <div>
-                <div
-                  style={{
-                    fontSize: "11px",
-                    fontWeight: 700,
-                    color: "var(--text-muted)",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.07em",
-                    marginBottom: "10px",
-                  }}
-                >
-                  What's Included
-                </div>
+                <SectionLabel>What's Included</SectionLabel>
                 <div
                   style={{
                     display: "flex",

@@ -145,8 +145,6 @@ services:
         --maxmemory-policy allkeys-lru
         --save 60 1000
         --loglevel notice
-    ports:
-      - "6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -301,6 +299,9 @@ services:
       # OPENBAO_ADDR: http://openbao:8200  # uncomment when openbao service is enabled
       # S3_ENDPOINT: http://minio:9000      # uncomment when minio service is enabled
     restart: unless-stopped
+    networks:
+      - default
+      - openwind_zitadel
     depends_on:
       pgbouncer:
         condition: service_healthy
@@ -357,6 +358,9 @@ services:
     volumes:
       - ./.env.local:/app/.env.local
       - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - default
+      - openwind_zitadel
     depends_on:
       pgbouncer:
         condition: service_healthy
@@ -369,3 +373,7 @@ volumes:
   novu_mongo_data:
   mailhog_data:
   # minio_data:    # uncomment when minio service is enabled
+networks:
+  openwind_zitadel:
+    external: true # created by the zitadel compose project (../zitadel/)
+    name: openwind_zitadel

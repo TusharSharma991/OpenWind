@@ -3,7 +3,7 @@ import { useLogout, useGetIdentity } from "@refinedev/core";
 import { Link, useLocation } from "react-router-dom";
 import { userManager } from "../authProvider.js";
 
-// â”€â”€ Admin nav items â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Admin nav items ──────────────────────────────────────────────────────────
 
 // Nav shown to super-admins only
 const SUPER_ADMIN_NAV_EXTRA = [
@@ -206,9 +206,9 @@ export function Layout({
   }, []);
 
   // RBAC tiers:
-  //   admin  = super admin â€” full access including Users page
-  //   agent  = workflow admin â€” Workflows + Templates + Records, no Users/Dashboard
-  //   user   = record assignee â€” Records + Templates only (portal-like view)
+  //   admin  = super admin — full access including Users page
+  //   agent  = workflow admin — Workflows + Templates + Records, no Users/Dashboard
+  //   user   = record assignee — Records + Templates only (portal-like view)
   const isAdmin = roles.includes("admin");
   const isAgent = roles.includes("agent") && !isAdmin;
   const isCustomer =
@@ -463,7 +463,7 @@ export function Layout({
     </header>
   );
 
-  // â”€â”€ Customer / user layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Customer / user layout ──────────────────────────────────────────────
   if (isCustomer) {
     return (
       <div className="app-container">
@@ -487,7 +487,7 @@ export function Layout({
                 gap: "2px",
               }}
             >
-              {/* Records â€” shows cards where user has assigned tickets */}
+              {/* Records — shows cards where user has assigned tickets */}
               <Link
                 to="/records"
                 className={`menu-item ${!sidebarOpen && !mobileNavOpen ? "menu-item-icon-only" : ""} ${isActive("/records") ? "active" : ""}`}
@@ -509,7 +509,7 @@ export function Layout({
                 {(sidebarOpen || mobileNavOpen) && <span>Records</span>}
               </Link>
 
-              {/* Templates â€” users can browse / fork workflows */}
+              {/* Templates — users can browse / fork workflows */}
               <Link
                 to="/modules"
                 className={`menu-item ${!sidebarOpen && !mobileNavOpen ? "menu-item-icon-only" : ""} ${isActive("/modules") ? "active" : ""}`}
@@ -552,9 +552,9 @@ export function Layout({
   // Super admin gets all ADMIN_NAV + SUPER_ADMIN_NAV_EXTRA (Users)
   const sidebarNav = isAdmin
     ? [...ADMIN_NAV, ...SUPER_ADMIN_NAV_EXTRA]
-    : ADMIN_NAV; // agents see same nav as admin minus dashboard (dashboard requires admin role â€” handled by page itself)
+    : ADMIN_NAV; // agents see same nav as admin minus dashboard (dashboard requires admin role — handled by page itself)
 
-  // â”€â”€ Admin / Agent layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Admin / Agent layout ────────────────────────────────────────────────
   return (
     <div className="app-container">
       {topnav}

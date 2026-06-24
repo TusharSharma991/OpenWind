@@ -21,8 +21,14 @@ See `packages/secrets/README.md` for the API surface.
 
 ---
 
-1. **RLS is not optional.** Every new table storing tenant data needs RLS enabled and a
-   policy defined. PRs missing this are blocked. See ADR-001.
+1. **Tenant isolation requires two layers — both are mandatory.**
+   - **Explicit `WHERE tenant_id = ?` filters** in every engine query. These are the primary
+     guard. Do not remove them on the assumption that RLS alone is sufficient.
+   - **RLS via `set_config('app.tenant_id', …)`** set by `withTenantContext`. Second line of
+     defence. `withTenantContext` sets the GUC but does not switch the DB role — if
+     `DATABASE_URL` is a superuser, RLS is bypassed and only the explicit filters protect you.
+     Every new table storing tenant data also needs RLS enabled and a policy defined. PRs
+     missing either layer are blocked. See ADR-001.
 
 2. **Validate all external input with Zod before using it.** API inputs, webhook payloads,
    connector data, file metadata — all validated before processing.

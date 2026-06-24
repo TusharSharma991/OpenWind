@@ -9,7 +9,8 @@ Detailed rules live in `.claude/rules/` and auto-load — see the index below.
 
 A modular, workflow-native business platform. Every module (CRM, helpdesk, HRMS,
 reimbursements, etc.) is a configuration of three shared engines: Entity Engine,
-Workflow Engine, Automation Engine. No per-module TypeScript — modules are seed SQL only.
+Workflow Engine, Automation Engine. Modules are seed SQL + one-line stub index files —
+no domain logic TypeScript in `modules/`.
 
 Reference docs (read before starting work in a new area):
 

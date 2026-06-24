@@ -50,6 +50,6 @@ All four tracks merged. Full status in [roadmap-tracker.md](docs/sup-docs/roadma
 
 1. **Config over code.** Any change expressible as seed SQL must not require TypeScript. Every time we catch ourselves writing module-specific TypeScript, we ask: is this a missing engine feature?
 
-2. **Isolation is not optional.** RLS, tenant-scoped rate limits, presigned-only file access, OpenBao for secrets. These are not polish — they are the product. A cross-tenant leak is a company-ending event.
+2. **Isolation is not optional.** Explicit `WHERE tenant_id = ?` filters in every engine query (primary guard) plus RLS via `app.tenant_id` GUC (second line of defence), tenant-scoped rate limits, presigned-only file access, OpenBao for secrets. These are not polish — they are the product. A cross-tenant leak is a company-ending event.
 
 3. **Tests travel with the code.** Implementation without tests does not ship. Isolation tests travel with every new table or route. The test suite is the living specification.

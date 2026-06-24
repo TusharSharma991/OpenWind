@@ -74,5 +74,5 @@ Reads: `outbox_events` (trigger source), `entity_instances` (event payload + fie
   throw `INVALID_EVENT_PAYLOAD` immediately — rules never run.
 - Dead-letter events: events that fail after the 48-hour stale threshold go to a DLQ table.
   Operators can inspect and manually re-trigger or discard from the admin UI.
-- Issue #2 (SSRF + PII leakage gaps) is a known open item and a **pilot blocker**. Do not
-  modify `validateWebhookUrl()` or PII handling without human review.
+- Issue #2 (SSRF + PII leakage gaps) is ✅ **closed** — PR #85 merged. `validateWebhookUrl()`
+  and PII redaction are implemented. Still run `/security-review` on any PR that touches them.

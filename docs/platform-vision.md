@@ -633,7 +633,7 @@ graph LR
     P0 --> P1 --> P2 --> P3 --> P4 --> P5 --> P6
 
     style P0 fill:#d1fae5,stroke:#059669,color:#065f46
-    style P1 fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
+    style P1 fill:#d1fae5,stroke:#059669,color:#065f46
     style P2 fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
     style P3 fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
     style P4 fill:#fef3c7,stroke:#d97706,color:#78350f

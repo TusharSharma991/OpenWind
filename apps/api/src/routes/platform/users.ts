@@ -12,11 +12,11 @@ export const usersRouter = new Hono<AppVars>();
 // GET /users — returns all org users alphabetically by display name.
 // Merges Zitadel org users (source of truth) with tenant_users DB records
 // (which hold locally-resolved display names for users who have logged in).
-// Accessible by admin and agent roles.
+// Accessible by admin and agent roles only — not customers (PII: emails + display names).
 usersRouter.get(
   "/",
   requireAuth(db),
-  requireRole("admin", "agent", "user"),
+  requireRole("admin", "agent"),
   async (c) => {
     const { tenantId } = c.get("auth");
 

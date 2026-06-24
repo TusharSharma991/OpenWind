@@ -5,6 +5,32 @@
 
 ---
 
+## 2026-06-24 — Post-review followup (PR #130)
+
+**Session type:** Documentation / tracking
+**Branch:** `docs/post-review-followup` → PR #130
+
+### Completed this session
+
+- Created GH issues #120–#129 for all 10 pre-Phase 3 hardening items (labelled `phase:2`)
+- Backfilled issue links into CLAUDE.md hardening checklist
+- Written PROGRESS.md with priority-ordered hardening sprint and session handoff
+- Fixed VISION.md wording, platform-vision.md P1 chart style (S2 from review)
+- Addressed PR #130 review: CLAUDE.md gate changed from "pilot" to "3A start"; checklist reordered by dependency; roadmap-tracker now lists both label queries; agent-behaviour.md PROGRESS.md template updated; PROGRESS.md cleaned up
+
+### Phase snapshot
+
+| Track            | Status                                |
+| ---------------- | ------------------------------------- |
+| Hardening sprint | 🔴 0/10 — issues open, not started    |
+| Phase 3          | 🔴 Not started (blocked by hardening) |
+
+### Next
+
+Start hardening sprint at #121 (RLS role fix).
+
+---
+
 ## 2026-06-23 — External review; doc reconciliation
 
 **Session type:** Documentation / planning

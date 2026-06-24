@@ -93,4 +93,6 @@
 1. When a GH issue closes → update `Status` to ✅ Done, set `%` to 100, log date in [week-log.md](week-log.md)
 2. When a track is partially done → update `%` to estimated progress and add a note
 3. When a new sub-item is identified → add a row, create a GH issue, link it
-4. Run a session-start check: `gh issue list --state open --label phase:3` to see what's active
+4. Run session-start checks:
+   - `gh issue list --state open --label phase:2` — hardening sprint (must close before 3A starts)
+   - `gh issue list --state open --label phase:3` — Phase 3 feature tracks

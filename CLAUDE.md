@@ -30,21 +30,22 @@ Reference docs (read before starting work in a new area):
 
 Phase 3 tracks (all 0% — no active work yet):
 
-| ID    | Track                                               | Notes                                   |
-| ----- | --------------------------------------------------- | --------------------------------------- |
-| 3A    | Integration layer — connector runtime, marketplace  | Next. Requires human planning sign-off. |
-| 3B    | Plugin system — Module Federation, slot registry    | After 3A                                |
-| 3C    | AI layer — automation gen, workflow suggestion, RAG | After 3B                                |
-| 3D    | Observability + compliance — OTel, Prometheus, GDPR | Parallel with 3A–3C possible            |
-| 3-OPS | Deferred ops/infra concerns                         | See Phase 1 carry-overs in tracker      |
+| ID    | Track                                               | Notes                                                                                              |
+| ----- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| 3A    | Integration layer — connector runtime, marketplace  | Next. Requires human planning sign-off. Write `.claude/context/phase-3-primer.md` before starting. |
+| 3B    | Plugin system — Module Federation, slot registry    | After 3A                                                                                           |
+| 3C    | AI layer — automation gen, workflow suggestion, RAG | After 3B                                                                                           |
+| 3D    | Observability + compliance — OTel, Prometheus, GDPR | Parallel with 3A–3C possible                                                                       |
+| 3-OPS | Deferred ops/infra concerns                         | See Phase 1 carry-overs in tracker                                                                 |
 
-**Pre-Phase 3 hardening (external review flagged — resolve before pilot goes live):**
+**Pre-Phase 3 hardening (external review flagged — complete before starting 3A):**
 
-These are not Phase 3 features — they are correctness/safety fixes in existing code:
+These are not Phase 3 features — they are correctness/safety fixes in existing code.
+Work in this order (sequential dependencies at the top):
 
-- [ ] [#120](../../issues/120) Automation double-trigger: `transition` action writes outbox + calls inline, depth resets to 0 on outbox path → `MAX_DEPTH` never fires in loops. Fix: carry `depth` through outbox payload or deduplicate by idempotency key.
 - [ ] [#121](../../issues/121) RLS under real role: `withTenantContext` sets `app.tenant_id` GUC but never `SET LOCAL ROLE app_user`. Add `SET LOCAL ROLE app_user` or `ALTER TABLE … FORCE ROW LEVEL SECURITY` so RLS is enforced regardless of connection role.
-- [ ] [#122](../../issues/122) Isolation tests skipped: the three cross-tenant RLS tests are `.skip` because CI runs as superuser. Run CI isolation suite as `app_user` so the isolation guarantee is actually proven.
+- [ ] [#122](../../issues/122) Isolation tests skipped: the three cross-tenant RLS tests are `.skip` because CI runs as superuser. Run CI isolation suite as `app_user` so the isolation guarantee is actually proven. (depends on #121)
+- [ ] [#120](../../issues/120) Automation double-trigger: `transition` action writes outbox + calls inline, depth resets to 0 on outbox path → `MAX_DEPTH` never fires in loops. Fix: carry `depth` through outbox payload or deduplicate by idempotency key.
 - [ ] [#123](../../issues/123) Automation queue retries: `automation` BullMQ queue has `attempts=1` (BullMQ default). Add `attempts: 3, backoff: { type: "exponential" }` to match the SLA queue.
 - [ ] [#124](../../issues/124) Auth middleware write-on-every-request: `packages/auth/src/middleware.ts:154-169` does `onConflictDoUpdate` (not `onConflictDoNothing`) on every authenticated request — HOT update per request at scale.
 - [ ] [#125](../../issues/125) `notify` action is a stub: `actions/notify.ts` only logs. Wire Novu delivery worker to close the notification loop.

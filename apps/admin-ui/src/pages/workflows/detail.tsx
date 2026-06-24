@@ -25,13 +25,18 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useOne } from "@refinedev/core";
-import { useParams, Link, useNavigate, useBlocker, Navigate } from "react-router-dom";
+import {
+  useParams,
+  Link,
+  useNavigate,
+  useBlocker,
+  Navigate,
+} from "react-router-dom";
 import { fetchWithAuth, API_URL } from "../../lib/api.js";
 import { useEntityTypes } from "../../entity-type-context.js";
 import { userManager } from "../../authProvider.js";
 import { UserPicker } from "../../components/user-picker.js";
 import type { UserOption } from "../../components/user-picker.js";
-import { userManager } from "../../authProvider.js";
 
 function toWorkflowSlug(name: string): string {
   return name
@@ -973,21 +978,6 @@ export function WorkflowDetail(): React.ReactElement {
     id: id ?? "missing",
     queryOptions: { enabled: !!id },
   });
-
-  const [isAdmin, setIsAdmin] = useState(false);
-  useEffect(() => {
-    userManager
-      .getUser()
-      .then((user) => {
-        if (!user?.profile) return;
-        const rolesMap = (user.profile["urn:zitadel:iam:org:project:roles"] ??
-          {}) as Record<string, unknown>;
-        setIsAdmin(Object.keys(rolesMap).includes("admin"));
-      })
-      .catch(() => {
-        /* leave isAdmin false */
-      });
-  }, []);
 
   const [fields, setFields] = useState<EntityField[]>([]);
   const [fieldsLoading, setFieldsLoading] = useState(false);

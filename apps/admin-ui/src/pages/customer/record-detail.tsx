@@ -723,7 +723,6 @@ export function CustomerRecordDetail(): React.ReactElement {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [allStates, setAllStates] = useState<WorkflowState[]>([]);
-  const [allTransitions, setAllTransitions] = useState<Transition[]>([]);
   const [currentState, setCurrentState] = useState("");
   const [users, setUsers] = useState<OrgUser[]>([]);
   const [activeTab, setActiveTab] = useState<"history" | "comments">("history");
@@ -806,7 +805,6 @@ export function CustomerRecordDetail(): React.ReactElement {
   useEffect(() => {
     if (!record?.workflowId && !entityTypeId) {
       setAllStates([]);
-      setAllTransitions([]);
       return;
     }
 
@@ -832,15 +830,12 @@ export function CustomerRecordDetail(): React.ReactElement {
             ).data ?? [])[0];
         if (wf) {
           setAllStates(wf.states as WorkflowState[]);
-          setAllTransitions(wf.transitions as Transition[]);
         } else {
           setAllStates([]);
-          setAllTransitions([]);
         }
       })
       .catch(() => {
         setAllStates([]);
-        setAllTransitions([]);
       });
   }, [record?.workflowId, entityTypeId]);
 
@@ -915,11 +910,7 @@ export function CustomerRecordDetail(): React.ReactElement {
     );
   }
 
-  const _availableTransitions = allTransitions.filter(
-    (t) => t.fromState === record.currentState,
-  );
   const currentStateObj = allStates.find((s) => s.name === record.currentState);
-  const _isTerminal = currentStateObj?.isTerminal ?? false;
 
   const historyEvents = history;
   const allCommentEvents = history.filter(

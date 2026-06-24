@@ -30,18 +30,24 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 3001,
       host: "0.0.0.0",
-      allowedHosts: ["openwind.rokkalabs.com"],
+      ...(env["VITE_ALLOWED_HOSTS"]
+        ? { allowedHosts: env["VITE_ALLOWED_HOSTS"].split(",") }
+        : {}),
       watch: {
         usePolling: true,
         interval: 300,
       },
-      proxy: {
-        "/api": {
-          target: "http://ow-backend:3000",
-          changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/api/, ""),
-        },
-      },
+      ...(env["VITE_API_PROXY_TARGET"]
+        ? {
+            proxy: {
+              "/api": {
+                target: env["VITE_API_PROXY_TARGET"],
+                changeOrigin: true,
+                rewrite: (path) => path.replace(/^\/api/, ""),
+              },
+            },
+          }
+        : {}),
     },
   };
 });

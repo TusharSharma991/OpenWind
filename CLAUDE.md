@@ -9,7 +9,8 @@ Detailed rules live in `.claude/rules/` and auto-load — see the index below.
 
 A modular, workflow-native business platform. Every module (CRM, helpdesk, HRMS,
 reimbursements, etc.) is a configuration of three shared engines: Entity Engine,
-Workflow Engine, Automation Engine. No per-module TypeScript — modules are seed SQL only.
+Workflow Engine, Automation Engine. Modules are seed SQL + one-line stub index files —
+no domain logic TypeScript in `modules/`.
 
 Reference docs (read before starting work in a new area):
 
@@ -24,24 +25,36 @@ Reference docs (read before starting work in a new area):
 
 ## Current focus
 
-**Phase:** 2 — First Customer-Ready Apps
-**Active track:** 2B — Module system + standard module configs (0%)
-**Blocked by:** 2A must merge first (95% — needs CI green on Docker test suite)
+**Phase:** 3 — Scale & Extensibility (not started — planning required before 3A)
+**Phase 2 status:** ✅ Complete as of 2026-06-18 (all 4 tracks + pre-pilot hardening merged)
 
-Acceptance criteria for 2B:
+Phase 3 tracks (all 0% — no active work yet):
 
-- [ ] `module_registry` table + seed runner in `packages/db`
-- [ ] `pnpm db:seed --module=<name>` works for all 7 modules
-- [ ] All 7 modules: entity types, workflows, automation rules as INSERT-only SQL
-- [ ] Config-first test passes: zero TypeScript in `modules/`
-- [ ] `pnpm test:isolation` green for all module-seeded entity types
-- [ ] `pnpm test && pnpm typecheck && pnpm lint` clean
+| ID    | Track                                               | Notes                                   |
+| ----- | --------------------------------------------------- | --------------------------------------- |
+| 3A    | Integration layer — connector runtime, marketplace  | Next. Requires human planning sign-off. |
+| 3B    | Plugin system — Module Federation, slot registry    | After 3A                                |
+| 3C    | AI layer — automation gen, workflow suggestion, RAG | After 3B                                |
+| 3D    | Observability + compliance — OTel, Prometheus, GDPR | Parallel with 3A–3C possible            |
+| 3-OPS | Deferred ops/infra concerns                         | See Phase 1 carry-overs in tracker      |
 
-Full task spec: [first-loop-task.md](docs/sup-docs/first-loop-task.md)
+**Pre-Phase 3 hardening (external review flagged — resolve before pilot goes live):**
+
+These are not Phase 3 features — they are correctness/safety fixes in existing code:
+
+- [ ] Automation double-trigger: `transition` action writes outbox + calls inline, depth resets to 0 on outbox path → `MAX_DEPTH` never fires in loops. Fix: carry `depth` through outbox payload or deduplicate by idempotency key.
+- [ ] RLS under real role: `withTenantContext` sets `app.tenant_id` GUC but never `SET LOCAL ROLE app_user`. Add `SET LOCAL ROLE app_user` or `ALTER TABLE … FORCE ROW LEVEL SECURITY` so RLS is enforced regardless of connection role.
+- [ ] Isolation tests skipped: the three cross-tenant RLS tests are `.skip` because CI runs as superuser. Run CI isolation suite as `app_user` so the isolation guarantee is actually proven.
+- [ ] Automation queue retries: `automation` BullMQ queue has `attempts=1` (BullMQ default). Add `attempts: 3, backoff: { type: "exponential" }` to match the SLA queue.
+- [ ] Auth middleware write-on-every-request: `packages/auth/src/middleware.ts:154-169` does `onConflictDoUpdate` (not `onConflictDoNothing`) on every authenticated request — HOT update per request at scale.
+- [ ] `notify` action is a stub: `actions/notify.ts` only logs. Wire Novu delivery worker to close the notification loop.
+- [ ] `entity.created` / `entity.assigned` triggers never fire: defined in `event-schemas.ts` but entity engine never emits them to the outbox.
+- [ ] `setEntityState` / `bulkSetState` are unguarded state side-doors: mutate `current_state` directly with no `workflow_events` row and no outbox event.
+- [ ] OpenBao + MinIO commented out of `docker-compose.yml`: the code expects them but `docker compose up` doesn't start them. Uncomment and reconcile with `.env.example`.
+- [ ] Worker has no health endpoint: orchestrators cannot health-check `apps/worker`. Add an HTTP readiness probe.
 
 **Off-limits (never touch autonomously):**
 
-- Issue #2 (SSRF + PII leakage gaps) — pilot blocker, needs human review
 - Parallel approval code — deferred to Phase 3
 - ADR files in `docs/decisions/` — humans write these
 - Schema cache / `redis.keys()` fix — deferred until load testing
@@ -72,7 +85,7 @@ packages/
   plugin-sdk/   Plugin extension points (Phase 3)
   ui/           Shared design system (shadcn/ui + tokens)
   ai/           Anthropic SDK wrapper + RAG helpers
-modules/        Seed SQL only — zero TypeScript here
+modules/        Seed SQL + one-line stub index.ts per module (no domain logic TypeScript)
 tests/
   integration/  Cross-package integration tests
   isolation/    Tenant RLS tests — run on every db/ PR

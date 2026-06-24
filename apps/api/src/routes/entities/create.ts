@@ -51,7 +51,7 @@ export const createEntityHandler = factory.createHandlers(
         createEntity(tx, tenantId, {
           ...input,
           actorId: userId,
-          actorName,
+          actorName: actorName ?? undefined,
           // Prefer createdBy from body if provided; fall back to authenticated user.
           createdBy: input.createdBy ?? userId,
         }),

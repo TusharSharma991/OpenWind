@@ -97,7 +97,6 @@ export function App(): React.ReactElement {
               element={<AutomationWizard />}
             />
 
-
             {/* Customer routes */}
             <Route path="/records/:typeSlug" element={<CustomerRecordList />} />
             <Route

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("@platform/config", () => ({
   env: {
+    ZITADEL_ISSUER: "https://zitadel.example.com",
     ZITADEL_INTROSPECTION_URL:
       "https://zitadel.example.com/oauth/v2/introspect",
     ZITADEL_INTROSPECTION_CLIENT_ID: "client-id",

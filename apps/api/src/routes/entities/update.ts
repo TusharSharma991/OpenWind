@@ -74,7 +74,7 @@ export const updateEntityHandler = factory.createHandlers(
           ...input,
           actorId: userId,
           actorType: "user",
-          actorName,
+          actorName: actorName ?? undefined,
         }),
       );
       return c.json({ data: instance });

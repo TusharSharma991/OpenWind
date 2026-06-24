@@ -103,13 +103,13 @@ export const listWorkflowEventsHandler = factory.createHandlers(
             changed?: Record<string, { old: unknown; new: unknown }>;
           }
         ).changed;
-        let enrichedChanged = changed;
+        let enrichedChanged: Record<string, unknown> | undefined = changed;
         if (changed?.["assignedTo"]) {
           const at = changed["assignedTo"];
           enrichedChanged = {
             ...changed,
             assignedTo: {
-              ...at,
+              ...(at as Record<string, unknown>),
               oldName:
                 at.old && typeof at.old === "string"
                   ? resolveDisplayName(at.old, nameMap)

@@ -209,7 +209,6 @@ flowchart LR
     style G0 fill:#ecfdf5,stroke:#059669
     style G1 fill:#ecfdf5,stroke:#059669
     style G2 fill:#fef3c7,stroke:#d97706
-    style G2 fill:#fef3c7,stroke:#d97706
     style G3 fill:#fef3c7,stroke:#d97706
     style G4 fill:#fef3c7,stroke:#d97706
     style G5 fill:#fef3c7,stroke:#d97706

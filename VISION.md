@@ -21,7 +21,7 @@ We are NOT building a generic CRUD framework, a no-code toy, or a mono-product S
 - **Per-module domain TypeScript.** Modules are seed SQL + minimal stub index files. Any business logic in TypeScript inside `modules/` is wrong — that belongs in an engine feature.
 - **Bespoke integrations.** Connectors use the connector SDK — no custom HTTP clients scattered across routes.
 - **Relying on RLS alone without explicit tenant filters.** RLS (`app.tenant_id` GUC) is the second line of defence; explicit `WHERE tenant_id = ?` in engine queries is the first. Both must be present. `withTenantContext` sets the GUC but does not change the DB role — RLS enforcement depends on the connection role. Do not remove explicit tenant filters under the assumption that RLS alone is sufficient.
-- **Parallel approval for pilot.** Explicitly deferred. Sequential approval only for pilot.
+- **Parallel approval.** Explicitly deferred to Phase 3. Sequential approval only for pilot.
 - **A chatbot.** AI features (classification, RAG replies, automation generation) are assistants — humans review before any irreversible action.
 
 ---

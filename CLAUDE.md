@@ -30,28 +30,29 @@ Reference docs (read before starting work in a new area):
 
 Phase 3 tracks (all 0% — no active work yet):
 
-| ID    | Track                                               | Notes                                   |
-| ----- | --------------------------------------------------- | --------------------------------------- |
-| 3A    | Integration layer — connector runtime, marketplace  | Next. Requires human planning sign-off. |
-| 3B    | Plugin system — Module Federation, slot registry    | After 3A                                |
-| 3C    | AI layer — automation gen, workflow suggestion, RAG | After 3B                                |
-| 3D    | Observability + compliance — OTel, Prometheus, GDPR | Parallel with 3A–3C possible            |
-| 3-OPS | Deferred ops/infra concerns                         | See Phase 1 carry-overs in tracker      |
+| ID    | Track                                               | Notes                                                                                              |
+| ----- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| 3A    | Integration layer — connector runtime, marketplace  | Next. Requires human planning sign-off. Write `.claude/context/phase-3-primer.md` before starting. |
+| 3B    | Plugin system — Module Federation, slot registry    | After 3A                                                                                           |
+| 3C    | AI layer — automation gen, workflow suggestion, RAG | After 3B                                                                                           |
+| 3D    | Observability + compliance — OTel, Prometheus, GDPR | Parallel with 3A–3C possible                                                                       |
+| 3-OPS | Deferred ops/infra concerns                         | See Phase 1 carry-overs in tracker                                                                 |
 
-**Pre-Phase 3 hardening (external review flagged — resolve before pilot goes live):**
+**Pre-Phase 3 hardening (external review flagged — complete before starting 3A):**
 
-These are not Phase 3 features — they are correctness/safety fixes in existing code:
+These are not Phase 3 features — they are correctness/safety fixes in existing code.
+Work in this order (sequential dependencies at the top):
 
-- [ ] Automation double-trigger: `transition` action writes outbox + calls inline, depth resets to 0 on outbox path → `MAX_DEPTH` never fires in loops. Fix: carry `depth` through outbox payload or deduplicate by idempotency key.
-- [ ] RLS under real role: `withTenantContext` sets `app.tenant_id` GUC but never `SET LOCAL ROLE app_user`. Add `SET LOCAL ROLE app_user` or `ALTER TABLE … FORCE ROW LEVEL SECURITY` so RLS is enforced regardless of connection role.
-- [ ] Isolation tests skipped: the three cross-tenant RLS tests are `.skip` because CI runs as superuser. Run CI isolation suite as `app_user` so the isolation guarantee is actually proven.
-- [ ] Automation queue retries: `automation` BullMQ queue has `attempts=1` (BullMQ default). Add `attempts: 3, backoff: { type: "exponential" }` to match the SLA queue.
-- [ ] Auth middleware write-on-every-request: `packages/auth/src/middleware.ts:154-169` does `onConflictDoUpdate` (not `onConflictDoNothing`) on every authenticated request — HOT update per request at scale.
-- [ ] `notify` action is a stub: `actions/notify.ts` only logs. Wire Novu delivery worker to close the notification loop.
-- [ ] `entity.created` / `entity.assigned` triggers never fire: defined in `event-schemas.ts` but entity engine never emits them to the outbox.
-- [ ] `setEntityState` / `bulkSetState` are unguarded state side-doors: mutate `current_state` directly with no `workflow_events` row and no outbox event.
-- [ ] OpenBao + MinIO commented out of `docker-compose.yml`: the code expects them but `docker compose up` doesn't start them. Uncomment and reconcile with `.env.example`.
-- [ ] Worker has no health endpoint: orchestrators cannot health-check `apps/worker`. Add an HTTP readiness probe.
+- [ ] [#121](../../issues/121) RLS under real role: `withTenantContext` sets `app.tenant_id` GUC but never `SET LOCAL ROLE app_user`. Add `SET LOCAL ROLE app_user` or `ALTER TABLE … FORCE ROW LEVEL SECURITY` so RLS is enforced regardless of connection role.
+- [ ] [#122](../../issues/122) Isolation tests skipped: the three cross-tenant RLS tests are `.skip` because CI runs as superuser. Run CI isolation suite as `app_user` so the isolation guarantee is actually proven. (depends on #121)
+- [ ] [#120](../../issues/120) Automation double-trigger: `transition` action writes outbox + calls inline, depth resets to 0 on outbox path → `MAX_DEPTH` never fires in loops. Fix: carry `depth` through outbox payload or deduplicate by idempotency key.
+- [ ] [#123](../../issues/123) Automation queue retries: `automation` BullMQ queue has `attempts=1` (BullMQ default). Add `attempts: 3, backoff: { type: "exponential" }` to match the SLA queue.
+- [ ] [#124](../../issues/124) Auth middleware write-on-every-request: `packages/auth/src/middleware.ts:154-169` does `onConflictDoUpdate` (not `onConflictDoNothing`) on every authenticated request — HOT update per request at scale.
+- [ ] [#125](../../issues/125) `notify` action is a stub: `actions/notify.ts` only logs. Wire Novu delivery worker to close the notification loop.
+- [ ] [#126](../../issues/126) `entity.created` / `entity.assigned` triggers never fire: defined in `event-schemas.ts` but entity engine never emits them to the outbox.
+- [ ] [#127](../../issues/127) `setEntityState` / `bulkSetState` are unguarded state side-doors: mutate `current_state` directly with no `workflow_events` row and no outbox event.
+- [ ] [#128](../../issues/128) OpenBao + MinIO commented out of `docker-compose.yml`: the code expects them but `docker compose up` doesn't start them. Uncomment and reconcile with `.env.example`.
+- [ ] [#129](../../issues/129) Worker has no health endpoint: orchestrators cannot health-check `apps/worker`. Add an HTTP readiness probe.
 
 **Off-limits (never touch autonomously):**
 

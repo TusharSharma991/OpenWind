@@ -1,3 +1,4 @@
+-- analytics: included(created_by, assigned_to) — type change only, same columns as before
 -- Down migration:
 -- ALTER TABLE "entity_instances" ALTER COLUMN "created_by" TYPE uuid USING "created_by"::uuid;
 -- ALTER TABLE "entity_instances" ALTER COLUMN "assigned_to" TYPE uuid USING "assigned_to"::uuid;

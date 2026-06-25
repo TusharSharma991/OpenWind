@@ -18,7 +18,7 @@ export const listWorkflowEventsHandler = factory.createHandlers(
   requireAuth(),
   async (c) => {
     const id = c.req.param("id") ?? "";
-    const { tenantId } = c.get("auth");
+    const { tenantId, orgId } = c.get("auth");
 
     try {
       const events = await withTenantContext(tenantId, (tx) =>
@@ -45,7 +45,7 @@ export const listWorkflowEventsHandler = factory.createHandlers(
       const nameMap = new Map<string, string>();
       if (userIds.size > 0) {
         const [zitadelUsers, dbRows] = await Promise.all([
-          listOrgUsers(),
+          listOrgUsers(orgId),
           withTenantContext(tenantId, (tx) =>
             tx
               .select({

@@ -22,8 +22,9 @@ export const addCommentHandler = factory.createHandlers(
   zValidator("json", AddCommentSchema),
   async (c) => {
     const id = c.req.param("id") ?? "";
-    const { tenantId, userId } = c.get("auth");
+    const { tenantId, userId, orgId, roles } = c.get("auth");
     const { text, mentions, replyTo } = c.req.valid("json");
+    const isPrivileged = roles.includes("admin") || roles.includes("agent");
 
     // Verify entity exists and belongs to tenant
     const [instance] = await withTenantContext(tenantId, (tx) =>
@@ -32,6 +33,7 @@ export const addCommentHandler = factory.createHandlers(
           id: entityInstances.id,
           workflowId: entityInstances.workflowId,
           currentState: entityInstances.currentState,
+          assignedTo: entityInstances.assignedTo,
         })
         .from(entityInstances)
         .where(
@@ -44,6 +46,11 @@ export const addCommentHandler = factory.createHandlers(
     );
 
     if (!instance) {
+      return c.json({ error: "NOT_FOUND", message: "Record not found" }, 404);
+    }
+
+    // Non-admin/agent users may only comment on records assigned to them
+    if (!isPrivileged && instance.assignedTo !== userId) {
       return c.json({ error: "NOT_FOUND", message: "Record not found" }, 404);
     }
 
@@ -78,7 +85,7 @@ export const addCommentHandler = factory.createHandlers(
     } else if (dbUser?.email && dbUser.email !== userId) {
       // Try Zitadel for display name
       try {
-        const zUsers = await listOrgUsers();
+        const zUsers = await listOrgUsers(orgId);
         const zUser = zUsers.find((u) => u.userId === userId);
         actorName = zUser?.displayName ?? zUser?.loginName ?? dbUser.email;
       } catch {

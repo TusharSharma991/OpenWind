@@ -99,7 +99,7 @@ router.post(
 );
 
 // Seed the module registry (admin only) — idempotent, safe to call multiple times
-router.post("/seed", requireRole("admin"), async (c) => {
+router.post("/seed", requireAuth(db), requireRole("admin"), async (c) => {
   const auth = c.get("auth");
   try {
     await ModuleService.seedRegistry();

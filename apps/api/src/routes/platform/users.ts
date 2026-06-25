@@ -18,10 +18,10 @@ usersRouter.get(
   requireAuth(db),
   requireRole("admin", "agent"),
   async (c) => {
-    const { tenantId } = c.get("auth");
+    const { tenantId, orgId } = c.get("auth");
 
     const [zitadelUsers, dbRows] = await Promise.all([
-      listOrgUsers(),
+      listOrgUsers(orgId),
       withTenantContext(tenantId, (tx) =>
         tx
           .select({

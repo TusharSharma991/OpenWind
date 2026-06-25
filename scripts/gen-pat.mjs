@@ -40,7 +40,7 @@ const REDIRECT_URI   = ZITADEL_SECURE
   : `http://${HOST_HEADER}:${ZITADEL_PORT}/ui/console/auth/callback`
 
 // ── ANSI colours ─────────────────────────────────────────────────────────────
-const G = '\x1b[32m', Y = '\x1b[33m', C = '\x1b[36m', B = '\x1b[1m', R = '\x1b[0m', D = '\x1b[2m'
+const G = '\x1b[32m', C = '\x1b[36m', B = '\x1b[1m', R = '\x1b[0m', D = '\x1b[2m'
 function log(msg)   { console.log(msg) }
 function ok(msg)    { console.log(`  ${G}✓${R}  ${msg}`) }
 function info(msg)  { console.log(`  ${D}→${R}  ${msg}`) }
@@ -134,13 +134,6 @@ function jsonPost(path, token, body) {
     'Content-Type': 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   }, JSON.stringify(body))
-}
-
-function jsonGet(path, token) {
-  return rawRequest('GET', path, {
-    'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  }, null)
 }
 
 function assertOk(res, label) {

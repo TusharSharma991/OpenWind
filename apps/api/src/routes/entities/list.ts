@@ -57,11 +57,8 @@ export const listEntitiesHandler = factory.createHandlers(
 
     try {
       const { fields, ...rest } = query;
-      // Non-admin/agent users only see records assigned to them
-      const assignedTo =
-        !isPrivileged && rest.assignedTo === undefined
-          ? userId
-          : rest.assignedTo;
+      // Non-privileged users are always scoped to their own records — query param cannot override
+      const assignedTo = isPrivileged ? rest.assignedTo : userId;
       const page = await withTenantContext(tenantId, (tx) =>
         listEntities(tx, tenantId, {
           ...rest,

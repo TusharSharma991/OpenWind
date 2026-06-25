@@ -51,6 +51,8 @@ Thumbs.db
 # ignore only personal/generated files
 .claude/worktrees/
 .claude/settings.local.json
+# Local-only skills (not committed — contain reviewer-specific audit patterns)
+.claude/skills/pre-pr-review/
 .claire/
 
 # Test coverage

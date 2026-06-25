@@ -57,7 +57,7 @@ beforeEach(() => {
 describe("introspectToken", () => {
   it("returns active result for a valid token", async () => {
     const body = JSON.stringify({ active: true, sub: "user-123" });
-    const res = makeHttpResponse({ active: true, sub: "user-123" });
+    const res = makeHttpResponse();
     makeHttpRequest(res);
 
     const promise = introspectToken("valid-token-1a");
@@ -74,7 +74,7 @@ describe("introspectToken", () => {
 
   it("returns inactive result when server responds with active=false", async () => {
     const body = JSON.stringify({ active: false });
-    const res = makeHttpResponse({ active: false });
+    const res = makeHttpResponse();
     makeHttpRequest(res);
 
     const promise = introspectToken("invalid-token-2a");
@@ -104,8 +104,7 @@ describe("introspectToken", () => {
   });
 
   it("returns inactive result when server returns non-2xx", async () => {
-    const res = makeHttpResponse({}, 503);
-    res.statusCode = 503;
+    const res = makeHttpResponse(503);
     makeHttpRequest(res);
 
     const promise = introspectToken("bad-server-4a");
@@ -120,7 +119,7 @@ describe("introspectToken", () => {
 
   it("uses cached result on second call with same token", async () => {
     const body = JSON.stringify({ active: true, sub: "user-cached" });
-    const res = makeHttpResponse({ active: true, sub: "user-cached" });
+    const res = makeHttpResponse();
     makeHttpRequest(res);
 
     const promise = introspectToken("cached-token-5a");

@@ -15,9 +15,9 @@ export const getWorkflowHandler = factory.createHandlers(
       );
       // Admins and agents have full access; regular users may only access
       // workflows they are assigned to. Return 404 (not 403) to avoid leaking existence.
-      const isAdmin = roles.includes("admin") || roles.includes("agent");
+      const isPrivileged = roles.includes("admin") || roles.includes("agent");
       const isAssignee = workflow.assignedTo === userId;
-      if (!isAdmin && !isAssignee) {
+      if (!isPrivileged && !isAssignee) {
         return c.json(
           { error: "NOT_FOUND", message: "Workflow not found" },
           404,

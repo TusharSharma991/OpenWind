@@ -292,7 +292,7 @@ export function EntityInstanceCreate(): React.ReactElement {
         body: JSON.stringify(payload),
       });
       const created = (res as { data: { id: string } }).data;
-      const et = entityTypeId ? getTypeById(entityTypeId) : undefined;
+      const et = getTypeById(entityTypeId);
       const slug = et ? toTypeSlug(et.name) : entityTypeId;
       navigate(`/records/${slug}/${created.id}`);
     } catch (err) {

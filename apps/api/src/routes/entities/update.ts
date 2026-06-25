@@ -23,11 +23,14 @@ export const updateEntityHandler = factory.createHandlers(
 
     const isAdminOrAgent = roles.includes("admin") || roles.includes("agent");
 
-    // Non-admin/agent users may only edit records assigned to them
+    // Non-admin/agent users may only edit records they own (assignee or creator)
     if (!isAdminOrAgent) {
       const [row] = await withTenantContext(tenantId, (tx) =>
         tx
-          .select({ assignedTo: entityInstances.assignedTo })
+          .select({
+            assignedTo: entityInstances.assignedTo,
+            createdBy: entityInstances.createdBy,
+          })
           .from(entityInstances)
           .where(
             and(
@@ -38,11 +41,8 @@ export const updateEntityHandler = factory.createHandlers(
           .limit(1),
       );
 
-      if (row?.assignedTo !== userId) {
-        return c.json(
-          { error: "Forbidden", message: "Not assigned to this record" },
-          403,
-        );
+      if (row?.assignedTo !== userId && row?.createdBy !== userId) {
+        return c.json({ error: "NOT_FOUND", message: "Record not found" }, 404);
       }
     }
 

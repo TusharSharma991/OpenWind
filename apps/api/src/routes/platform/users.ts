@@ -21,7 +21,7 @@ usersRouter.get(
     const { tenantId, orgId } = c.get("auth");
 
     const [zitadelUsers, dbRows] = await Promise.all([
-      listOrgUsers(orgId),
+      orgId ? listOrgUsers(orgId) : Promise.resolve([]),
       withTenantContext(tenantId, (tx) =>
         tx
           .select({

@@ -34,6 +34,7 @@ export const addCommentHandler = factory.createHandlers(
           workflowId: entityInstances.workflowId,
           currentState: entityInstances.currentState,
           assignedTo: entityInstances.assignedTo,
+          createdBy: entityInstances.createdBy,
         })
         .from(entityInstances)
         .where(
@@ -49,8 +50,12 @@ export const addCommentHandler = factory.createHandlers(
       return c.json({ error: "NOT_FOUND", message: "Record not found" }, 404);
     }
 
-    // Non-admin/agent users may only comment on records assigned to them
-    if (!isPrivileged && instance.assignedTo !== userId) {
+    // Non-admin/agent users may only comment on records they own (assignee or creator)
+    if (
+      !isPrivileged &&
+      instance.assignedTo !== userId &&
+      instance.createdBy !== userId
+    ) {
       return c.json({ error: "NOT_FOUND", message: "Record not found" }, 404);
     }
 
@@ -85,7 +90,7 @@ export const addCommentHandler = factory.createHandlers(
     } else if (dbUser?.email && dbUser.email !== userId) {
       // Try Zitadel for display name
       try {
-        const zUsers = await listOrgUsers(orgId);
+        const zUsers = orgId ? await listOrgUsers(orgId) : [];
         const zUser = zUsers.find((u) => u.userId === userId);
         actorName = zUser?.displayName ?? zUser?.loginName ?? dbUser.email;
       } catch {

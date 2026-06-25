@@ -1,7 +1,7 @@
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { requireAuth, requireRole } from "@platform/auth";
-import { withTenantContext, db, tenantUsers } from "@platform/db";
+import { withTenantContext, tenantUsers } from "@platform/db";
 import { eq, and } from "drizzle-orm";
 import { updateWorkflow } from "@platform/workflow-engine";
 import { factory } from "./factory.js";
@@ -23,16 +23,18 @@ export const updateWorkflowHandler = factory.createHandlers(
 
     // M2: verify assignedTo belongs to this tenant before writing
     if (input.assignedTo !== null && input.assignedTo !== undefined) {
-      const [found] = await db
-        .select({ userId: tenantUsers.userId })
-        .from(tenantUsers)
-        .where(
-          and(
-            eq(tenantUsers.tenantId, tenantId),
-            eq(tenantUsers.userId, input.assignedTo),
-          ),
-        )
-        .limit(1);
+      const [found] = await withTenantContext(tenantId, (tx) =>
+        tx
+          .select({ userId: tenantUsers.userId })
+          .from(tenantUsers)
+          .where(
+            and(
+              eq(tenantUsers.tenantId, tenantId),
+              eq(tenantUsers.userId, input.assignedTo as string),
+            ),
+          )
+          .limit(1),
+      );
       if (!found)
         return c.json(
           { error: "NOT_FOUND", message: "User not found in this tenant" },

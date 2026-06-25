@@ -13,9 +13,14 @@ No raw SQL in application code except:
 1. Migration files in `packages/db/migrations/`
 2. Explicitly performance-critical hot paths with a comment explaining why Drizzle was insufficient
 
-Never instantiate a DB client. Always import from `@platform/db`. The tenant context
-middleware sets `app.tenant_id` via `set_config` — this is how RLS is enforced. No query
-in the engine needs a `WHERE tenant_id = ?` clause.
+Never instantiate a DB client. Always import from `@platform/db`.
+
+**Tenant isolation uses two layers — both are required:**
+
+1. **Explicit `WHERE tenant_id = ?` filters** in every engine query. These are the primary guard and must not be removed.
+2. **RLS via `set_config('app.tenant_id', …)`** set by `withTenantContext`. This is the second line of defence.
+
+`withTenantContext` sets the GUC but does not switch the DB role. If `DATABASE_URL` points at a superuser or table owner, RLS is bypassed and only the explicit filters protect you. Never remove explicit tenant filters on the assumption that RLS alone is sufficient. `withTenantAndUserContext` (used for saved views) sets both `app.tenant_id` and `app.user_id` and is the pattern to follow for user-scoped resources.
 
 ---
 

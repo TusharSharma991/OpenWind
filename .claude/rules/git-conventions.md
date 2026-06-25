@@ -38,6 +38,7 @@ Scope = the package or area changed. Message describes the effect, not the mecha
 - [ ] No `any` types introduced
 - [ ] No direct `process.env` reads introduced
 - [ ] RLS policy on all new tenant-scoped tables
+- [ ] Explicit `WHERE tenant_id = ?` filter in every engine query touching the new table
 - [ ] Analytics annotation on every new `CREATE TABLE`
       (`-- analytics: excluded (reason)` or `-- analytics: included(col1,col2,...)`)
 - [ ] `/ultrareview` passed before merge

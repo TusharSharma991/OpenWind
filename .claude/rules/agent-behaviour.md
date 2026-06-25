@@ -145,10 +145,10 @@ Load when working in those packages — key invariants, gotchas, error codes:
 
 ### Verification
 
-- pnpm typecheck: PASS / FAIL
-- pnpm lint: PASS / FAIL
-- pnpm test: PASS / FAIL
-- pnpm test:isolation: PASS / FAIL
+- pnpm typecheck: PASS / FAIL / N/A — docs-only
+- pnpm lint: PASS / FAIL / N/A — docs-only
+- pnpm test: PASS / FAIL / N/A — docs-only
+- pnpm test:isolation: PASS / FAIL / N/A — docs-only
 
 ### Next
 

@@ -1,14 +1,14 @@
 # Phase 2 Context Primer
 
-> ⚠️ **Planned architecture — most of this does not exist yet.**
-> Phase 2 has not started. APIs, packages, and tables described here are the
-> intended design, not current reality. Do not import these packages or reference
-> these tables until their track is implemented and merged.
+> ✅ **Phase 2 is complete as of 2026-06-18.** All packages, tables, and APIs described
+> here are implemented and merged. Use them freely — `@platform/notifications`,
+> `@platform/files`, `@platform/audit`, the module registry, the UI layers, everything.
 
-Load this file when working on any Phase 2 feature (platform services, module system, UI).
+Load this file for architectural reference when working near Phase 2 code.
 
-**Phase 2 goal:** Helpdesk, reimbursements, and CRM live for pilot customers.
-Modules are pure config. No module-specific backend TypeScript.
+**Phase 2 delivered:** Helpdesk, reimbursements, CRM, and 4 other modules live as
+seed SQL config. Platform services (files, notifications, audit, view_configs) fully
+shipped. Admin UI + customer portal with visual workflow builder and automation wizard.
 
 ---
 

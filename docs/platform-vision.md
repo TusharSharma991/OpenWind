@@ -178,7 +178,7 @@ sequenceDiagram
 - Steps 10–12 are atomic. If the transaction rolls back, no event is emitted.
 - The outbox poller provides at-least-once delivery — even if the worker crashes between steps 14 and 15, the event is re-processed on recovery.
 - Automation failures (step 19) never propagate back to the client. A broken rule cannot prevent a workflow transition from completing.
-- RLS is set once per connection (step 3) — no query in the engine needs a `WHERE tenant_id = ?` clause.
+- RLS (`app.tenant_id` GUC, step 3) is the second line of defence. Engine queries also carry explicit `WHERE tenant_id = ?` filters as the primary guard — both are required.
 
 ---
 
@@ -187,8 +187,8 @@ sequenceDiagram
 ```mermaid
 flowchart LR
     P0(["Phase 0\nFoundation\n✅ DONE"])
-    P1(["Phase 1\nWorking Product"])
-    P2(["Phase 2\nIntegration\nPlatform"])
+    P1(["Phase 1\nWorking Product\n✅ DONE"])
+    P2(["Phase 2\nIntegration\nPlatform\n▶ NEXT"])
     P3(["Phase 3\nExtensibility"])
     P4(["Phase 4\nAI-Native"])
     P5(["Phase 5\nEnterprise +\nVerticals"])
@@ -205,8 +205,9 @@ flowchart LR
     P0 --> G0 --> P1 --> G1 --> P2 --> G2 --> P3 --> G3 --> P4 --> G4 --> P5 --> G5 --> P6 --> G6
 
     style P0 fill:#d1fae5,stroke:#059669
+    style P1 fill:#d1fae5,stroke:#059669
     style G0 fill:#ecfdf5,stroke:#059669
-    style G1 fill:#fef3c7,stroke:#d97706
+    style G1 fill:#ecfdf5,stroke:#059669
     style G2 fill:#fef3c7,stroke:#d97706
     style G3 fill:#fef3c7,stroke:#d97706
     style G4 fill:#fef3c7,stroke:#d97706
@@ -622,7 +623,7 @@ The plugin system requires the admin UI to become a Module Federation host, plug
 ```mermaid
 graph LR
     P0["Phase 0\nFoundation\n✅ DONE"]
-    P1["Phase 1\nWorking Product\nmodules + UI + pilot"]
+    P1["Phase 1\nWorking Product\n✅ DONE"]
     P2["Phase 2\nIntegration\nconnectors + webhooks"]
     P3["Phase 3\nExtensibility\nplugins + marketplace"]
     P4["Phase 4\nAI-Native\nclassification + generation"]
@@ -632,7 +633,7 @@ graph LR
     P0 --> P1 --> P2 --> P3 --> P4 --> P5 --> P6
 
     style P0 fill:#d1fae5,stroke:#059669,color:#065f46
-    style P1 fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
+    style P1 fill:#d1fae5,stroke:#059669,color:#065f46
     style P2 fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
     style P3 fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
     style P4 fill:#fef3c7,stroke:#d97706,color:#78350f

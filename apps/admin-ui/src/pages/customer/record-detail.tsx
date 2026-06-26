@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { fetchWithAuth, API_URL } from "../../lib/api.js";
 import { useEntityTypes } from "../../entity-type-context.js";
+import { userManager } from "../../authProvider.js";
 
 type EntityField = {
   id: string;
@@ -586,76 +587,247 @@ function CommentComposer({
   );
 }
 
-/* ── Comment thread node ─────────────────────────────────────── */
-function CommentNode({
-  event,
-  allComments,
+/* ── Searchable assign dropdown ──────────────────────────────── */
+function AssignDropdown({
+  value,
   users,
-  depth,
-  onSubmitReply,
+  disabled,
+  onChange,
 }: {
-  event: WorkflowEvent;
-  allComments: WorkflowEvent[];
+  value: string;
   users: OrgUser[];
-  depth: number;
-  onSubmitReply: (
-    text: string,
-    mentions: string[],
-    replyTo: string | null,
-  ) => Promise<void>;
+  disabled?: boolean;
+  onChange: (userId: string) => void;
 }): React.ReactElement {
-  const [showReplyBox, setShowReplyBox] = useState(false);
-  const meta = event.metadata as { type?: string; text?: string } | undefined;
-  const commentText = meta?.text ?? event.comment ?? "";
-  const ts = event.triggeredAt;
-  const directReplies = allComments.filter(
-    (e) =>
-      (e.metadata as { replyTo?: string | null } | undefined)?.replyTo ===
-      event.id,
-  );
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const containerRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
 
-  const renderText = (): React.ReactNode =>
-    commentText.split(/(@[\w. ]+)/g).map((part, i) =>
-      part.startsWith("@") ? (
-        <span key={i} className="cmt-mention-chip">
-          {part}
-        </span>
-      ) : (
-        <React.Fragment key={i}>{part}</React.Fragment>
-      ),
-    );
+  const selectedUser = users.find((u) => u.userId === value);
+  const filtered = search
+    ? users.filter((u) => {
+        const q = search.toLowerCase();
+        return (
+          (u.displayName ?? "").toLowerCase().includes(q) ||
+          u.email.toLowerCase().includes(q)
+        );
+      })
+    : users;
+
+  useEffect(() => {
+    if (!open) return;
+    searchRef.current?.focus();
+    function onClickOutside(e: MouseEvent): void {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false);
+        setSearch("");
+      }
+    }
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [open]);
+
+  function select(userId: string): void {
+    onChange(userId);
+    setOpen(false);
+    setSearch("");
+  }
 
   return (
-    <div className={`cmt-node ${depth > 0 ? "cmt-node-reply" : ""}`}>
-      <div className="cmt-node-header">
-        <span className="cmt-node-avatar">
-          {(event.actorDisplayName ?? event.actorId).slice(0, 1).toUpperCase()}
-        </span>
-        <span className="cmt-node-author">
-          {event.actorDisplayName ?? event.actorId.slice(0, 8) + "…"}
-        </span>
-        <span className="cmt-node-time">
-          {ts
-            ? new Date(ts).toLocaleString(undefined, {
-                month: "short",
-                day: "numeric",
-                year: "numeric",
-                hour: "2-digit",
-                minute: "2-digit",
-              })
-            : ""}
-        </span>
-      </div>
-      <div className="cmt-node-body">{renderText()}</div>
-      <div className="cmt-node-actions">
-        <button
-          type="button"
-          className="cmt-reply-btn"
-          onClick={() => setShowReplyBox((v) => !v)}
+    <div ref={containerRef} className="asgn-drop">
+      <button
+        type="button"
+        className={`asgn-trigger ${open ? "asgn-trigger-open" : ""}`}
+        disabled={disabled}
+        onClick={() => setOpen((v) => !v)}
+      >
+        {selectedUser ? (
+          <>
+            <span className="asgn-avatar">
+              {(selectedUser.displayName ?? selectedUser.email)
+                .slice(0, 1)
+                .toUpperCase()}
+            </span>
+            <span className="asgn-name">
+              {selectedUser.displayName ?? selectedUser.email}
+            </span>
+          </>
+        ) : (
+          <>
+            <span className="asgn-avatar asgn-avatar-empty">?</span>
+            <span className="asgn-name asgn-unassigned">Unassigned</span>
+          </>
+        )}
+        <svg
+          className="asgn-chevron"
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
         >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="asgn-menu">
+          <div className="asgn-search-wrap">
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            <input
+              ref={searchRef}
+              className="asgn-search"
+              placeholder="Search people…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+          <div className="asgn-options">
+            <button
+              type="button"
+              className={`asgn-option ${!value ? "asgn-option-selected" : ""}`}
+              onClick={() => select("")}
+            >
+              <span className="asgn-avatar asgn-avatar-empty">?</span>
+              <span className="asgn-option-info">
+                <span className="asgn-option-name">Unassigned</span>
+              </span>
+              {!value && (
+                <svg
+                  className="asgn-check"
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              )}
+            </button>
+            {filtered.length === 0 && (
+              <div className="asgn-empty">No results</div>
+            )}
+            {filtered.map((u) => (
+              <button
+                key={u.userId}
+                type="button"
+                className={`asgn-option ${value === u.userId ? "asgn-option-selected" : ""}`}
+                onClick={() => select(u.userId)}
+              >
+                <span className="asgn-avatar">
+                  {(u.displayName ?? u.email).slice(0, 1).toUpperCase()}
+                </span>
+                <span className="asgn-option-info">
+                  <span className="asgn-option-name">
+                    {u.displayName ?? u.email}
+                  </span>
+                  <span className="asgn-option-email">{u.email}</span>
+                </span>
+                {value === u.userId && (
+                  <svg
+                    className="asgn-check"
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Searchable state transition dropdown ────────────────────── */
+function StateDropdown({
+  currentState: current,
+  allStates,
+  transitions,
+  disabled,
+  onTransition,
+}: {
+  currentState: string | null;
+  allStates: WorkflowState[];
+  transitions: Transition[];
+  disabled?: boolean;
+  onTransition: (transition: Transition) => void;
+}): React.ReactElement {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const stateObj = allStates.find((s) => s.name === current);
+  const color = stateObj?.color ?? null;
+  const available = transitions.filter((t) => t.fromState === current);
+
+  useEffect(() => {
+    if (!open) return;
+    function onClickOutside(e: MouseEvent): void {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [open]);
+
+  if (!current) return <span className="rcd-muted">—</span>;
+
+  return (
+    <div ref={containerRef} className="asgn-drop">
+      <button
+        type="button"
+        className={`asgn-trigger asgn-trigger-state ${open ? "asgn-trigger-open" : ""}`}
+        disabled={disabled === true || available.length === 0}
+        onClick={() => setOpen((v) => !v)}
+        title={
+          available.length === 0 ? "No transitions available" : "Change state"
+        }
+      >
+        <span
+          className="rcd-state-dot"
+          style={color ? { background: color } : undefined}
+        />
+        <span className="asgn-name">{stateObj?.label ?? current}</span>
+        {available.length > 0 && (
           <svg
-            width="11"
-            height="11"
+            className="asgn-chevron"
+            width="12"
+            height="12"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -663,42 +835,61 @@ function CommentNode({
             strokeLinecap="round"
             strokeLinejoin="round"
           >
-            <polyline points="9 14 4 9 9 4" />
-            <path d="M20 20v-7a4 4 0 00-4-4H4" />
+            <polyline points="6 9 12 15 18 9" />
           </svg>
-          Reply
-        </button>
-      </div>
-      {showReplyBox && (
-        <div className="cmt-inline-reply">
-          <CommentComposer
-            users={users}
-            replyTo={event}
-            onCancel={() => setShowReplyBox(false)}
-            placeholder="Reply… (@ to mention)"
-            onSubmit={async (text, mentions, replyToId) => {
-              await onSubmitReply(text, mentions, replyToId);
-              setShowReplyBox(false);
-            }}
-          />
-        </div>
-      )}
-      {directReplies.length > 0 && (
-        <div className="cmt-replies">
-          {directReplies.map((r) => (
-            <CommentNode
-              key={r.id}
-              event={r}
-              allComments={allComments}
-              users={users}
-              depth={depth + 1}
-              onSubmitReply={onSubmitReply}
-            />
-          ))}
+        )}
+      </button>
+
+      {open && available.length > 0 && (
+        <div className="asgn-menu">
+          <div className="asgn-menu-label">Move to…</div>
+          <div className="asgn-options">
+            {available.map((t) => {
+              const toState = allStates.find((s) => s.name === t.toState);
+              const toColor = toState?.color ?? null;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  className="asgn-option"
+                  onClick={() => {
+                    setOpen(false);
+                    onTransition(t);
+                  }}
+                >
+                  <span
+                    className="rcd-state-dot"
+                    style={toColor ? { background: toColor } : undefined}
+                  />
+                  <span className="asgn-option-info">
+                    <span className="asgn-option-name">
+                      {t.label !== "" ? t.label : (toState?.label ?? t.toState)}
+                    </span>
+                    {t.requiresComment && (
+                      <span className="asgn-option-email">
+                        Comment required
+                      </span>
+                    )}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
   );
+}
+
+function formatFieldValue(value: unknown): string {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    if ("amount" in obj && "currency" in obj)
+      return `${String(obj.currency)} ${String(obj.amount)}`;
+    return JSON.stringify(value);
+  }
+  return String(value);
 }
 
 /* ══════════════════════════════════════════════════════════════ */
@@ -723,9 +914,45 @@ export function CustomerRecordDetail(): React.ReactElement {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [allStates, setAllStates] = useState<WorkflowState[]>([]);
+  const [transitions, setTransitions] = useState<Transition[]>([]);
   const [currentState, setCurrentState] = useState("");
   const [users, setUsers] = useState<OrgUser[]>([]);
-  const [activeTab, setActiveTab] = useState<"history" | "comments">("history");
+  const [detailsExpanded, setDetailsExpanded] = useState(false);
+  const [activeTab, setActiveTab] = useState<"comments" | "history">(
+    "comments",
+  );
+  const [quickAssigning, setQuickAssigning] = useState(false);
+  const [replyTo, setReplyTo] = useState<WorkflowEvent | null>(null);
+  const [collapsedThreads, setCollapsedThreads] = useState<Set<string>>(
+    new Set(),
+  );
+  const initializedCollapse = useRef(false);
+  const [currentUserRoles, setCurrentUserRoles] = useState<string[]>([]);
+  useEffect(() => {
+    userManager
+      .getUser()
+      .then((u) => {
+        if (!u) return;
+        const roleClaim = u.profile["urn:zitadel:iam:org:project:roles"] as
+          | Record<string, unknown>
+          | undefined;
+        setCurrentUserRoles(roleClaim ? Object.keys(roleClaim) : []);
+      })
+      .catch(() => {
+        /* leave defaults */
+      });
+  }, []);
+  const isAdminOrAgent =
+    currentUserRoles.includes("admin") || currentUserRoles.includes("agent");
+
+  function toggleThread(id: string): void {
+    setCollapsedThreads((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   const getFieldLabel = (fieldName: string): string => {
     if (fieldName === "state" || fieldName === "currentState") return "State";
@@ -776,6 +1003,26 @@ export function CustomerRecordDetail(): React.ReactElement {
       )
       .finally(() => setLoading(false));
   }
+
+  // Collapse all parent threads on first load (and after a full reload)
+  useEffect(() => {
+    if (history.length === 0) return;
+    const comments = history.filter((e) => e.metadata?.type === "comment");
+    const parentIds = new Set(
+      comments
+        .map(
+          (c) =>
+            (c.metadata as { replyTo?: string | null } | undefined)?.replyTo ??
+            null,
+        )
+        .filter((id): id is string => id !== null),
+    );
+    if (parentIds.size === 0) return;
+    if (!initializedCollapse.current) {
+      initializedCollapse.current = true;
+      setCollapsedThreads(parentIds);
+    }
+  }, [history]);
 
   async function refreshHistory(): Promise<void> {
     if (!id) return;
@@ -830,8 +1077,10 @@ export function CustomerRecordDetail(): React.ReactElement {
             ).data ?? [])[0];
         if (wf) {
           setAllStates(wf.states as WorkflowState[]);
+          setTransitions(wf.transitions as Transition[]);
         } else {
           setAllStates([]);
+          setTransitions([]);
         }
       })
       .catch(() => {
@@ -859,6 +1108,20 @@ export function CustomerRecordDetail(): React.ReactElement {
       setSaveError(err instanceof Error ? err.message : "Save failed");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function quickAssign(userId: string): Promise<void> {
+    if (!id) return;
+    setQuickAssigning(true);
+    try {
+      await fetchWithAuth(`${API_URL}/entities/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ assignedTo: userId || null }),
+      });
+      void loadRecord();
+    } finally {
+      setQuickAssigning(false);
     }
   }
 
@@ -910,15 +1173,39 @@ export function CustomerRecordDetail(): React.ReactElement {
     );
   }
 
-  const currentStateObj = allStates.find((s) => s.name === record.currentState);
-
   const historyEvents = history;
-  const allCommentEvents = history.filter(
-    (e) => (e.metadata as { type?: string } | null)?.type === "comment",
+  const commentEvents = historyEvents.filter(
+    (e) => e.metadata?.type === "comment",
   );
-  const topLevelComments = allCommentEvents.filter(
-    (e) => !(e.metadata as { replyTo?: string | null } | null)?.replyTo,
+  const timelineEvents = historyEvents.filter(
+    (e) => e.metadata?.type !== "comment",
   );
+  const sortedAll = [...historyEvents].sort(
+    (a, b) =>
+      new Date(a.triggeredAt).getTime() - new Date(b.triggeredAt).getTime(),
+  );
+
+  // Build a proper comment tree: each node knows its direct children
+  const sortedComments = [...commentEvents].sort(
+    (a, b) =>
+      new Date(a.triggeredAt).getTime() - new Date(b.triggeredAt).getTime(),
+  );
+  const commentById = new Map(sortedComments.map((c) => [c.id, c]));
+
+  // childrenOf[parentId] = direct children in chronological order
+  const childrenOf = new Map<string, WorkflowEvent[]>();
+  const topLevelComments: WorkflowEvent[] = [];
+  for (const c of sortedComments) {
+    const parentId =
+      (c.metadata as { replyTo?: string | null } | undefined)?.replyTo ?? null;
+    if (parentId && commentById.has(parentId)) {
+      const arr = childrenOf.get(parentId) ?? [];
+      arr.push(c);
+      childrenOf.set(parentId, arr);
+    } else {
+      topLevelComments.push(c);
+    }
+  }
 
   const titleField = fields.find(
     (f) => f.name === "subject" || f.name === "title" || f.name === "name",
@@ -927,10 +1214,255 @@ export function CustomerRecordDetail(): React.ReactElement {
     ? String(record.fields[titleField.name] ?? "")
     : `${entityType?.name ?? "Record"} #${record.id.slice(0, 8)}`;
 
+  const createdByEvent = historyEvents.find(
+    (e) => e.metadata?.type === "create",
+  );
+
+  function renderCommentBubble(event: WorkflowEvent): React.ReactElement {
+    const meta = event.metadata;
+    const commentText =
+      (meta as { text?: string } | undefined)?.text ?? event.comment ?? "";
+    const renderText = (): React.ReactNode =>
+      commentText.split(/(@[\w. ]+)/g).map((part, i) =>
+        part.startsWith("@") ? (
+          <span key={i} className="cmt-mention-chip">
+            {part}
+          </span>
+        ) : (
+          <React.Fragment key={i}>{part}</React.Fragment>
+        ),
+      );
+    return (
+      <>
+        <span className="rcd-feed-avatar">
+          {(event.actorDisplayName ?? event.actorId).slice(0, 1).toUpperCase()}
+        </span>
+        <div className="rcd-feed-comment-body">
+          <div className="rcd-feed-comment-meta">
+            <span className="rcd-feed-comment-author">
+              {event.actorDisplayName ?? event.actorId.slice(0, 8) + "…"}
+            </span>
+            <span className="rcd-feed-comment-time">
+              {new Date(event.triggeredAt).toLocaleString(undefined, {
+                month: "short",
+                day: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </span>
+            <button
+              type="button"
+              className="rcd-reply-btn"
+              onClick={() => {
+                setReplyTo(event);
+                setActiveTab("comments");
+              }}
+              title="Reply"
+            >
+              <svg
+                width="11"
+                height="11"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="9 14 4 9 9 4" />
+                <path d="M20 20v-7a4 4 0 00-4-4H4" />
+              </svg>
+              Reply
+            </button>
+          </div>
+          <div className="rcd-feed-comment-text">{renderText()}</div>
+        </div>
+      </>
+    );
+  }
+
+  function renderCommentNode(
+    event: WorkflowEvent,
+    depth: number,
+  ): React.ReactElement {
+    const children = childrenOf.get(event.id) ?? [];
+    const hasChildren = children.length > 0;
+    const collapsed = collapsedThreads.has(event.id);
+
+    return (
+      <div className={depth === 0 ? "rcd-comment-root" : "rcd-comment-child"}>
+        <div className="rcd-comment-row">
+          {renderCommentBubble(event)}
+          {hasChildren && (
+            <button
+              type="button"
+              className={`rcd-thread-toggle ${collapsed ? "rcd-thread-toggle-collapsed" : ""}`}
+              onClick={() => toggleThread(event.id)}
+              title={
+                collapsed
+                  ? `Show ${children.length} repl${children.length === 1 ? "y" : "ies"}`
+                  : "Collapse replies"
+              }
+            >
+              <svg
+                width="11"
+                height="11"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+              <span>{collapsed ? children.length : ""}</span>
+            </button>
+          )}
+        </div>
+        {hasChildren && !collapsed && (
+          <div className="rcd-comment-children">
+            {children.map((child) => (
+              <React.Fragment key={child.id}>
+                {renderCommentNode(child, depth + 1)}
+              </React.Fragment>
+            ))}
+          </div>
+        )}
+        {hasChildren && collapsed && (
+          <div
+            className="rcd-comment-collapsed-hint"
+            onClick={() => toggleThread(event.id)}
+          >
+            <svg
+              width="11"
+              height="11"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+            {children.length} repl{children.length === 1 ? "y" : "ies"} hidden
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function renderFeedEvent(event: WorkflowEvent): React.ReactElement {
+    const meta = event.metadata;
+    const isCreate = meta?.type === "create";
+    const isUpdate = meta?.type === "update";
+    const isComment = meta?.type === "comment";
+
+    if (isComment) {
+      // standalone (no replies, not a reply) — used only for history tab
+      return (
+        <div key={event.id} className="rcd-feed-comment">
+          {renderCommentBubble(event)}
+        </div>
+      );
+    }
+
+    const eventType = isCreate ? "create" : isUpdate ? "update" : "transition";
+    return (
+      <div key={event.id} className="rcd-feed-event">
+        <div className="rcd-feed-event-icon-wrap">
+          <HistoryIcon type={eventType} />
+          <div className="rcd-feed-event-line" />
+        </div>
+        <div className="rcd-feed-event-body">
+          {isCreate ? (
+            <span className="rcd-feed-event-text">
+              <strong>
+                {event.actorDisplayName ?? getActorName(event.actorId)}
+              </strong>{" "}
+              created this record
+            </span>
+          ) : isUpdate ? (
+            <div>
+              <span className="rcd-feed-event-text">
+                <strong>
+                  {event.actorDisplayName ?? getActorName(event.actorId)}
+                </strong>{" "}
+                updated the record
+              </span>
+              {"changed" in (meta as Record<string, unknown>) &&
+                typeof (meta as Record<string, unknown>)["changed"] ===
+                  "object" &&
+                (meta as Record<string, unknown>)["changed"] !== null &&
+                Object.keys(
+                  (meta as Record<string, unknown>)["changed"] as object,
+                ).length > 0 && (
+                  <ul className="rcd-tl-changes">
+                    {Object.entries(
+                      (
+                        meta as Record<
+                          string,
+                          Record<string, Record<string, unknown>>
+                        >
+                      )["changed"] ?? {},
+                    ).map(([fieldName, change]) => (
+                      <li key={fieldName}>
+                        <strong>{getFieldLabel(fieldName)}</strong>:{" "}
+                        {fieldName === "assignedTo"
+                          ? ((change["oldName"] as string | null) ??
+                            getActorName(change["old"] as string | null))
+                          : formatFieldValue(change["old"])}
+                        {" → "}
+                        {fieldName === "assignedTo"
+                          ? ((change["newName"] as string | null) ??
+                            getActorName(change["new"] as string | null))
+                          : formatFieldValue(change["new"])}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+            </div>
+          ) : (
+            <div className="rcd-feed-event-text">
+              <strong>
+                {event.actorDisplayName ?? getActorName(event.actorId)}
+              </strong>{" "}
+              moved{" "}
+              {event.fromState && (
+                <>
+                  <span className="rcd-tl-state">{event.fromState}</span>
+                  {" → "}
+                </>
+              )}
+              <span className="rcd-tl-state rcd-tl-state-to">
+                {event.toState}
+              </span>
+              {event.comment && (
+                <div className="rcd-tl-comment" style={{ marginTop: "6px" }}>
+                  "{event.comment}"
+                </div>
+              )}
+            </div>
+          )}
+          <div className="rcd-feed-event-time">
+            {new Date(event.triggeredAt).toLocaleString(undefined, {
+              month: "short",
+              day: "numeric",
+              year: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="rcd-page">
-      {/* ── Breadcrumb ───────────────────────────────────────── */}
-      <div className="rcd-breadcrumb">
+      {/* ── Breadcrumb nav ───────────────────────────────── */}
+      <div className="rcd-nav">
         <Link to={`/records/${typeSlug ?? ""}`} className="rcd-bc-link">
           <svg
             width="13"
@@ -951,55 +1483,6 @@ export function CustomerRecordDetail(): React.ReactElement {
         <span className="rcd-bc-current">{recordTitle}</span>
       </div>
 
-      {/* ── Page Header ─────────────────────────────────────── */}
-      <div className="rcd-header">
-        <div className="rcd-header-left">
-          <div className="rcd-header-icon">
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <rect x="2" y="7" width="20" height="14" rx="2" />
-              <path d="M16 3H8a2 2 0 00-2 2v2h12V5a2 2 0 00-2-2z" />
-            </svg>
-          </div>
-          <div>
-            <h1 className="rcd-title">{recordTitle}</h1>
-            <div className="rcd-meta-row">
-              <StateBadge
-                stateName={record.currentState}
-                allStates={allStates}
-              />
-              <span className="rcd-meta-sep" />
-              <span className="rcd-meta-text">
-                Created{" "}
-                {new Date(record.createdAt).toLocaleDateString(undefined, {
-                  month: "short",
-                  day: "numeric",
-                  year: "numeric",
-                })}
-              </span>
-              <span className="rcd-meta-sep" />
-              <span className="rcd-meta-text">
-                Updated{" "}
-                {new Date(record.updatedAt).toLocaleDateString(undefined, {
-                  month: "short",
-                  day: "numeric",
-                  year: "numeric",
-                })}
-              </span>
-              <span className="rcd-id-chip">{record.id.slice(0, 8)}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
       {transError && (
         <div className="portal-alert-error rcd-trans-error">
           ⚠ {transError}
@@ -1012,45 +1495,39 @@ export function CustomerRecordDetail(): React.ReactElement {
         </div>
       )}
 
-      {/* ── Two-column layout ──────────────────────────────── */}
-      <div className="rcd-layout">
-        {/* ── Left: Fields + History ── */}
-        <div className="rcd-main">
-          {/* Fields panel */}
-          <div className="rcd-panel">
-            <div className="rcd-panel-header">
-              <div className="rcd-panel-title">
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-                  <polyline points="14 2 14 8 20 8" />
-                </svg>
-                Details
+      {/* ── Cards area ───────────────────────────────────── */}
+      <div className="rcd-cards">
+        {/* ══ CARD 1: Details ══════════════════════════════ */}
+        <div className="rcd-card rcd-detail-card">
+          {/* Card header: title + state + actions */}
+          <div className="rcd-card-header">
+            <div className="rcd-card-header-left">
+              <h1 className="rcd-title">{recordTitle}</h1>
+              <div className="rcd-card-header-meta">
+                <StateBadge
+                  stateName={record.currentState}
+                  allStates={allStates}
+                />
+                <span className="rcd-id-chip">{record.id.slice(0, 8)}</span>
               </div>
-              {!editing && (
+            </div>
+            <div className="rcd-card-header-right">
+              {!editing && isAdminOrAgent && (
                 <button
-                  className="rcd-panel-edit-icon"
-                  aria-label="Edit record"
+                  type="button"
+                  className="rcd-btn-secondary"
                   onClick={() => {
                     setEditValues(record.fields);
                     setCurrentState(record.currentState ?? "");
                     setEditAssignedTo(record.assignedTo ?? "");
-                    setEditing(true);
                     setSaveError(null);
+                    setEditing(true);
+                    setDetailsExpanded(true);
                   }}
                 >
                   <svg
-                    width="13"
-                    height="13"
+                    width="12"
+                    height="12"
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
@@ -1062,456 +1539,343 @@ export function CustomerRecordDetail(): React.ReactElement {
                     <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
                     <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
                   </svg>
+                  Edit
                 </button>
               )}
-            </div>
-
-            {fields.length === 0 ? (
-              <p className="rcd-empty-hint">
-                No fields defined for this record type.
-              </p>
-            ) : editing ? (
-              <div className="rcd-edit-body">
-                {saveError && (
-                  <div
-                    className="portal-alert-error"
-                    style={{ marginBottom: "16px" }}
-                  >
-                    {saveError}
-                  </div>
-                )}
-                <div className="portal-edit-grid">
-                  {allStates.length > 0 && (
-                    <div className="portal-field-group portal-field-full">
-                      <label className="portal-field-label">State</label>
-                      <select
-                        className="portal-input"
-                        value={currentState}
-                        onChange={(e) => setCurrentState(e.target.value)}
-                      >
-                        {allStates.map((st) => (
-                          <option key={st.id} value={st.name}>
-                            {st.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-                  <div className="portal-field-group portal-field-full">
-                    <label className="portal-field-label">Assigned To</label>
-                    <select
-                      className="portal-input"
-                      value={editAssignedTo}
-                      onChange={(e) => setEditAssignedTo(e.target.value)}
-                    >
-                      <option value="">Unassigned</option>
-                      {users.map((u) => (
-                        <option key={u.userId} value={u.userId}>
-                          {u.displayName ?? u.email}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  {fields.map((f) => (
-                    <div
-                      key={f.id}
-                      className={`portal-field-group ${f.fieldType === "longtext" ? "portal-field-full" : ""}`}
-                    >
-                      <label className="portal-field-label">
-                        {f.label}
-                        {f.isRequired && (
-                          <span className="portal-required">*</span>
-                        )}
-                      </label>
-                      <FieldInput
-                        field={f}
-                        value={editValues[f.name]}
-                        onChange={(v) =>
-                          setEditValues((p) => ({ ...p, [f.name]: v }))
-                        }
-                      />
-                    </div>
-                  ))}
-                </div>
-                <div className="rcd-edit-footer">
-                  <button
-                    className="portal-btn-secondary"
-                    onClick={() => {
-                      setEditing(false);
-                      setSaveError(null);
-                    }}
-                    disabled={saving}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    className="portal-btn-primary"
-                    onClick={() => void saveEdit()}
-                    disabled={saving}
-                  >
-                    {saving ? "Saving…" : "Save changes"}
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="rcd-fields">
-                <div className="rcd-field-row">
-                  <div className="rcd-field-label">Assigned To</div>
-                  <div className="rcd-field-value">
-                    {record.assignedTo ? (
-                      <span>
-                        {(() => {
-                          const u = users.find(
-                            (u) => u.userId === record.assignedTo,
-                          );
-                          return u
-                            ? (u.displayName ?? u.loginName ?? u.email)
-                            : record.assignedTo;
-                        })()}
-                      </span>
-                    ) : (
-                      <span className="rcd-muted">Unassigned</span>
-                    )}
-                  </div>
-                </div>
-                {fields.map((f) => (
-                  <div key={f.id} className="rcd-field-row">
-                    <div className="rcd-field-label">{f.label}</div>
-                    <div className="rcd-field-value">
-                      <FieldValue
-                        value={record.fields[f.name]}
-                        fieldType={f.fieldType}
-                        field={f}
-                      />
-                    </div>
-                  </div>
-                ))}
-                {fields.length === 0 && (
-                  <p className="rcd-empty-hint">No custom fields.</p>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* ── Right sidebar ── */}
-        <div className="rcd-sidebar">
-          {/* Record info */}
-          <div className="rcd-panel">
-            <div className="rcd-panel-header">
-              <div className="rcd-panel-title">
+              <button
+                type="button"
+                className={`rcd-expand-btn ${detailsExpanded ? "rcd-expand-btn-open" : ""}`}
+                onClick={() => {
+                  setDetailsExpanded((v) => !v);
+                  if (editing) setEditing(false);
+                }}
+                aria-expanded={detailsExpanded}
+                title={detailsExpanded ? "Collapse details" : "Expand details"}
+              >
                 <svg
                   width="14"
                   height="14"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
-                  strokeWidth="2"
+                  strokeWidth="2.5"
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   aria-hidden="true"
                 >
-                  <circle cx="12" cy="12" r="10" />
-                  <line x1="12" y1="8" x2="12" y2="12" />
-                  <line x1="12" y1="16" x2="12.01" y2="16" />
+                  <polyline points="6 9 12 15 18 9" />
                 </svg>
-                Info
-              </div>
-            </div>
-            <div className="rcd-info-list">
-              {[
-                { label: "Record ID", value: record.id.slice(0, 8) + "…" },
-                {
-                  label: "Current State",
-                  value: currentStateObj?.label ?? record.currentState ?? "—",
-                },
-                { label: "Type", value: entityType?.name ?? "—" },
-                {
-                  label: "Created",
-                  value: new Date(record.createdAt).toLocaleDateString(),
-                },
-                {
-                  label: "Last Updated",
-                  value: new Date(record.updatedAt).toLocaleDateString(),
-                },
-              ].map((row) => (
-                <div key={row.label} className="rcd-info-row">
-                  <div className="rcd-info-label">{row.label}</div>
-                  <div className="rcd-info-value">{row.value}</div>
-                </div>
-              ))}
+              </button>
             </div>
           </div>
 
-          {/* State pipeline */}
-          {allStates.length > 0 && (
-            <div className="rcd-panel">
-              <div className="rcd-panel-header">
-                <div className="rcd-panel-title">
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <path d="M3 8.689c0-.864.933-1.406 1.683-.977l7.108 4.061a1.125 1.125 0 010 1.954l-7.108 4.061A1.125 1.125 0 013 16.811V8.69zM12.75 8.689c0-.864.933-1.406 1.683-.977l7.108 4.061a1.125 1.125 0 010 1.954l-7.108 4.061a1.125 1.125 0 01-1.683-.977V8.69z" />
-                  </svg>
-                  Workflow States
-                </div>
+          {/* Always-visible info strip */}
+          <div className="rcd-info-strip">
+            {/* State */}
+            <div className="rcd-info-item">
+              <span className="rcd-info-lbl">State</span>
+              <div className="rcd-info-val">
+                <StateDropdown
+                  currentState={record.currentState}
+                  allStates={allStates}
+                  transitions={transitions}
+                  disabled={!!transitioning}
+                  onTransition={(t) => {
+                    if (t.requiresComment) {
+                      setStateModal(t);
+                    } else {
+                      void executeTransition(t);
+                    }
+                  }}
+                />
               </div>
-              <div className="rcd-states-list">
-                {allStates.map((s) => {
-                  const isCurrent = s.name === record.currentState;
-                  return (
+            </div>
+
+            <div className="rcd-info-divider" />
+
+            {/* Assigned to */}
+            <div className="rcd-info-item">
+              <span className="rcd-info-lbl">Assigned to</span>
+              <div className="rcd-info-val">
+                <AssignDropdown
+                  value={record.assignedTo ?? ""}
+                  users={users}
+                  disabled={quickAssigning}
+                  onChange={(userId) => void quickAssign(userId)}
+                />
+              </div>
+            </div>
+
+            <div className="rcd-info-divider" />
+
+            {/* Created */}
+            <div className="rcd-info-item">
+              <span className="rcd-info-lbl">Created</span>
+              <span className="rcd-info-val">
+                {new Date(record.createdAt).toLocaleDateString(undefined, {
+                  month: "short",
+                  day: "numeric",
+                  year: "numeric",
+                })}
+                {createdByEvent && (
+                  <span className="rcd-info-by">
+                    {" "}
+                    by{" "}
+                    {createdByEvent.actorDisplayName ??
+                      getActorName(createdByEvent.actorId)}
+                  </span>
+                )}
+              </span>
+            </div>
+
+            <div className="rcd-info-divider" />
+
+            {/* Last updated */}
+            <div className="rcd-info-item">
+              <span className="rcd-info-lbl">Last updated</span>
+              <span className="rcd-info-val">
+                {new Date(record.updatedAt).toLocaleDateString(undefined, {
+                  month: "short",
+                  day: "numeric",
+                  year: "numeric",
+                })}
+              </span>
+            </div>
+
+            <div className="rcd-info-divider" />
+
+            {/* Type */}
+            <div className="rcd-info-item">
+              <span className="rcd-info-lbl">Type</span>
+              <span className="rcd-info-val">{entityType?.name ?? "—"}</span>
+            </div>
+          </div>
+
+          {/* Expandable: all fields / edit form */}
+          <div
+            className={`rcd-expand-body ${detailsExpanded ? "rcd-expand-body-open" : ""}`}
+          >
+            <div className="rcd-expand-inner">
+              {editing ? (
+                <>
+                  {saveError && (
                     <div
-                      key={s.id}
-                      className={`rcd-state-row ${isCurrent ? "rcd-state-row-current" : ""}`}
+                      className="portal-alert-error"
+                      style={{ marginBottom: "12px" }}
                     >
-                      <span
-                        className="rcd-state-pip"
-                        style={{ background: s.color ?? "var(--accent)" }}
-                      />
-                      <span className="rcd-state-name">{s.label}</span>
-                      {isCurrent && (
-                        <span className="rcd-state-current-tag">current</span>
-                      )}
-                      {s.isTerminal && !isCurrent && (
-                        <span className="rcd-state-end-tag">end</span>
-                      )}
+                      {saveError}
                     </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ── Activity section — full width ──────────────────── */}
-      <div className="rcd-activity-section">
-        <div className="rcd-tabs">
-          <button
-            type="button"
-            className={`rcd-tab${activeTab === "history" ? " rcd-tab-active" : ""}`}
-            onClick={() => {
-              setActiveTab("history");
-            }}
-          >
-            History
-            {historyEvents.length > 0 && (
-              <span className="rcd-tab-count">{historyEvents.length}</span>
-            )}
-          </button>
-          <button
-            type="button"
-            className={`rcd-tab${activeTab === "comments" ? " rcd-tab-active" : ""}`}
-            onClick={() => {
-              setActiveTab("comments");
-            }}
-          >
-            Comments
-            {allCommentEvents.length > 0 && (
-              <span className="rcd-tab-count">{allCommentEvents.length}</span>
-            )}
-          </button>
-        </div>
-
-        {activeTab === "history" && (
-          <div className="rcd-activity-body">
-            {historyEvents.length === 0 ? (
-              <p className="rcd-empty-hint">No history yet.</p>
-            ) : (
-              <div className="rcd-timeline rcd-timeline-wide">
-                {[...historyEvents].reverse().map((event) => {
-                  const meta = event.metadata;
-                  const isCreate = meta?.type === "create";
-                  const isUpdate = meta?.type === "update";
-                  const isComment = meta?.type === "comment";
-                  const eventType = isCreate
-                    ? "create"
-                    : isUpdate
-                      ? "update"
-                      : isComment
-                        ? "comment"
-                        : "transition";
-                  return (
-                    <div key={event.id} className="rcd-tl-item">
-                      <div className="rcd-tl-left">
-                        <HistoryIcon type={eventType} />
-                        <div className="rcd-tl-line" />
+                  )}
+                  <div className="portal-edit-grid">
+                    {allStates.length > 0 && (
+                      <div className="portal-field-group portal-field-full">
+                        <label className="portal-field-label">State</label>
+                        <select
+                          className="portal-input"
+                          value={currentState}
+                          onChange={(e) => setCurrentState(e.target.value)}
+                        >
+                          {allStates.map((st) => (
+                            <option key={st.id} value={st.name}>
+                              {st.label}
+                            </option>
+                          ))}
+                        </select>
                       </div>
-                      <div className="rcd-tl-body">
-                        {isComment ? (
-                          <div className="rcd-tl-title">
-                            Added a comment
-                            <span className="rcd-tl-actor">
-                              by{" "}
-                              {event.actorDisplayName ??
-                                getActorName(event.actorId)}
-                            </span>
-                          </div>
-                        ) : isCreate ? (
-                          <div className="rcd-tl-title">
-                            Record created
-                            <span className="rcd-tl-actor">
-                              by{" "}
-                              {event.actorDisplayName ??
-                                getActorName(event.actorId)}
-                            </span>
-                          </div>
-                        ) : isUpdate ? (
-                          <div>
-                            <div className="rcd-tl-title">
-                              Record updated
-                              <span className="rcd-tl-actor">
-                                by{" "}
-                                {event.actorDisplayName ??
-                                  getActorName(event.actorId)}
-                              </span>
-                            </div>
-                            {"changed" in (meta as Record<string, unknown>) &&
-                              typeof (meta as Record<string, unknown>)[
-                                "changed"
-                              ] === "object" &&
-                              (meta as Record<string, unknown>)["changed"] !==
-                                null &&
-                              Object.keys(
-                                (meta as Record<string, unknown>)[
-                                  "changed"
-                                ] as object,
-                              ).length > 0 && (
-                                <ul className="rcd-tl-changes">
-                                  {Object.entries(
-                                    (
-                                      meta as Record<
-                                        string,
-                                        Record<string, Record<string, unknown>>
-                                      >
-                                    )["changed"] ?? {},
-                                  ).map(([fieldName, change]) => (
-                                    <li key={fieldName}>
-                                      <strong>
-                                        {getFieldLabel(fieldName)}
-                                      </strong>
-                                      :{" "}
-                                      {fieldName === "assignedTo"
-                                        ? ((change["oldName"] as
-                                            | string
-                                            | null) ??
-                                          getActorName(
-                                            change["old"] as string | null,
-                                          ))
-                                        : String(change["old"] ?? "—")}{" "}
-                                      →{" "}
-                                      {fieldName === "assignedTo"
-                                        ? ((change["newName"] as
-                                            | string
-                                            | null) ??
-                                          getActorName(
-                                            change["new"] as string | null,
-                                          ))
-                                        : String(change["new"] ?? "—")}
-                                    </li>
-                                  ))}
-                                </ul>
-                              )}
-                          </div>
-                        ) : (
-                          <div className="rcd-tl-transition-row">
-                            {event.fromState && (
-                              <>
-                                <span className="rcd-tl-state">
-                                  {event.fromState}
-                                </span>
-                                <svg
-                                  width="12"
-                                  height="12"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="2.5"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  className="rcd-tl-arrow"
-                                >
-                                  <polyline points="5 12 19 12" />
-                                  <polyline points="13 6 19 12 13 18" />
-                                </svg>
-                              </>
-                            )}
-                            <span className="rcd-tl-state rcd-tl-state-to">
-                              {event.toState}
-                            </span>
-                            <span className="rcd-tl-actor">
-                              by{" "}
-                              {event.actorDisplayName ??
-                                getActorName(event.actorId)}
-                            </span>
-                          </div>
-                        )}
-                        {event.comment && !isCreate && !isUpdate && (
-                          <div className="rcd-tl-comment">
-                            "{event.comment}"
-                          </div>
-                        )}
-                        <div className="rcd-tl-time">
-                          {new Date(event.triggeredAt).toLocaleString(
-                            undefined,
-                            {
-                              month: "short",
-                              day: "numeric",
-                              year: "numeric",
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            },
+                    )}
+                    <div className="portal-field-group portal-field-full">
+                      <label className="portal-field-label">Assigned To</label>
+                      <select
+                        className="portal-input"
+                        value={editAssignedTo}
+                        onChange={(e) => setEditAssignedTo(e.target.value)}
+                      >
+                        <option value="">Unassigned</option>
+                        {users.map((u) => (
+                          <option key={u.userId} value={u.userId}>
+                            {u.displayName ?? u.email}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    {fields.map((f) => (
+                      <div
+                        key={f.id}
+                        className={`portal-field-group ${f.fieldType === "longtext" ? "portal-field-full" : ""}`}
+                      >
+                        <label className="portal-field-label">
+                          {f.label}
+                          {f.isRequired && (
+                            <span className="portal-required">*</span>
                           )}
-                        </div>
+                        </label>
+                        <FieldInput
+                          field={f}
+                          value={editValues[f.name]}
+                          onChange={(v) =>
+                            setEditValues((p) => ({ ...p, [f.name]: v }))
+                          }
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <div className="rcd-edit-footer">
+                    <button
+                      className="portal-btn-secondary"
+                      onClick={() => {
+                        setEditing(false);
+                        setSaveError(null);
+                      }}
+                      disabled={saving}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      className="portal-btn-primary"
+                      onClick={() => void saveEdit()}
+                      disabled={saving}
+                    >
+                      {saving ? "Saving…" : "Save changes"}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="rcd-fields-grid">
+                  {fields.map((f) => (
+                    <div key={f.id} className="rcd-field-item">
+                      <div className="rcd-field-lbl">{f.label}</div>
+                      <div className="rcd-field-val">
+                        <FieldValue
+                          value={record.fields[f.name]}
+                          fieldType={f.fieldType}
+                          field={f}
+                        />
                       </div>
                     </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-
-        {activeTab === "comments" && (
-          <div className="rcd-activity-body cmt-tab">
-            <CommentComposer
-              users={users}
-              replyTo={null}
-              onSubmit={(text, mentions, replyTo) => {
-                return submitComment(text, mentions, replyTo);
-              }}
-            />
-            <div className="cmt-thread">
-              {topLevelComments.length === 0 ? (
-                <p className="rcd-empty-hint">No comments yet.</p>
-              ) : (
-                [...topLevelComments].reverse().map((c) => (
-                  <CommentNode
-                    key={c.id}
-                    event={c}
-                    allComments={allCommentEvents}
-                    users={users}
-                    depth={0}
-                    onSubmitReply={(text, mentions, replyTo) => {
-                      return submitComment(text, mentions, replyTo);
-                    }}
-                  />
-                ))
+                  ))}
+                  {fields.length === 0 && (
+                    <p
+                      className="rcd-empty-hint"
+                      style={{ padding: "0", gridColumn: "1/-1" }}
+                    >
+                      No custom fields defined.
+                    </p>
+                  )}
+                </div>
               )}
             </div>
           </div>
-        )}
+        </div>
+
+        {/* ══ CARD 2: Activity tabs ════════════════════════ */}
+        <div className="rcd-card rcd-activity-card">
+          {/* Tab bar */}
+          <div className="rcd-tabs">
+            <button
+              type="button"
+              className={`rcd-tab ${activeTab === "comments" ? "rcd-tab-active" : ""}`}
+              onClick={() => setActiveTab("comments")}
+            >
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+              </svg>
+              Comments
+              {commentEvents.length > 0 && (
+                <span className="rcd-tab-count">{commentEvents.length}</span>
+              )}
+            </button>
+            <button
+              type="button"
+              className={`rcd-tab ${activeTab === "history" ? "rcd-tab-active" : ""}`}
+              onClick={() => setActiveTab("history")}
+            >
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
+              </svg>
+              History
+              {timelineEvents.length > 0 && (
+                <span className="rcd-tab-count">{timelineEvents.length}</span>
+              )}
+            </button>
+          </div>
+
+          {/* Tab content */}
+          <div className="rcd-tab-panel">
+            {activeTab === "comments" ? (
+              <>
+                <div className="rcd-tab-scroll">
+                  {topLevelComments.length === 0 ? (
+                    <p className="rcd-empty-hint rcd-empty-hint-feed">
+                      No comments yet. Be the first to comment.
+                    </p>
+                  ) : (
+                    <div className="rcd-feed-list">
+                      {topLevelComments.map((root) => (
+                        <React.Fragment key={root.id}>
+                          {renderCommentNode(root, 0)}
+                        </React.Fragment>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="rcd-composer-dock">
+                  <CommentComposer
+                    users={users}
+                    replyTo={replyTo}
+                    onCancel={() => setReplyTo(null)}
+                    onSubmit={(text, mentions, replyToId) =>
+                      submitComment(text, mentions, replyToId).then(() =>
+                        setReplyTo(null),
+                      )
+                    }
+                  />
+                </div>
+              </>
+            ) : (
+              <div className="rcd-tab-scroll">
+                {timelineEvents.length === 0 ? (
+                  <p className="rcd-empty-hint rcd-empty-hint-feed">
+                    No history yet.
+                  </p>
+                ) : (
+                  <div className="rcd-feed-list">
+                    {sortedAll
+                      .filter((e) => e.metadata?.type !== "comment")
+                      .map((event) => (
+                        <React.Fragment key={event.id}>
+                          {renderFeedEvent(event)}
+                        </React.Fragment>
+                      ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
-      {/* ── Transition modal ─────────────────────────────────── */}
+      {/* ── Transition modal ─────────────────────────────── */}
       {stateModal && (
         <div
           className="modal-overlay"

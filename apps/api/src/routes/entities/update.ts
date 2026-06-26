@@ -1,7 +1,7 @@
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { eq, and } from "drizzle-orm";
-import { requireAuth } from "@platform/auth";
+import { requireAuth, requireRole } from "@platform/auth";
 import { entityInstances, tenantUsers, withTenantContext } from "@platform/db";
 import { updateEntity } from "@platform/entity-engine";
 import { factory } from "./factory.js";
@@ -15,6 +15,7 @@ const UpdateEntitySchema = z.object({
 
 export const updateEntityHandler = factory.createHandlers(
   requireAuth(),
+  requireRole("admin", "agent", "user"),
   zValidator("json", UpdateEntitySchema),
   async (c) => {
     const id = c.req.param("id") ?? "";
@@ -27,7 +28,10 @@ export const updateEntityHandler = factory.createHandlers(
     if (!isAdminOrAgent) {
       const [row] = await withTenantContext(tenantId, (tx) =>
         tx
-          .select({ assignedTo: entityInstances.assignedTo })
+          .select({
+            assignedTo: entityInstances.assignedTo,
+            createdBy: entityInstances.createdBy,
+          })
           .from(entityInstances)
           .where(
             and(
@@ -38,9 +42,10 @@ export const updateEntityHandler = factory.createHandlers(
           .limit(1),
       );
 
-      if (row?.assignedTo !== userId) {
+      const isOwner = row?.assignedTo === userId || row?.createdBy === userId;
+      if (!isOwner) {
         return c.json(
-          { error: "Forbidden", message: "Not assigned to this record" },
+          { error: "Forbidden", message: "Not authorized to edit this record" },
           403,
         );
       }

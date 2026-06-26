@@ -629,7 +629,7 @@ async function runZitadelSetup(
       "OIDC_GRANT_TYPE_REFRESH_TOKEN",
     ],
     appType: "OIDC_APP_TYPE_WEB",
-    authMethodType: "OIDC_AUTH_METHOD_TYPE_BASIC",
+    authMethodType: "OIDC_AUTH_METHOD_TYPE_NONE",
     postLogoutRedirectUris: [
       "http://localhost:3001",
       "http://localhost:3001/login",

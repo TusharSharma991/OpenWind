@@ -25,13 +25,63 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useOne } from "@refinedev/core";
-import {
-  useParams,
-  Link,
-  useNavigate,
-  useBlocker,
-  Navigate,
-} from "react-router-dom";
+import { useParams, Link, useNavigate, Navigate } from "react-router-dom";
+
+// useBlocker requires a data router (createBrowserRouter), but this app uses
+// BrowserRouter. This shim intercepts history.pushState/replaceState to provide
+// the same { state, proceed, reset } API without data-router internals.
+function useHistoryBlocker(when: boolean): {
+  state: "unblocked" | "blocked";
+  proceed: () => void;
+  reset: () => void;
+} {
+  const [blockedUrl, setBlockedUrl] = useState<string | null>(null);
+  const whenRef = useRef(when);
+  useEffect(() => {
+    whenRef.current = when;
+  }, [when]);
+
+  useEffect(() => {
+    const orig = window.history.pushState.bind(window.history);
+    const origReplace = window.history.replaceState.bind(window.history);
+
+    function intercept(
+      fn: typeof orig,
+      data: unknown,
+      unused: string,
+      url?: string | URL | null,
+    ): void {
+      if (whenRef.current && url !== null && url !== undefined) {
+        setBlockedUrl(typeof url === "string" ? url : url.toString());
+        return;
+      }
+      fn(data, unused, url as string);
+    }
+
+    window.history.pushState = (d, u, url) => intercept(orig, d, u, url);
+    window.history.replaceState = (d, u, url) =>
+      intercept(origReplace, d, u, url);
+
+    return () => {
+      window.history.pushState = orig;
+      window.history.replaceState = origReplace;
+    };
+  }, []);
+
+  const proceed = useCallback(() => {
+    const url = blockedUrl;
+    setBlockedUrl(null);
+    if (url) window.history.pushState(null, "", url);
+  }, [blockedUrl]);
+
+  const reset = useCallback(() => setBlockedUrl(null), []);
+
+  return {
+    state: blockedUrl !== null ? "blocked" : "unblocked",
+    proceed,
+    reset,
+  };
+}
 import { fetchWithAuth, API_URL } from "../../lib/api.js";
 import { useEntityTypes } from "../../entity-type-context.js";
 import { userManager } from "../../authProvider.js";
@@ -654,8 +704,7 @@ function StateFlowDiagram({
     setLocalStates([...states].sort((a, b) => a.sortOrder - b.sortOrder));
   }, [states]);
 
-  // intentional: no deps array — always re-measure after any layout change so SVG arcs stay accurate
-  useLayoutEffect(() => {
+  const measureNodes = useCallback(() => {
     const container = containerRef.current;
     if (!container) return;
     const containerRect = container.getBoundingClientRect();
@@ -666,7 +715,21 @@ function StateFlowDiagram({
     }
     setNodeCenters(centers);
     setContainerWidth(containerRect.width);
-  });
+  }, []);
+
+  // Re-measure when state list changes (nodes added/removed/reordered).
+  useLayoutEffect(() => {
+    measureNodes();
+  }, [localStates, measureNodes]);
+
+  // Re-measure on container resize so SVG arcs stay accurate after window resize.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const ro = new ResizeObserver(measureNodes);
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, [measureNodes]);
 
   const sensors = useSensors(useSensor(PointerSensor));
 
@@ -1015,7 +1078,7 @@ export function WorkflowDetail(): React.ReactElement {
   const [canvasView, setCanvasView] = useState<"canvas" | "pipeline">("canvas");
   const [canvasDirty, setCanvasDirty] = useState(false);
 
-  const blocker = useBlocker(canvasDirty);
+  const blocker = useHistoryBlocker(canvasDirty);
 
   // Warn on browser refresh/tab-close when canvas has unsaved changes
   useEffect(() => {
@@ -1640,43 +1703,47 @@ export function WorkflowDetail(): React.ReactElement {
               </svg>
               View Records
             </button>
-            <button
-              className={
-                workflow.isActive ? "btn btn-secondary" : "btn-primary"
-              }
-              onClick={() => void handleToggleActive()}
-              disabled={togglingActive}
-              style={{ minWidth: "110px" }}
-            >
-              {togglingActive
-                ? "Saving…"
-                : workflow.isActive
-                  ? "Deactivate"
-                  : "Activate"}
-            </button>
-            <button
-              className="icon-btn icon-btn-delete"
-              style={{ width: "36px", height: "36px" }}
-              onClick={() => setShowDeleteWorkflow(true)}
-              title="Delete workflow"
-              aria-label="Delete workflow"
-            >
-              <svg
-                width="15"
-                height="15"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
+            {isAdmin && (
+              <button
+                className={
+                  workflow.isActive ? "btn btn-secondary" : "btn-primary"
+                }
+                onClick={() => void handleToggleActive()}
+                disabled={togglingActive}
+                style={{ minWidth: "110px" }}
               >
-                <polyline points="3 6 5 6 21 6" />
-                <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
-                <path d="M10 11v6M14 11v6" />
-                <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" />
-              </svg>
-            </button>
+                {togglingActive
+                  ? "Saving…"
+                  : workflow.isActive
+                    ? "Deactivate"
+                    : "Activate"}
+              </button>
+            )}
+            {isAdmin && (
+              <button
+                className="icon-btn icon-btn-delete"
+                style={{ width: "36px", height: "36px" }}
+                onClick={() => setShowDeleteWorkflow(true)}
+                title="Delete workflow"
+                aria-label="Delete workflow"
+              >
+                <svg
+                  width="15"
+                  height="15"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <polyline points="3 6 5 6 21 6" />
+                  <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+                  <path d="M10 11v6M14 11v6" />
+                  <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" />
+                </svg>
+              </button>
+            )}
           </div>
         </div>
 
@@ -1934,12 +2001,14 @@ export function WorkflowDetail(): React.ReactElement {
               label="Fields"
               count={fields.length}
               action={
-                <button
-                  className="btn-primary btn-sm"
-                  onClick={() => setShowAddField(true)}
-                >
-                  + Add Field
-                </button>
+                isAdmin ? (
+                  <button
+                    className="btn-primary btn-sm"
+                    onClick={() => setShowAddField(true)}
+                  >
+                    + Add Field
+                  </button>
+                ) : undefined
               }
             />
             {fieldsLoading ? (
@@ -1999,58 +2068,28 @@ export function WorkflowDetail(): React.ReactElement {
                           <td
                             style={{ textAlign: "right", whiteSpace: "nowrap" }}
                           >
-                            <div
-                              style={{
-                                display: "flex",
-                                gap: "6px",
-                                justifyContent: "flex-end",
-                              }}
-                            >
-                              <button
-                                className="icon-btn icon-btn-edit"
-                                onClick={() => {
-                                  setEditingField(f);
-                                  setFieldForm({
-                                    name: f.name,
-                                    label: f.label,
-                                    fieldType: f.fieldType,
-                                    isRequired: f.isRequired,
-                                  });
-                                  setFieldError(null);
+                            {isAdmin && (
+                              <div
+                                style={{
+                                  display: "flex",
+                                  gap: "6px",
+                                  justifyContent: "flex-end",
                                 }}
-                                title="Edit field"
                               >
-                                <svg
-                                  width="13"
-                                  height="13"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="2"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
+                                <button
+                                  className="icon-btn icon-btn-edit"
+                                  onClick={() => {
+                                    setEditingField(f);
+                                    setFieldForm({
+                                      name: f.name,
+                                      label: f.label,
+                                      fieldType: f.fieldType,
+                                      isRequired: f.isRequired,
+                                    });
+                                    setFieldError(null);
+                                  }}
+                                  title="Edit field"
                                 >
-                                  <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
-                                  <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
-                                </svg>
-                              </button>
-                              <button
-                                className="icon-btn icon-btn-delete"
-                                disabled={deletingFieldId === f.id}
-                                onClick={() =>
-                                  setConfirmDelete({
-                                    message: `Delete field "${f.label}"?`,
-                                    onConfirm: () => {
-                                      setConfirmDelete(null);
-                                      void handleDeleteField(f.id);
-                                    },
-                                  })
-                                }
-                                title="Delete field"
-                              >
-                                {deletingFieldId === f.id ? (
-                                  <span style={{ fontSize: "11px" }}>…</span>
-                                ) : (
                                   <svg
                                     width="13"
                                     height="13"
@@ -2061,13 +2100,45 @@ export function WorkflowDetail(): React.ReactElement {
                                     strokeLinecap="round"
                                     strokeLinejoin="round"
                                   >
-                                    <polyline points="3 6 5 6 21 6" />
-                                    <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
-                                    <path d="M10 11v6M14 11v6" />
+                                    <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                                    <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
                                   </svg>
-                                )}
-                              </button>
-                            </div>
+                                </button>
+                                <button
+                                  className="icon-btn icon-btn-delete"
+                                  disabled={deletingFieldId === f.id}
+                                  onClick={() =>
+                                    setConfirmDelete({
+                                      message: `Delete field "${f.label}"?`,
+                                      onConfirm: () => {
+                                        setConfirmDelete(null);
+                                        void handleDeleteField(f.id);
+                                      },
+                                    })
+                                  }
+                                  title="Delete field"
+                                >
+                                  {deletingFieldId === f.id ? (
+                                    <span style={{ fontSize: "11px" }}>…</span>
+                                  ) : (
+                                    <svg
+                                      width="13"
+                                      height="13"
+                                      viewBox="0 0 24 24"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="2"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                    >
+                                      <polyline points="3 6 5 6 21 6" />
+                                      <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+                                      <path d="M10 11v6M14 11v6" />
+                                    </svg>
+                                  )}
+                                </button>
+                              </div>
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -2086,12 +2157,14 @@ export function WorkflowDetail(): React.ReactElement {
               label="States"
               count={workflow.states.length}
               action={
-                <button
-                  className="btn-primary btn-sm"
-                  onClick={() => setShowAddState(true)}
-                >
-                  + Add State
-                </button>
+                isAdmin ? (
+                  <button
+                    className="btn-primary btn-sm"
+                    onClick={() => setShowAddState(true)}
+                  >
+                    + Add State
+                  </button>
+                ) : undefined
               }
             />
             <div className="table-scroll">
@@ -2163,86 +2236,91 @@ export function WorkflowDetail(): React.ReactElement {
                         {state.sortOrder}
                       </td>
                       <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                        <div
-                          style={{
-                            display: "flex",
-                            gap: "6px",
-                            justifyContent: "flex-end",
-                          }}
-                        >
-                          <button
-                            className="icon-btn icon-btn-edit"
-                            onClick={() => {
-                              setEditingState(state);
-                              setStateForm({
-                                name: state.name,
-                                label: state.label,
-                                color: state.color ?? "#6366f1",
-                                isTerminal: state.isTerminal,
-                                slaHours:
-                                  state.slaHours !== null
-                                    ? String(state.slaHours)
-                                    : "",
-                                sortOrder: String(state.sortOrder),
-                              });
-                              setStateError(null);
+                        {isAdmin && (
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: "6px",
+                              justifyContent: "flex-end",
                             }}
-                            title="Edit state"
                           >
-                            <svg
-                              width="13"
-                              height="13"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            >
-                              <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
-                              <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
-                            </svg>
-                          </button>
-                          {state.name !== workflow.initialState ? (
                             <button
-                              className="icon-btn icon-btn-delete"
-                              disabled={deletingStateId === state.id}
-                              onClick={() =>
-                                setConfirmDelete({
-                                  message: `Delete state "${state.label}"?`,
-                                  onConfirm: () => {
-                                    setConfirmDelete(null);
-                                    void handleDeleteState(state.id);
-                                  },
-                                })
-                              }
-                              title="Delete state"
+                              className="icon-btn icon-btn-edit"
+                              onClick={() => {
+                                setEditingState(state);
+                                setStateForm({
+                                  name: state.name,
+                                  label: state.label,
+                                  color: state.color ?? "#6366f1",
+                                  isTerminal: state.isTerminal,
+                                  slaHours:
+                                    state.slaHours !== null
+                                      ? String(state.slaHours)
+                                      : "",
+                                  sortOrder: String(state.sortOrder),
+                                });
+                                setStateError(null);
+                              }}
+                              title="Edit state"
                             >
-                              {deletingStateId === state.id ? (
-                                <span style={{ fontSize: "11px" }}>…</span>
-                              ) : (
-                                <svg
-                                  width="13"
-                                  height="13"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="2"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                >
-                                  <polyline points="3 6 5 6 21 6" />
-                                  <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
-                                  <path d="M10 11v6M14 11v6" />
-                                </svg>
-                              )}
+                              <svg
+                                width="13"
+                                height="13"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                                <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                              </svg>
                             </button>
-                          ) : (
-                            <span
-                              style={{ display: "inline-block", width: "30px" }}
-                            />
-                          )}
-                        </div>
+                            {state.name !== workflow.initialState ? (
+                              <button
+                                className="icon-btn icon-btn-delete"
+                                disabled={deletingStateId === state.id}
+                                onClick={() =>
+                                  setConfirmDelete({
+                                    message: `Delete state "${state.label}"?`,
+                                    onConfirm: () => {
+                                      setConfirmDelete(null);
+                                      void handleDeleteState(state.id);
+                                    },
+                                  })
+                                }
+                                title="Delete state"
+                              >
+                                {deletingStateId === state.id ? (
+                                  <span style={{ fontSize: "11px" }}>…</span>
+                                ) : (
+                                  <svg
+                                    width="13"
+                                    height="13"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  >
+                                    <polyline points="3 6 5 6 21 6" />
+                                    <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+                                    <path d="M10 11v6M14 11v6" />
+                                  </svg>
+                                )}
+                              </button>
+                            ) : (
+                              <span
+                                style={{
+                                  display: "inline-block",
+                                  width: "30px",
+                                }}
+                              />
+                            )}
+                          </div>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -2260,12 +2338,14 @@ export function WorkflowDetail(): React.ReactElement {
               label="Transitions"
               count={workflow.transitions.length}
               action={
-                <button
-                  className="btn-primary btn-sm"
-                  onClick={() => setShowAddTransition(true)}
-                >
-                  + Add Transition
-                </button>
+                isAdmin ? (
+                  <button
+                    className="btn-primary btn-sm"
+                    onClick={() => setShowAddTransition(true)}
+                  >
+                    + Add Transition
+                  </button>
+                ) : undefined
               }
             />
             {workflow.transitions.length === 0 ? (
@@ -2377,59 +2457,29 @@ export function WorkflowDetail(): React.ReactElement {
                         <td
                           style={{ textAlign: "right", whiteSpace: "nowrap" }}
                         >
-                          <div
-                            style={{
-                              display: "flex",
-                              gap: "6px",
-                              justifyContent: "flex-end",
-                            }}
-                          >
-                            <button
-                              className="icon-btn icon-btn-edit"
-                              onClick={() => {
-                                setEditingTransition(t);
-                                setTransForm({
-                                  fromState: t.fromState,
-                                  toState: t.toState,
-                                  label: t.label,
-                                  allowedRoles: [...t.allowedRoles],
-                                  requiresComment: t.requiresComment,
-                                });
-                                setTransError(null);
+                          {isAdmin && (
+                            <div
+                              style={{
+                                display: "flex",
+                                gap: "6px",
+                                justifyContent: "flex-end",
                               }}
-                              title="Edit transition"
                             >
-                              <svg
-                                width="13"
-                                height="13"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
+                              <button
+                                className="icon-btn icon-btn-edit"
+                                onClick={() => {
+                                  setEditingTransition(t);
+                                  setTransForm({
+                                    fromState: t.fromState,
+                                    toState: t.toState,
+                                    label: t.label,
+                                    allowedRoles: [...t.allowedRoles],
+                                    requiresComment: t.requiresComment,
+                                  });
+                                  setTransError(null);
+                                }}
+                                title="Edit transition"
                               >
-                                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
-                                <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
-                              </svg>
-                            </button>
-                            <button
-                              className="icon-btn icon-btn-delete"
-                              disabled={deletingTransId === t.id}
-                              onClick={() =>
-                                setConfirmDelete({
-                                  message: `Delete transition "${t.label || `${t.fromState} → ${t.toState}`}"?`,
-                                  onConfirm: () => {
-                                    setConfirmDelete(null);
-                                    void handleDeleteTransition(t.id);
-                                  },
-                                })
-                              }
-                              title="Delete transition"
-                            >
-                              {deletingTransId === t.id ? (
-                                <span style={{ fontSize: "11px" }}>…</span>
-                              ) : (
                                 <svg
                                   width="13"
                                   height="13"
@@ -2440,13 +2490,45 @@ export function WorkflowDetail(): React.ReactElement {
                                   strokeLinecap="round"
                                   strokeLinejoin="round"
                                 >
-                                  <polyline points="3 6 5 6 21 6" />
-                                  <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
-                                  <path d="M10 11v6M14 11v6" />
+                                  <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                                  <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
                                 </svg>
-                              )}
-                            </button>
-                          </div>
+                              </button>
+                              <button
+                                className="icon-btn icon-btn-delete"
+                                disabled={deletingTransId === t.id}
+                                onClick={() =>
+                                  setConfirmDelete({
+                                    message: `Delete transition "${t.label || `${t.fromState} → ${t.toState}`}"?`,
+                                    onConfirm: () => {
+                                      setConfirmDelete(null);
+                                      void handleDeleteTransition(t.id);
+                                    },
+                                  })
+                                }
+                                title="Delete transition"
+                              >
+                                {deletingTransId === t.id ? (
+                                  <span style={{ fontSize: "11px" }}>…</span>
+                                ) : (
+                                  <svg
+                                    width="13"
+                                    height="13"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  >
+                                    <polyline points="3 6 5 6 21 6" />
+                                    <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+                                    <path d="M10 11v6M14 11v6" />
+                                  </svg>
+                                )}
+                              </button>
+                            </div>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -2591,39 +2673,45 @@ export function WorkflowDetail(): React.ReactElement {
             <div
               style={{ display: "flex", flexDirection: "column", gap: "8px" }}
             >
-              <button
-                className="btn btn-secondary"
-                style={{
-                  width: "100%",
-                  textAlign: "left",
-                  justifyContent: "flex-start",
-                }}
-                onClick={() => setShowAddState(true)}
-              >
-                + Add State
-              </button>
-              <button
-                className="btn btn-secondary"
-                style={{
-                  width: "100%",
-                  textAlign: "left",
-                  justifyContent: "flex-start",
-                }}
-                onClick={() => setShowAddTransition(true)}
-              >
-                + Add Transition
-              </button>
-              <button
-                className="btn btn-secondary"
-                style={{
-                  width: "100%",
-                  textAlign: "left",
-                  justifyContent: "flex-start",
-                }}
-                onClick={() => setShowAddField(true)}
-              >
-                + Add Field
-              </button>
+              {isAdmin && (
+                <button
+                  className="btn btn-secondary"
+                  style={{
+                    width: "100%",
+                    textAlign: "left",
+                    justifyContent: "flex-start",
+                  }}
+                  onClick={() => setShowAddState(true)}
+                >
+                  + Add State
+                </button>
+              )}
+              {isAdmin && (
+                <button
+                  className="btn btn-secondary"
+                  style={{
+                    width: "100%",
+                    textAlign: "left",
+                    justifyContent: "flex-start",
+                  }}
+                  onClick={() => setShowAddTransition(true)}
+                >
+                  + Add Transition
+                </button>
+              )}
+              {isAdmin && (
+                <button
+                  className="btn btn-secondary"
+                  style={{
+                    width: "100%",
+                    textAlign: "left",
+                    justifyContent: "flex-start",
+                  }}
+                  onClick={() => setShowAddField(true)}
+                >
+                  + Add Field
+                </button>
+              )}
               <button
                 className="btn-primary"
                 style={{ width: "100%" }}

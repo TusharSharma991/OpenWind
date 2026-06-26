@@ -22,6 +22,12 @@ type EntityInstance = {
   fields: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+  assignedTo?: string | null;
+};
+type OrgUser = {
+  userId: string;
+  email: string;
+  displayName: string | null;
 };
 type WorkflowState = {
   id: string;
@@ -522,6 +528,21 @@ export function WorkflowRecords(): React.ReactElement {
   const [transitioning, setTransitioning] = useState(false);
   const [transError, setTransError] = useState<string | null>(null);
 
+  const [users, setUsers] = useState<OrgUser[]>([]);
+  const [searchText, setSearchText] = useState("");
+  const [searchExpanded, setSearchExpanded] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchWrapRef = useRef<HTMLDivElement>(null);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [filterDateField, setFilterDateField] = useState<
+    "createdAt" | "updatedAt" | ""
+  >("");
+  const [filterDateValue, setFilterDateValue] = useState("");
+  const [filterAssignedTo, setFilterAssignedTo] = useState("");
+  const [userSearch, setUserSearch] = useState("");
+  const filterBtnRef = useRef<HTMLButtonElement>(null);
+  const filterPanelRef = useRef<HTMLDivElement>(null);
+
   const [colOrder, setColOrder] = useState<string[]>([]);
 
   const [pendingDrop, setPendingDrop] = useState<{
@@ -602,9 +623,10 @@ export function WorkflowRecords(): React.ReactElement {
           return [...kept, ...added];
         });
 
-        const [fieldsRes, recRes] = await Promise.all([
+        const [fieldsRes, recRes, usersRes] = await Promise.all([
           fetchWithAuth(`${API_URL}/entity-types/${wf.entityTypeId}/fields`),
           fetchWithAuth(`${API_URL}/entities?entityTypeId=${wf.entityTypeId}`),
+          fetchWithAuth(`${API_URL}/users`).catch(() => ({ data: [] })),
         ]);
         setFields(
           (fieldsRes as { data: EntityField[] }).data.filter(
@@ -612,12 +634,43 @@ export function WorkflowRecords(): React.ReactElement {
           ),
         );
         setRecords((recRes as { data?: EntityInstance[] }).data ?? []);
+        setUsers((usersRes as { data?: OrgUser[] }).data ?? []);
       })
       .catch((err: unknown) =>
         setError(err instanceof Error ? err.message : "Failed to load"),
       )
       .finally(() => setLoading(false));
   }, [workflowSlug]);
+
+  useEffect(() => {
+    if (!searchExpanded) return;
+    function onClickOutside(e: MouseEvent): void {
+      if (
+        searchWrapRef.current &&
+        !searchWrapRef.current.contains(e.target as Node)
+      ) {
+        if (!searchText) setSearchExpanded(false);
+      }
+    }
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [searchExpanded, searchText]);
+
+  useEffect(() => {
+    if (!filterOpen) return;
+    function onClickOutside(e: MouseEvent): void {
+      if (
+        filterPanelRef.current &&
+        !filterPanelRef.current.contains(e.target as Node) &&
+        filterBtnRef.current &&
+        !filterBtnRef.current.contains(e.target as Node)
+      ) {
+        setFilterOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [filterOpen]);
 
   const entityType = entityTypeId ? getTypeById(entityTypeId) : undefined;
   const typeSlug = entityType
@@ -633,9 +686,48 @@ export function WorkflowRecords(): React.ReactElement {
     .map((name) => states.find((s) => s.name === name))
     .filter(Boolean) as WorkflowState[];
 
+  // Derive title field name once
+  const titleFieldName =
+    fields.find(
+      (f) => f.name === "subject" || f.name === "title" || f.name === "name",
+    )?.name ?? null;
+
+  // Apply search + filters
+  const activeFilterCount = [
+    filterDateField !== "" && filterDateValue !== "",
+    filterAssignedTo !== "",
+  ].filter(Boolean).length;
+
+  const filteredRecords = records.filter((rec) => {
+    if (searchText.trim()) {
+      const title = titleFieldName
+        ? String(rec.fields[titleFieldName] ?? "")
+        : rec.id;
+      if (!title.toLowerCase().includes(searchText.toLowerCase())) return false;
+    }
+    if (filterAssignedTo) {
+      if (filterAssignedTo === "__unassigned__") {
+        if (rec.assignedTo) return false;
+      } else if (rec.assignedTo !== filterAssignedTo) {
+        return false;
+      }
+    }
+    if (filterDateField && filterDateValue) {
+      const recDate = new Date(rec[filterDateField]);
+      const filterDate = new Date(filterDateValue);
+      if (
+        recDate.getFullYear() !== filterDate.getFullYear() ||
+        recDate.getMonth() !== filterDate.getMonth() ||
+        recDate.getDate() !== filterDate.getDate()
+      )
+        return false;
+    }
+    return true;
+  });
+
   const grouped: Record<string, EntityInstance[]> = {};
   const unassigned: EntityInstance[] = [];
-  for (const rec of records) {
+  for (const rec of filteredRecords) {
     if (rec.currentState && states.some((s) => s.name === rec.currentState)) {
       (grouped[rec.currentState] ??= []).push(rec);
     } else {
@@ -835,9 +927,14 @@ export function WorkflowRecords(): React.ReactElement {
             )}
             {displayName}
           </h1>
-          <span className="kb-record-count">{records.length}</span>
+          <span className="kb-record-count">
+            {activeFilterCount > 0 && filteredRecords.length !== records.length
+              ? `${filteredRecords.length} / ${records.length}`
+              : records.length}
+          </span>
         </div>
 
+        {/* Right-aligned toolbar */}
         <div className="kb-topbar-right">
           {transitioning && (
             <span className="kb-status-pill kb-status-pill--saving">
@@ -854,30 +951,291 @@ export function WorkflowRecords(): React.ReactElement {
               ⚠ {transError}
             </span>
           )}
+
+          {/* Collapsible search */}
+          <div
+            ref={searchWrapRef}
+            className={`kb-search-wrap ${searchExpanded ? "kb-search-wrap-open" : ""}`}
+          >
+            <button
+              type="button"
+              className="kb-search-icon-btn"
+              onClick={() => {
+                setSearchExpanded(true);
+                setTimeout(() => searchInputRef.current?.focus(), 50);
+              }}
+              title="Search"
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+            </button>
+            {searchExpanded && (
+              <>
+                <input
+                  ref={searchInputRef}
+                  className="kb-search"
+                  placeholder="Search by title…"
+                  value={searchText}
+                  onChange={(e) => setSearchText(e.target.value)}
+                />
+                {searchText && (
+                  <button
+                    type="button"
+                    className="kb-search-clear"
+                    onClick={() => setSearchText("")}
+                  >
+                    ×
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* Filter */}
+          <div style={{ position: "relative" }}>
+            <button
+              ref={filterBtnRef}
+              type="button"
+              className={`kb-circ-btn ${filterOpen ? "kb-circ-btn-open" : ""} ${activeFilterCount > 0 ? "kb-circ-btn-active" : ""}`}
+              onClick={() => setFilterOpen((v) => !v)}
+              title="Filters"
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+              </svg>
+              {activeFilterCount > 0 && (
+                <span className="kb-circ-badge">{activeFilterCount}</span>
+              )}
+            </button>
+
+            {filterOpen && (
+              <div ref={filterPanelRef} className="kb-filter-panel">
+                <div className="kb-filter-panel-header">
+                  <span className="kb-filter-panel-title">Filters</span>
+                  {activeFilterCount > 0 && (
+                    <button
+                      type="button"
+                      className="kb-filter-clear-all"
+                      onClick={() => {
+                        setFilterDateField("");
+                        setFilterDateValue("");
+                        setFilterAssignedTo("");
+                        setUserSearch("");
+                      }}
+                    >
+                      Clear all
+                    </button>
+                  )}
+                </div>
+
+                {/* Date filter */}
+                <div className="kb-filter-section">
+                  <div className="kb-filter-section-label">Date</div>
+                  <select
+                    className="kb-filter-select"
+                    value={filterDateField}
+                    onChange={(e) => {
+                      setFilterDateField(
+                        e.target.value as "createdAt" | "updatedAt" | "",
+                      );
+                      setFilterDateValue("");
+                    }}
+                  >
+                    <option value="">Select field…</option>
+                    <option value="createdAt">Created at</option>
+                    <option value="updatedAt">Last updated</option>
+                  </select>
+                  {filterDateField && (
+                    <input
+                      type="date"
+                      className="kb-filter-date-input"
+                      value={filterDateValue}
+                      onChange={(e) => setFilterDateValue(e.target.value)}
+                      style={{ marginTop: "8px" }}
+                    />
+                  )}
+                </div>
+
+                {/* Assigned to filter */}
+                <div className="kb-filter-section">
+                  <div className="kb-filter-section-label">Assigned to</div>
+                  <div className="kb-filter-user-search-wrap">
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <circle cx="11" cy="11" r="8" />
+                      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                    </svg>
+                    <input
+                      className="kb-filter-user-search"
+                      placeholder="Search name or email…"
+                      value={userSearch}
+                      onChange={(e) => setUserSearch(e.target.value)}
+                    />
+                  </div>
+                  <div className="kb-filter-assignee-list">
+                    {!userSearch && (
+                      <>
+                        <button
+                          type="button"
+                          className={`kb-filter-assignee-item ${filterAssignedTo === "" ? "kb-filter-assignee-active" : ""}`}
+                          onClick={() => setFilterAssignedTo("")}
+                        >
+                          <span className="kb-filter-assignee-avatar kb-filter-assignee-avatar-all">
+                            A
+                          </span>
+                          <span>Anyone</span>
+                          {filterAssignedTo === "" && (
+                            <svg
+                              className="kb-filter-check"
+                              width="12"
+                              height="12"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2.5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          className={`kb-filter-assignee-item ${filterAssignedTo === "__unassigned__" ? "kb-filter-assignee-active" : ""}`}
+                          onClick={() =>
+                            setFilterAssignedTo(
+                              filterAssignedTo === "__unassigned__"
+                                ? ""
+                                : "__unassigned__",
+                            )
+                          }
+                        >
+                          <span className="kb-filter-assignee-avatar kb-filter-assignee-avatar-none">
+                            ?
+                          </span>
+                          <span>Unassigned</span>
+                          {filterAssignedTo === "__unassigned__" && (
+                            <svg
+                              className="kb-filter-check"
+                              width="12"
+                              height="12"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2.5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                          )}
+                        </button>
+                      </>
+                    )}
+                    {users
+                      .filter((u) => {
+                        if (!userSearch) return true;
+                        const q = userSearch.toLowerCase();
+                        return (
+                          (u.displayName ?? "").toLowerCase().includes(q) ||
+                          u.email.toLowerCase().includes(q)
+                        );
+                      })
+                      .map((u) => (
+                        <button
+                          key={u.userId}
+                          type="button"
+                          className={`kb-filter-assignee-item ${filterAssignedTo === u.userId ? "kb-filter-assignee-active" : ""}`}
+                          onClick={() =>
+                            setFilterAssignedTo(
+                              filterAssignedTo === u.userId ? "" : u.userId,
+                            )
+                          }
+                        >
+                          <span className="kb-filter-assignee-avatar">
+                            {(u.displayName ?? u.email)
+                              .slice(0, 1)
+                              .toUpperCase()}
+                          </span>
+                          <span className="kb-filter-assignee-name">
+                            {u.displayName ?? u.email}
+                          </span>
+                          {filterAssignedTo === u.userId && (
+                            <svg
+                              className="kb-filter-check"
+                              width="12"
+                              height="12"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2.5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                          )}
+                        </button>
+                      ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Settings */}
           {showSettings && workflowSlug && (
             <Link
               to={`/workflows/${workflowSlug}`}
-              className="kb-settings-btn"
+              className="kb-circ-btn"
               title="Workflow Settings"
             >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <circle
-                  cx="7"
-                  cy="7"
-                  r="2"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                />
-                <path
-                  d="M7 1v1.5M7 11.5V13M1 7h1.5M11.5 7H13M2.636 2.636l1.06 1.06M10.304 10.304l1.06 1.06M11.364 2.636l-1.06 1.06M3.696 10.304l-1.06 1.06"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                />
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
               </svg>
-              Workflow Settings
             </Link>
           )}
+
+          {/* New record */}
           {entityTypeId && (
             <Link
               to={
@@ -886,17 +1244,22 @@ export function WorkflowRecords(): React.ReactElement {
                   : `/entity-types/${entityTypeId}/records/new`
               }
               state={{ workflowId }}
-              className="kb-new-btn"
+              className="kb-circ-btn kb-circ-btn-primary"
+              title={`New ${entityType?.name ?? "Record"}`}
             >
-              <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-                <path
-                  d="M6.5 1v11M1 6.5h11"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                  strokeLinecap="round"
-                />
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
               </svg>
-              New {entityType?.name ?? "Record"}
             </Link>
           )}
         </div>
@@ -957,9 +1320,10 @@ export function WorkflowRecords(): React.ReactElement {
           justify-content: space-between;
           padding: 20px 28px 16px;
           flex-shrink: 0;
+          gap: 12px;
         }
-        .kb-topbar-left  { display: flex; align-items: center; gap: 10px; }
-        .kb-topbar-right { display: flex; align-items: center; gap: 10px; }
+        .kb-topbar-left  { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+        .kb-topbar-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
         .kb-heading {
           font-size: 18px; font-weight: 600;
@@ -1002,16 +1366,28 @@ export function WorkflowRecords(): React.ReactElement {
         }
         @keyframes kb-pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
 
-        .kb-settings-btn {
-          display: inline-flex; align-items: center; gap: 6px;
-          font-size: 13px; font-weight: 500; padding: 7px 14px;
-          border-radius: var(--radius-sm);
-          background: var(--bg-secondary);
-          border: 1px solid var(--border-color);
-          color: var(--text-secondary);
-          text-decoration: none;
-          transition: background var(--transition-fast), color var(--transition-fast);
-          white-space: nowrap;
+        /* ── Circular icon buttons ── */
+        .kb-circ-btn {
+          display: inline-flex; align-items: center; justify-content: center;
+          width: 34px; height: 34px; padding: 0; flex-shrink: 0;
+          border-radius: 50%;
+          background: var(--bg-secondary); border: 1px solid var(--border-color);
+          color: var(--text-secondary); cursor: pointer; text-decoration: none;
+          transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+          position: relative;
+        }
+        .kb-circ-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+        .kb-circ-btn-open { border-color: var(--accent-primary); color: var(--accent-primary); background: hsla(250,84%,60%,.08); }
+        .kb-circ-btn-active { border-color: var(--accent-primary); color: var(--accent-primary); }
+        .kb-circ-btn-primary { background: var(--accent-primary); border-color: var(--accent-primary); color: #fff; }
+        .kb-circ-btn-primary:hover { opacity: .88; background: var(--accent-primary); color: #fff; }
+        .kb-circ-badge {
+          position: absolute; top: -3px; right: -3px;
+          width: 14px; height: 14px; border-radius: 50%;
+          background: var(--accent-primary); color: #fff;
+          font-size: 8px; font-weight: 700; line-height: 1;
+          display: flex; align-items: center; justify-content: center;
+          border: 1.5px solid var(--bg-primary);
         }
         .kb-back-btn {
           display: inline-flex; align-items: center; justify-content: center;
@@ -1025,18 +1401,6 @@ export function WorkflowRecords(): React.ReactElement {
           flex-shrink: 0;
         }
         .kb-back-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); }
-
-        .kb-settings-btn {
-          display: inline-flex; align-items: center; gap: 6px;
-          font-size: 13px; font-weight: 500; padding: 7px 14px;
-          border-radius: var(--radius-sm);
-          background: var(--bg-secondary); color: var(--text-secondary);
-          border: 1px solid var(--border-primary);
-          text-decoration: none;
-          transition: background var(--transition-fast), color var(--transition-fast);
-          white-space: nowrap;
-        }
-        .kb-settings-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); }
 
         .kb-new-btn {
           display: inline-flex; align-items: center; gap: 6px;
@@ -1218,6 +1582,120 @@ export function WorkflowRecords(): React.ReactElement {
           font-size: 13px; margin: 24px 28px;
         }
         .kb-loading { display: flex; justify-content: center; padding: 60px; }
+
+        /* ── Collapsible search ── */
+        .kb-search-wrap {
+          display: flex; align-items: center; gap: 0;
+          background: var(--bg-secondary); border: 1px solid var(--border-color);
+          border-radius: 34px; overflow: hidden;
+          width: 34px; height: 34px;
+          transition: width .22s cubic-bezier(.4,0,.2,1), border-color .15s, box-shadow .15s;
+        }
+        .kb-search-wrap-open {
+          width: 200px;
+          border-color: var(--accent-primary);
+          box-shadow: 0 0 0 2px hsla(250,84%,60%,.14);
+        }
+        .kb-search-icon-btn {
+          display: flex; align-items: center; justify-content: center;
+          width: 34px; height: 34px; min-width: 34px; padding: 0;
+          background: none; border: none; cursor: pointer;
+          color: var(--text-secondary);
+          transition: color var(--transition-fast);
+        }
+        .kb-search-wrap-open .kb-search-icon-btn { color: var(--accent-primary); }
+        .kb-search {
+          flex: 1; background: none; border: none; outline: none;
+          font-size: 13px; color: var(--text-primary); min-width: 0;
+          padding: 0;
+        }
+        .kb-search::placeholder { color: var(--text-muted); }
+        .kb-search-clear {
+          background: none; border: none; cursor: pointer;
+          color: var(--text-muted); font-size: 15px; line-height: 1;
+          padding: 0 8px 0 2px; display: flex; align-items: center;
+          transition: color var(--transition-fast);
+        }
+        .kb-search-clear:hover { color: var(--text-primary); }
+
+
+        .kb-filter-panel {
+          position: absolute; top: calc(100% + 6px); right: 0; z-index: 300;
+          width: 280px; background: var(--bg-secondary);
+          border: 1px solid var(--border-color); border-radius: var(--radius-md);
+          box-shadow: 0 8px 32px rgba(0,0,0,.45);
+          animation: kb-fadein .1s ease;
+        }
+        .kb-filter-panel-header {
+          display: flex; align-items: center; justify-content: space-between;
+          padding: 12px 14px 8px;
+          border-bottom: 1px solid var(--border-color);
+        }
+        .kb-filter-panel-title { font-size: 12px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .05em; }
+        .kb-filter-clear-all {
+          background: none; border: none; cursor: pointer;
+          font-size: 12px; color: var(--accent-primary); font-weight: 500;
+          padding: 0; transition: opacity var(--transition-fast);
+        }
+        .kb-filter-clear-all:hover { opacity: .7; }
+
+        .kb-filter-section { padding: 12px 14px; border-bottom: 1px solid var(--border-color); }
+        .kb-filter-section:last-child { border-bottom: none; padding-bottom: 8px; }
+        .kb-filter-section-label { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; }
+
+        .kb-filter-select {
+          width: 100%; padding: 6px 9px;
+          background: var(--bg-tertiary); border: 1px solid var(--border-color);
+          border-radius: var(--radius-sm); color: var(--text-primary);
+          font-size: 12.5px; cursor: pointer; outline: none;
+          transition: border-color var(--transition-fast);
+        }
+        .kb-filter-select:focus { border-color: var(--accent-primary); }
+        .kb-filter-date-input {
+          width: 100%; padding: 6px 9px; box-sizing: border-box;
+          background: var(--bg-tertiary); border: 1px solid var(--border-color);
+          border-radius: var(--radius-sm); color: var(--text-primary);
+          font-size: 12.5px; outline: none;
+          transition: border-color var(--transition-fast);
+        }
+        .kb-filter-date-input:focus { border-color: var(--accent-primary); }
+
+        .kb-filter-user-search-wrap {
+          display: flex; align-items: center; gap: 7px;
+          background: var(--bg-tertiary); border: 1px solid var(--border-color);
+          border-radius: var(--radius-sm); padding: 6px 9px; margin-bottom: 6px;
+          transition: border-color var(--transition-fast);
+        }
+        .kb-filter-user-search-wrap:focus-within { border-color: var(--accent-primary); }
+        .kb-filter-user-search-wrap svg { color: var(--text-muted); flex-shrink: 0; }
+        .kb-filter-user-search {
+          flex: 1; background: none; border: none; outline: none;
+          font-size: 12.5px; color: var(--text-primary);
+        }
+        .kb-filter-user-search::placeholder { color: var(--text-muted); }
+
+        .kb-filter-assignee-list { display: flex; flex-direction: column; gap: 1px; max-height: 180px; overflow-y: auto; }
+        .kb-filter-assignee-item {
+          display: flex; align-items: center; gap: 8px;
+          padding: 6px 8px; border-radius: var(--radius-sm);
+          background: none; border: none; cursor: pointer;
+          font-size: 13px; color: var(--text-primary); text-align: left;
+          transition: background var(--transition-fast);
+          width: 100%;
+        }
+        .kb-filter-assignee-item:hover { background: hsla(250,84%,60%,.07); }
+        .kb-filter-assignee-active { background: hsla(250,84%,60%,.12); color: var(--accent-primary); }
+        .kb-filter-assignee-avatar {
+          width: 24px; height: 24px; border-radius: 50%;
+          background: hsla(250,84%,60%,.2); color: var(--accent-primary);
+          font-size: 11px; font-weight: 700;
+          display: flex; align-items: center; justify-content: center;
+          flex-shrink: 0;
+        }
+        .kb-filter-assignee-avatar-all { background: var(--bg-tertiary); color: var(--text-muted); }
+        .kb-filter-assignee-avatar-none { background: var(--bg-tertiary); color: var(--text-muted); font-style: italic; }
+        .kb-filter-assignee-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .kb-filter-check { flex-shrink: 0; color: var(--accent-primary); margin-left: auto; }
 
         .tm-overlay {
           position: fixed; inset: 0; z-index: 1000;

@@ -2,7 +2,7 @@
 
 > Structured parent-child ticket hierarchy for the helpdesk module — work decomposition with downward visibility and stateless child execution units.
 
-status: draft
+status: approved
 created: 2026-06-30
 updated: 2026-06-30
 
@@ -23,6 +23,7 @@ Agents can break a top-level ticket into child tickets. Each child is an indepen
 | existing infra       | entity_relations table (no deleted_at yet); entity_instances (deleted_at, assigned_to, workflow_id, current_state)                                |
 | access layer         | query-time upward walk — no propagation writes, no ticket_participants table                                                                      |
 | child state model    | open / closed only — no transition engine, no workflow_id on children                                                                             |
+| child fields         | fixed minimal set: title (required), assigned_to, due_date, description — stored in fields JSONB; no entity_fields schema applied to children     |
 | top-level tickets    | full workflow transitions unchanged                                                                                                               |
 | hard delete          | never — archive only (set deleted_at)                                                                                                             |
 | depth default        | 1 (parent → child; no grandchild by default)                                                                                                      |
@@ -49,11 +50,25 @@ entity_relations table:
   deleted_at   TIMESTAMPTZ   -- NULL = active; set on soft-delete of either endpoint
 ```
 
-### Child ticket state
+### Child ticket fields
 
-Stored in `entity_instances.fields` JSONB as `{ "child_status": "open" | "closed" }`.
-Only present when the instance is a child (has an active `child_of` relation).
-Top-level tickets never have this field.
+Stored entirely in `entity_instances.fields` JSONB. Fixed minimal set — no `entity_fields` schema lookup, no dynamic field rendering for children.
+
+```
+{
+  "title":       string   (required)
+  "assignedTo":  string   (user ID, optional)
+  "dueDate":     string   (ISO date, optional)
+  "description": string   (optional)
+  "childStatus": "open" | "closed"   (managed by system; defaults to "open" on create)
+}
+```
+
+- `childStatus` is the only system-managed field; the rest are user-supplied at creation.
+- The create form shows exactly these 4 user fields: title, assigned to (picker), due date, description.
+- No other fields from the parent entity type are shown or required.
+- Children never have `workflow_id` set; `current_state` stays null.
+- Top-level tickets never have `childStatus` in fields.
 
 ### Relation types used
 
@@ -96,7 +111,9 @@ canRead(userId, instanceId):
 **R1: Create child ticket**
 A child ticket can be created under a parent ticket.
 ✓ POST `/:id/children` creates entity_instance + two entity_relations rows (`parent_of` + `child_of`) in one transaction
-✓ Child instance has no `workflow_id`; has `child_status: "open"` in fields JSONB
+✓ Request body: `{ title: string, assignedTo?: string, dueDate?: string, description?: string }`
+✓ Child instance has no `workflow_id`, `current_state` = null; fields JSONB = `{ title, assignedTo, dueDate, description, childStatus: "open" }`
+✓ `entity_fields` schema for the parent entity type is NOT applied — only the fixed 4 fields are accepted
 ✓ Returns 201 with child ticket data including parent reference
 ✓ Returns 400 if parent itself is a child and workflow.max_child_depth would be exceeded
 
@@ -188,6 +205,8 @@ Child tickets show their parent reference; parent tickets show child list.
 - Archive/restore is always a single transaction covering all descendants
 - Re-parent is atomic: old relation removed and new relation inserted or nothing changes
 - Reducing workflow depth/cap limits never invalidates existing valid chains
+- Child creation never runs entity_fields schema validation — only Zod validates the fixed 4-field shape
+- `childStatus`, `assignedTo`, `dueDate`, `description` keys are reserved in child fields JSONB; no user-defined key may shadow them
 
 ---
 

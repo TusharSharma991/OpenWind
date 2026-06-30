@@ -24,6 +24,16 @@ type EntityInstance = {
   createdAt: string;
   updatedAt: string;
   assignedTo: string | null;
+  parentId?: string | null;
+  childCount?: number;
+  deletedAt?: string | null;
+};
+type ChildInstance = {
+  id: string;
+  currentState: string | null;
+  fields: Record<string, unknown>;
+  assignedTo: string | null;
+  deletedAt: string | null;
 };
 type Transition = {
   id: string;
@@ -927,6 +937,24 @@ export function CustomerRecordDetail(): React.ReactElement {
     new Set(),
   );
   const initializedCollapse = useRef(false);
+
+  // Child tickets state
+  const [children, setChildren] = useState<ChildInstance[]>([]);
+  const [childrenLoading, setChildrenLoading] = useState(false);
+  const [parentRecord, setParentRecord] = useState<{
+    id: string;
+    title: string;
+    typeSlug: string;
+  } | null>(null);
+  const [showCreateChild, setShowCreateChild] = useState(false);
+  const [newChildTitle, setNewChildTitle] = useState("");
+  const [creatingChild, setCreatingChild] = useState(false);
+  const [createChildError, setCreateChildError] = useState<string | null>(null);
+  const [archiveConfirm, setArchiveConfirm] = useState<{
+    childCount: number;
+  } | null>(null);
+  const [archiving, setArchiving] = useState(false);
+  const [restoring, setRestoring] = useState(false);
   const [currentUserRoles, setCurrentUserRoles] = useState<string[]>([]);
   useEffect(() => {
     userManager
@@ -1078,6 +1106,124 @@ export function CustomerRecordDetail(): React.ReactElement {
     setHistory((histRes as { data?: WorkflowEvent[] }).data ?? []);
   }
 
+  async function loadChildren(): Promise<void> {
+    if (!id) return;
+    setChildrenLoading(true);
+    try {
+      const res = await fetchWithAuth(
+        `${API_URL}/entities/${id}/children`,
+      ).catch(() => ({ data: [] }));
+      setChildren((res as { data: ChildInstance[] }).data);
+    } finally {
+      setChildrenLoading(false);
+    }
+  }
+
+  async function loadParentRecord(parentId: string): Promise<void> {
+    try {
+      const res = await fetchWithAuth(`${API_URL}/entities/${parentId}`).catch(
+        () => null,
+      );
+      if (!res) return;
+      const inst = (res as { data: EntityInstance }).data;
+      const titleField = ["subject", "title", "name"].find(
+        (k) => inst.fields[k],
+      );
+      const title = titleField
+        ? String(inst.fields[titleField])
+        : `#${parentId.slice(0, 8)}`;
+      setParentRecord({ id: parentId, title, typeSlug: typeSlug ?? "" });
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  async function createChild(): Promise<void> {
+    if (!id || !entityTypeId || !newChildTitle.trim()) return;
+    setCreatingChild(true);
+    setCreateChildError(null);
+    try {
+      const titleKey =
+        fields.find(
+          (f) =>
+            f.name === "subject" || f.name === "title" || f.name === "name",
+        )?.name ?? "subject";
+      await fetchWithAuth(`${API_URL}/entities/${id}/children`, {
+        method: "POST",
+        body: JSON.stringify({
+          entityTypeId,
+          fields: { [titleKey]: newChildTitle.trim() },
+        }),
+      });
+      setNewChildTitle("");
+      setShowCreateChild(false);
+      void loadChildren();
+    } catch (err) {
+      setCreateChildError(
+        err instanceof Error ? err.message : "Failed to create sub-task",
+      );
+    } finally {
+      setCreatingChild(false);
+    }
+  }
+
+  async function detachParent(): Promise<void> {
+    if (!id) return;
+    try {
+      await fetchWithAuth(`${API_URL}/entities/${id}/parent`, {
+        method: "PATCH",
+        body: JSON.stringify({ parentId: null }),
+      });
+      setParentRecord(null);
+      void loadRecord();
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function archiveRecord(confirmed = false): Promise<void> {
+    if (!id) return;
+    setArchiving(true);
+    try {
+      const url = confirmed
+        ? `${API_URL}/entities/${id}/archive?confirm=true`
+        : `${API_URL}/entities/${id}/archive`;
+      const res = await fetchWithAuth(url, { method: "POST" });
+      const body = res as {
+        data: {
+          requiresConfirm?: boolean;
+          childCount?: number;
+          archived?: boolean;
+        };
+      };
+      if (body.data.requiresConfirm) {
+        setArchiveConfirm({ childCount: body.data.childCount ?? 0 });
+      } else {
+        setArchiveConfirm(null);
+        void loadRecord();
+      }
+    } catch (err) {
+      setTransError(err instanceof Error ? err.message : "Archive failed");
+    } finally {
+      setArchiving(false);
+    }
+  }
+
+  async function restoreRecord(): Promise<void> {
+    if (!id) return;
+    setRestoring(true);
+    try {
+      await fetchWithAuth(`${API_URL}/entities/${id}/restore`, {
+        method: "POST",
+      });
+      void loadRecord();
+    } catch (err) {
+      setTransError(err instanceof Error ? err.message : "Restore failed");
+    } finally {
+      setRestoring(false);
+    }
+  }
+
   async function submitComment(
     text: string,
     mentions: string[],
@@ -1094,6 +1240,16 @@ export function CustomerRecordDetail(): React.ReactElement {
   useEffect(() => {
     void loadRecord();
   }, [entityTypeId, id]);
+
+  useEffect(() => {
+    if (!record) return;
+    void loadChildren();
+    if (record.parentId) {
+      void loadParentRecord(record.parentId);
+    } else {
+      setParentRecord(null);
+    }
+  }, [record?.id, record?.parentId]);
 
   useEffect(() => {
     if (!record?.workflowId && !entityTypeId) {
@@ -1558,7 +1714,56 @@ export function CustomerRecordDetail(): React.ReactElement {
               </div>
             </div>
             <div className="rcd-card-header-right">
-              {!editing && isAdminOrAgent && (
+              {!editing && isAdminOrAgent && record.deletedAt && (
+                <button
+                  type="button"
+                  className="rcd-btn-secondary rcd-btn-restore"
+                  disabled={restoring}
+                  onClick={() => void restoreRecord()}
+                >
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                    <path d="M3 3v5h5" />
+                  </svg>
+                  {restoring ? "Restoring…" : "Restore"}
+                </button>
+              )}
+              {!editing && isAdminOrAgent && !record.deletedAt && (
+                <button
+                  type="button"
+                  className="rcd-btn-secondary rcd-btn-archive"
+                  disabled={archiving}
+                  onClick={() => void archiveRecord(false)}
+                >
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <polyline points="21 8 21 21 3 21 3 8" />
+                    <rect x="1" y="3" width="22" height="5" />
+                    <line x1="10" y1="12" x2="14" y2="12" />
+                  </svg>
+                  {archiving ? "Archiving…" : "Archive"}
+                </button>
+              )}
+              {!editing && isAdminOrAgent && !record.deletedAt && (
                 <button
                   type="button"
                   className="rcd-btn-secondary"
@@ -1697,6 +1902,154 @@ export function CustomerRecordDetail(): React.ReactElement {
               <span className="rcd-info-lbl">Type</span>
               <span className="rcd-info-val">{entityType?.name ?? "—"}</span>
             </div>
+          </div>
+
+          {/* Parent ticket chip */}
+          {parentRecord && (
+            <div className="rcd-parent-row">
+              <span className="rcd-parent-label">Parent</span>
+              <Link
+                to={`/records/${parentRecord.typeSlug}/${parentRecord.id}`}
+                className="rcd-parent-chip"
+              >
+                <svg
+                  width="11"
+                  height="11"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <polyline points="15 18 9 12 15 6" />
+                </svg>
+                {parentRecord.title}
+              </Link>
+              {isAdminOrAgent && (
+                <button
+                  type="button"
+                  className="rcd-detach-btn"
+                  title="Detach from parent"
+                  onClick={() => void detachParent()}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Sub-tasks panel */}
+          <div className="rcd-subtasks">
+            <div className="rcd-subtasks-header">
+              <span className="rcd-subtasks-title">
+                Sub-tasks
+                <span className="rcd-subtasks-count">{children.length}</span>
+              </span>
+              {isAdminOrAgent && !record.deletedAt && (
+                <button
+                  type="button"
+                  className="rcd-subtasks-add"
+                  onClick={() => {
+                    setShowCreateChild(true);
+                    setNewChildTitle("");
+                    setCreateChildError(null);
+                  }}
+                >
+                  <svg
+                    width="11"
+                    height="11"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <line x1="12" y1="5" x2="12" y2="19" />
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                  </svg>
+                  Add
+                </button>
+              )}
+            </div>
+
+            {childrenLoading ? (
+              <div className="rcd-subtasks-loading">Loading…</div>
+            ) : children.length === 0 ? (
+              <p className="rcd-subtasks-empty">No sub-tasks yet.</p>
+            ) : (
+              <>
+                {/* Progress bar */}
+                {(() => {
+                  const closed = children.filter(
+                    (c) => c.deletedAt !== null || c.currentState === "closed",
+                  ).length;
+                  const pct = Math.round((closed / children.length) * 100);
+                  return (
+                    <div
+                      className="rcd-subtasks-progress-wrap"
+                      title={`${closed} of ${children.length} closed`}
+                    >
+                      <div className="rcd-subtasks-progress-bar">
+                        <div
+                          className="rcd-subtasks-progress-fill"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <span className="rcd-subtasks-progress-label">
+                        {closed}/{children.length}
+                      </span>
+                    </div>
+                  );
+                })()}
+
+                <ul className="rcd-subtasks-list">
+                  {children.map((child) => {
+                    const childTitleField = ["subject", "title", "name"].find(
+                      (k) => child.fields[k],
+                    );
+                    const childTitle = childTitleField
+                      ? String(child.fields[childTitleField])
+                      : `#${child.id.slice(0, 8)}`;
+                    const isClosed =
+                      child.deletedAt !== null ||
+                      child.currentState === "closed";
+                    const assignee = users.find(
+                      (u) => u.userId === child.assignedTo,
+                    );
+                    return (
+                      <li key={child.id} className="rcd-subtask-item">
+                        <span
+                          className={`rcd-subtask-dot ${isClosed ? "rcd-subtask-dot-closed" : "rcd-subtask-dot-open"}`}
+                        />
+                        <Link
+                          to={`/records/${typeSlug ?? ""}/${child.id}`}
+                          className={`rcd-subtask-title ${isClosed ? "rcd-subtask-title-closed" : ""}`}
+                        >
+                          {childTitle}
+                        </Link>
+                        {assignee && (
+                          <span
+                            className="rcd-subtask-avatar"
+                            title={assignee.displayName ?? assignee.email}
+                          >
+                            {(assignee.displayName ?? assignee.email)
+                              .slice(0, 1)
+                              .toUpperCase()}
+                          </span>
+                        )}
+                        <span className="rcd-subtask-id">
+                          #{child.id.slice(0, 6)}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
+            )}
           </div>
 
           {/* Expandable: all fields / edit form */}
@@ -1922,6 +2275,110 @@ export function CustomerRecordDetail(): React.ReactElement {
           </div>
         </div>
       </div>
+
+      {/* ── Archive confirmation modal ───────────────────── */}
+      {archiveConfirm && (
+        <div className="modal-overlay" onClick={() => setArchiveConfirm(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">Archive this record?</h3>
+              <button
+                className="modal-close"
+                onClick={() => setArchiveConfirm(null)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              <p className="rcd-modal-desc">
+                This record has{" "}
+                <strong>
+                  {archiveConfirm.childCount} sub-task
+                  {archiveConfirm.childCount !== 1 ? "s" : ""}
+                </strong>
+                . Archiving will also archive all of them. This can be undone
+                with Restore.
+              </p>
+            </div>
+            <div className="modal-footer">
+              <button
+                className="btn-secondary"
+                onClick={() => setArchiveConfirm(null)}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn-primary rcd-btn-archive-confirm"
+                disabled={archiving}
+                onClick={() => void archiveRecord(true)}
+              >
+                {archiving
+                  ? "Archiving…"
+                  : `Archive all ${archiveConfirm.childCount + 1}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Create sub-task modal ────────────────────────── */}
+      {showCreateChild && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowCreateChild(false)}
+        >
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">New sub-task</h3>
+              <button
+                className="modal-close"
+                onClick={() => setShowCreateChild(false)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              {createChildError && (
+                <div
+                  className="portal-alert-error"
+                  style={{ marginBottom: "12px" }}
+                >
+                  {createChildError}
+                </div>
+              )}
+              <div className="form-group">
+                <label className="form-label">Title *</label>
+                <input
+                  className="form-input"
+                  type="text"
+                  placeholder="Sub-task title…"
+                  value={newChildTitle}
+                  onChange={(e) => setNewChildTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void createChild();
+                  }}
+                  autoFocus
+                />
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button
+                className="btn-secondary"
+                onClick={() => setShowCreateChild(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn-primary"
+                disabled={!newChildTitle.trim() || creatingChild}
+                onClick={() => void createChild()}
+              >
+                {creatingChild ? "Creating…" : "Create sub-task"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Transition modal ─────────────────────────────── */}
       {stateModal && (

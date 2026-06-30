@@ -125,6 +125,8 @@ type WorkflowFull = {
   createdAt: string;
   states: WorkflowState[];
   transitions: WorkflowTransition[];
+  maxChildDepth: number | null;
+  maxChildrenPerParent: number | null;
 };
 
 type EntityField = {
@@ -1131,6 +1133,40 @@ export function WorkflowDetail(): React.ReactElement {
         /* leave defaults */
       });
   }, []);
+
+  // Child ticket settings
+  const [maxChildDepth, setMaxChildDepth] = useState<string>("1");
+  const [maxChildrenPerParent, setMaxChildrenPerParent] =
+    useState<string>("10");
+  const [savingChildSettings, setSavingChildSettings] = useState(false);
+
+  useEffect(() => {
+    if (data?.data) {
+      const wf = data.data as WorkflowFull;
+      setMaxChildDepth(String(wf.maxChildDepth ?? 1));
+      setMaxChildrenPerParent(String(wf.maxChildrenPerParent ?? 10));
+    }
+  }, [data?.data]);
+
+  async function handleSaveChildSettings(): Promise<void> {
+    if (!id) return;
+    setSavingChildSettings(true);
+    try {
+      await fetchWithAuth(`${API_URL}/workflows/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          maxChildDepth: maxChildDepth === "" ? null : Number(maxChildDepth),
+          maxChildrenPerParent:
+            maxChildrenPerParent === "" ? null : Number(maxChildrenPerParent),
+        }),
+      });
+      void refetch();
+    } catch {
+      // ignore
+    } finally {
+      setSavingChildSettings(false);
+    }
+  }
 
   // User assignment
   const [orgUsers, setOrgUsers] = useState<UserOption[]>([]);
@@ -2712,6 +2748,107 @@ export function WorkflowDetail(): React.ReactElement {
             <div
               style={{ display: "flex", flexDirection: "column", gap: "20px" }}
             >
+              {/* Child ticket limits */}
+              <div className="data-panel">
+                <SectionHeader label="Sub-task Limits" />
+                <p
+                  style={{
+                    fontSize: "13px",
+                    color: "var(--text-secondary)",
+                    marginBottom: "14px",
+                    lineHeight: 1.5,
+                  }}
+                >
+                  Control how deeply tickets can be nested and how many
+                  sub-tasks a single ticket can have.
+                </p>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "12px",
+                    marginBottom: "14px",
+                  }}
+                >
+                  <div>
+                    <label
+                      style={{
+                        display: "block",
+                        fontSize: "11px",
+                        fontWeight: 700,
+                        color: "var(--text-muted)",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.5px",
+                        marginBottom: "5px",
+                      }}
+                    >
+                      Max nesting depth
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={10}
+                      className="portal-input"
+                      style={{ width: "120px" }}
+                      value={maxChildDepth}
+                      onChange={(e) => setMaxChildDepth(e.target.value)}
+                      placeholder="1"
+                    />
+                    <p
+                      style={{
+                        fontSize: "12px",
+                        color: "var(--text-muted)",
+                        marginTop: "4px",
+                      }}
+                    >
+                      How many levels deep sub-tasks can go (default: 1)
+                    </p>
+                  </div>
+                  <div>
+                    <label
+                      style={{
+                        display: "block",
+                        fontSize: "11px",
+                        fontWeight: 700,
+                        color: "var(--text-muted)",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.5px",
+                        marginBottom: "5px",
+                      }}
+                    >
+                      Max sub-tasks per ticket
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={200}
+                      className="portal-input"
+                      style={{ width: "120px" }}
+                      value={maxChildrenPerParent}
+                      onChange={(e) => setMaxChildrenPerParent(e.target.value)}
+                      placeholder="10"
+                    />
+                    <p
+                      style={{
+                        fontSize: "12px",
+                        color: "var(--text-muted)",
+                        marginTop: "4px",
+                      }}
+                    >
+                      Maximum number of direct sub-tasks (default: 10)
+                    </p>
+                  </div>
+                </div>
+                <button
+                  className="btn btn-secondary"
+                  disabled={savingChildSettings}
+                  onClick={() => void handleSaveChildSettings()}
+                  style={{ minWidth: "110px" }}
+                >
+                  {savingChildSettings ? "Saving…" : "Save limits"}
+                </button>
+              </div>
+
               {/* Admin assignment */}
               <div className="data-panel">
                 <SectionHeader label="Workflow Admins" />

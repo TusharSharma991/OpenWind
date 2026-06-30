@@ -1,6 +1,12 @@
 import { eq, and, isNull, sql, count } from "drizzle-orm";
 import type { DbOrTx } from "@platform/db";
 import { entityRelations, entityInstances, workflows } from "@platform/db";
+import {
+  encodeCursor,
+  decodeCursor,
+  DEFAULT_PAGE_SIZE,
+  MAX_PAGE_SIZE,
+} from "./pagination.js";
 import { logger } from "@platform/logger";
 import { EntityError } from "./errors.js";
 import type {
@@ -525,6 +531,73 @@ export async function getParentId(
 
 /** Count active direct children of parentId. */
 export { countActiveChildren };
+
+/**
+ * List the active child instances of parentId, ordered by relation creation time.
+ * Returns a cursor page of EntityInstance rows.
+ */
+export async function listChildInstances(
+  db: DbOrTx,
+  tenantId: string,
+  parentId: string,
+  opts: { cursor?: string; limit?: number } = {},
+): Promise<{ data: EntityInstance[]; nextCursor: string | null }> {
+  const limit = Math.min(opts.limit ?? DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
+  const decoded = opts.cursor ? decodeCursor(opts.cursor) : null;
+
+  const relRows = await db
+    .select({
+      toInstanceId: entityRelations.toInstanceId,
+      createdAt: entityRelations.createdAt,
+      id: entityRelations.id,
+    })
+    .from(entityRelations)
+    .where(
+      and(
+        eq(entityRelations.tenantId, tenantId),
+        eq(entityRelations.fromInstanceId, parentId),
+        eq(entityRelations.relationType, RELATION_PARENT_OF),
+        isNull(entityRelations.deletedAt),
+        ...(decoded
+          ? [
+              sql`(${entityRelations.createdAt}, ${entityRelations.id}) > (${decoded.createdAt.toISOString()}::timestamptz, ${decoded.id})`,
+            ]
+          : []),
+      ),
+    )
+    .orderBy(entityRelations.createdAt, entityRelations.id)
+    .limit(limit + 1);
+
+  const hasMore = relRows.length > limit;
+  const pageRows = hasMore ? relRows.slice(0, limit) : relRows;
+  const childIds = pageRows.map((r) => r.toInstanceId);
+
+  if (childIds.length === 0) return { data: [], nextCursor: null };
+
+  const instances = await db
+    .select()
+    .from(entityInstances)
+    .where(
+      and(
+        eq(entityInstances.tenantId, tenantId),
+        sql`${entityInstances.id} = ANY(${childIds})`,
+        isNull(entityInstances.deletedAt),
+      ),
+    );
+
+  // Preserve relation order
+  const byId = new Map(instances.map((i) => [i.id, i]));
+  const ordered = childIds.flatMap((id) => {
+    const i = byId.get(id);
+    return i ? [rowToInstance(i)] : [];
+  });
+
+  const lastRel = pageRows[pageRows.length - 1];
+  const nextCursor =
+    hasMore && lastRel ? encodeCursor(lastRel.createdAt, lastRel.id) : null;
+
+  return { data: ordered, nextCursor };
+}
 
 // ── Row mappers ────────────────────────────────────────────────────────────────
 

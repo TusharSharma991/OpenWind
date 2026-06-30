@@ -7,6 +7,8 @@ import type * as EntityEngine from "@platform/entity-engine";
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
 const mockGetEntity = vi.fn();
+const mockGetParentId = vi.fn().mockResolvedValue(null);
+const mockCountActiveChildren = vi.fn().mockResolvedValue(0);
 
 vi.mock("@platform/auth", () => ({
   requireAuth:
@@ -32,7 +34,13 @@ vi.mock("@platform/db", () => ({
 
 vi.mock("@platform/entity-engine", async (importOriginal) => {
   const real = await importOriginal<typeof EntityEngine>();
-  return { ...real, getEntity: (...args: unknown[]) => mockGetEntity(...args) };
+  return {
+    ...real,
+    getEntity: (...args: unknown[]) => mockGetEntity(...args),
+    getParentId: (...args: unknown[]) => mockGetParentId(...args),
+    countActiveChildren: (...args: unknown[]) =>
+      mockCountActiveChildren(...args),
+  };
 });
 
 const { getEntityHandler } = await import("./get.js");

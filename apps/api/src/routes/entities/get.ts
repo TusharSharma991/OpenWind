@@ -1,6 +1,10 @@
 import { requireAuth } from "@platform/auth";
-import { withTenantContext } from "@platform/db";
-import { getEntity } from "@platform/entity-engine";
+import { db, withTenantContext } from "@platform/db";
+import {
+  getEntity,
+  getParentId,
+  countActiveChildren,
+} from "@platform/entity-engine";
 import { factory } from "./factory.js";
 import { handleEntityError } from "../../lib/handle-entity-error.js";
 
@@ -11,10 +15,12 @@ export const getEntityHandler = factory.createHandlers(
     const { tenantId } = c.get("auth");
 
     try {
-      const instance = await withTenantContext(tenantId, (tx) =>
-        getEntity(tx, tenantId, id),
-      );
-      return c.json({ data: instance });
+      const [instance, parentId, childCount] = await Promise.all([
+        withTenantContext(tenantId, (tx) => getEntity(tx, tenantId, id)),
+        getParentId(db, tenantId, id),
+        countActiveChildren(db, tenantId, id),
+      ]);
+      return c.json({ data: { ...instance, parentId, childCount } });
     } catch (err) {
       return handleEntityError(c, err);
     }

@@ -62,6 +62,7 @@ export {
   canUserReadInstance,
   getParentId,
   countActiveChildren,
+  listChildInstances,
   RELATION_PARENT_OF,
   RELATION_CHILD_OF,
 } from "./child-relations.js";

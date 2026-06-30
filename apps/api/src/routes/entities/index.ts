@@ -18,6 +18,12 @@ import { listTransitionsHandler } from "./list-transitions.js";
 import { listWorkflowEventsHandler } from "./list-workflow-events.js";
 import { listEventsHandler } from "./list-events.js";
 import { addCommentHandler } from "./add-comment.js";
+import { createChildHandler } from "./create-child.js";
+import { listChildrenHandler } from "./list-children.js";
+import { moveParentHandler } from "./move-parent.js";
+import { setChildStatusHandler } from "./set-child-status.js";
+import { archiveEntityHandler } from "./archive.js";
+import { restoreEntityHandler } from "./restore.js";
 
 const router = new Hono<{ Variables: { auth: AuthContext } }>();
 
@@ -47,5 +53,12 @@ router.post("/:id/comments", ...addCommentHandler);
 router.post("/:id/relations", ...createRelationHandler);
 router.get("/:id/relations", ...listRelationsHandler);
 router.delete("/:id/relations/:relationId", ...deleteRelationHandler);
+
+router.post("/:id/children", ...createChildHandler);
+router.get("/:id/children", ...listChildrenHandler);
+router.patch("/:id/parent", ...moveParentHandler);
+router.patch("/:id/child-status", ...setChildStatusHandler);
+router.post("/:id/archive", ...archiveEntityHandler);
+router.post("/:id/restore", ...restoreEntityHandler);
 
 export { router as entitiesRouter };

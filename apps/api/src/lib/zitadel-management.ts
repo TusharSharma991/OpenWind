@@ -1,4 +1,5 @@
 import { request as nodeHttpRequest } from "node:http";
+import { request as nodeHttpsRequest } from "node:https";
 import { createPrivateKey } from "node:crypto";
 import { importPKCS8, SignJWT } from "jose";
 import { z } from "zod";
@@ -79,11 +80,14 @@ function httpPost(
 ): Promise<{ status: number; text: string }> {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
+    const isHttps = parsed.protocol === "https:";
+    const request = isHttps ? nodeHttpsRequest : nodeHttpRequest;
+    const defaultPort = isHttps ? 443 : 80;
     const buf = Buffer.from(body, "utf8");
-    const req = nodeHttpRequest(
+    const req = request(
       {
         hostname: parsed.hostname,
-        port: parsed.port ? parseInt(parsed.port, 10) : 80,
+        port: parsed.port ? parseInt(parsed.port, 10) : defaultPort,
         path: parsed.pathname + parsed.search,
         method: "POST",
         headers: {
@@ -116,10 +120,13 @@ function httpGet(
 ): Promise<{ status: number; text: string }> {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
-    const req = nodeHttpRequest(
+    const isHttps = parsed.protocol === "https:";
+    const request = isHttps ? nodeHttpsRequest : nodeHttpRequest;
+    const defaultPort = isHttps ? 443 : 80;
+    const req = request(
       {
         hostname: parsed.hostname,
-        port: parsed.port ? parseInt(parsed.port, 10) : 80,
+        port: parsed.port ? parseInt(parsed.port, 10) : defaultPort,
         path: parsed.pathname + parsed.search,
         method: "GET",
         headers: {
@@ -225,6 +232,10 @@ async function getAccessToken(): Promise<string | null> {
 
     // Use internal Docker URL for the token exchange; send Host matching EXTERNALDOMAIN
     const tokenUrl = `${internalBase()}/oauth/v2/token`;
+    logger.info(
+      { tokenUrl, issuer, keyUserId: keyConfig.userId },
+      "getAccessToken: exchanging service account JWT",
+    );
     const result = await httpPost(
       tokenUrl,
       issuerHost(),
@@ -310,7 +321,13 @@ export async function listOrgUsers(orgId?: string): Promise<OrgUser[]> {
   if (cached && now < cached.expiresAt) return cached.users;
 
   const token = await getAccessToken();
-  if (!token) return [];
+  if (!token) {
+    logger.warn(
+      { orgId },
+      "listOrgUsers: no service account token — check ZITADEL_SERVICE_ACCOUNT_KEY",
+    );
+    return [];
+  }
 
   try {
     // Use v2 UserService endpoint (gRPC-gateway) — returns active human users in the org
@@ -327,11 +344,21 @@ export async function listOrgUsers(orgId?: string): Promise<OrgUser[]> {
       payload["queries"] = [{ organizationIdQuery: { organizationId: orgId } }];
     }
 
+    logger.info(
+      { url, orgId, hasOrgFilter: !!orgId },
+      "listOrgUsers: calling Zitadel",
+    );
+
     const result = await httpPost(
       url,
       issuerHost(),
       headers,
       JSON.stringify(payload),
+    );
+
+    logger.info(
+      { status: result.status, bodySnippet: result.text.slice(0, 500) },
+      "listOrgUsers: Zitadel raw response",
     );
 
     if (result.status < 200 || result.status >= 300) {
@@ -359,6 +386,10 @@ export async function listOrgUsers(orgId?: string): Promise<OrgUser[]> {
     }
 
     const data = JSON.parse(result.text) as { result?: ZitadelUser[] };
+    logger.info(
+      { totalUsers: data.result?.length ?? 0, orgId },
+      "listOrgUsers: Zitadel returned users",
+    );
     const users: OrgUser[] = (data.result ?? [])
       .filter((u) => u.human !== undefined && u.state === "USER_STATE_ACTIVE")
       .map((u) => {
@@ -387,8 +418,82 @@ export async function listOrgUsers(orgId?: string): Promise<OrgUser[]> {
   }
 }
 
+// ── Get single user by ID ─────────────────────────────────────────────────────
+
+const _userByIdCache = new Map<
+  string,
+  { user: OrgUser | null; expiresAt: number }
+>();
+
+export async function getUserById(userId: string): Promise<OrgUser | null> {
+  const now = Date.now();
+  const cached = _userByIdCache.get(userId);
+  if (cached && now < cached.expiresAt) return cached.user;
+
+  const token = await getAccessToken();
+  if (!token) return null;
+
+  try {
+    const url = `${internalBase()}/zitadel.user.v2.UserService/GetUserByID`;
+    const result = await httpPost(
+      url,
+      issuerHost(),
+      { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      JSON.stringify({ userId }),
+    );
+
+    if (result.status < 200 || result.status >= 300) return null;
+
+    interface ZitadelGetUserResponse {
+      user?: {
+        userId: string;
+        preferredLoginName?: string;
+        loginNames?: string[];
+        human?: {
+          profile?: {
+            displayName?: string;
+            givenName?: string;
+            familyName?: string;
+          };
+          email?: { email?: string };
+        };
+      };
+    }
+
+    const data = JSON.parse(result.text) as ZitadelGetUserResponse;
+    const u = data.user;
+    if (!u) {
+      _userByIdCache.set(userId, { user: null, expiresAt: now + CACHE_TTL_MS });
+      return null;
+    }
+
+    const profile = u.human?.profile ?? {};
+    const nameParts = [profile.givenName, profile.familyName].filter(
+      (s): s is string => typeof s === "string" && s.length > 0,
+    );
+    const fullName = nameParts.length > 0 ? nameParts.join(" ") : undefined;
+    const displayName =
+      profile.displayName ?? fullName ?? u.preferredLoginName ?? u.userId;
+    const loginName = u.preferredLoginName ?? u.loginNames?.[0] ?? u.userId;
+    const orgUser: OrgUser = {
+      userId: u.userId,
+      email: u.human?.email?.email ?? "",
+      displayName,
+      loginName,
+    };
+    _userByIdCache.set(userId, {
+      user: orgUser,
+      expiresAt: now + CACHE_TTL_MS,
+    });
+    return orgUser;
+  } catch {
+    return null;
+  }
+}
+
 // ── Cache invalidation ────────────────────────────────────────────────────────
 
 export function invalidateUserCache(): void {
   _usersCache.clear();
+  _userByIdCache.clear();
 }

@@ -937,6 +937,29 @@ export function CustomerRecordDetail(): React.ReactElement {
           | Record<string, unknown>
           | undefined;
         setCurrentUserRoles(roleClaim ? Object.keys(roleClaim) : []);
+        // Inject the current user into the users list so their name always resolves,
+        // even when the /users API treats them as a ghost entry (no email/displayName in DB).
+        const sub = u.profile.sub;
+        const name =
+          (u.profile.name as string | undefined) ??
+          (u.profile.preferred_username as string | undefined) ??
+          (u.profile.email as string | undefined) ??
+          null;
+        const email = (u.profile.email as string | undefined) ?? "";
+        if (sub) {
+          setUsers((prev) => {
+            if (prev.some((p) => p.userId === sub)) return prev;
+            return [
+              ...prev,
+              {
+                userId: sub,
+                email,
+                displayName: name,
+                loginName: email || sub,
+              },
+            ];
+          });
+        }
       })
       .catch(() => {
         /* leave defaults */
@@ -965,7 +988,25 @@ export function CustomerRecordDetail(): React.ReactElement {
     if (!actorId) return "System";
     const u = users.find((user) => user.userId === actorId);
     if (!u) return actorId.slice(0, 8) + "…";
-    return u.displayName ?? u.loginName ?? u.email;
+    // If displayName is the raw userId (UUID), fall through to email/loginName
+    const display =
+      u.displayName && u.displayName !== actorId ? u.displayName : null;
+    return display ?? u.loginName ?? (u.email || actorId.slice(0, 8) + "…");
+  };
+
+  // Prefer backend-resolved display name; fall back to local users list when
+  // backend could only resolve a truncated ID (ends with "…", no real name).
+  const resolveActorName = (
+    actorDisplayName: string | null | undefined,
+    actorId: string | null,
+  ): string => {
+    const fromList = actorId ? getActorName(actorId) : null;
+    // If backend gave us a real name (not just a truncated ID), prefer it.
+    if (actorDisplayName && !actorDisplayName.endsWith("…"))
+      return actorDisplayName;
+    // If local users list has a real name, prefer that over the truncated ID.
+    if (fromList && !fromList.endsWith("…")) return fromList;
+    return actorDisplayName ?? fromList ?? "Unknown";
   };
 
   function loadRecord(): Promise<void> {
@@ -986,17 +1027,22 @@ export function CustomerRecordDetail(): React.ReactElement {
         );
         setRecord((recRes as { data: EntityInstance }).data);
         setHistory((histRes as { data?: WorkflowEvent[] }).data ?? []);
-        setUsers(
+        const apiUsers =
           (
             usersRes as {
               data?: Array<{
                 userId: string;
                 email: string;
                 displayName: string | null;
+                loginName?: string;
               }>;
             }
-          ).data ?? [],
-        );
+          ).data ?? [];
+        // Merge API users with any already-injected entries (e.g. current OIDC user)
+        setUsers((prev) => {
+          const apiIds = new Set(apiUsers.map((u) => u.userId));
+          return [...apiUsers, ...prev.filter((u) => !apiIds.has(u.userId))];
+        });
       })
       .catch((err: unknown) =>
         setError(err instanceof Error ? err.message : "Failed to load"),
@@ -1379,7 +1425,7 @@ export function CustomerRecordDetail(): React.ReactElement {
           {isCreate ? (
             <span className="rcd-feed-event-text">
               <strong>
-                {event.actorDisplayName ?? getActorName(event.actorId)}
+                {resolveActorName(event.actorDisplayName, event.actorId)}
               </strong>{" "}
               created this record
             </span>
@@ -1387,7 +1433,7 @@ export function CustomerRecordDetail(): React.ReactElement {
             <div>
               <span className="rcd-feed-event-text">
                 <strong>
-                  {event.actorDisplayName ?? getActorName(event.actorId)}
+                  {resolveActorName(event.actorDisplayName, event.actorId)}
                 </strong>{" "}
                 updated the record
               </span>
@@ -1426,7 +1472,7 @@ export function CustomerRecordDetail(): React.ReactElement {
           ) : (
             <div className="rcd-feed-event-text">
               <strong>
-                {event.actorDisplayName ?? getActorName(event.actorId)}
+                {resolveActorName(event.actorDisplayName, event.actorId)}
               </strong>{" "}
               moved{" "}
               {event.fromState && (
@@ -1621,8 +1667,10 @@ export function CustomerRecordDetail(): React.ReactElement {
                   <span className="rcd-info-by">
                     {" "}
                     by{" "}
-                    {createdByEvent.actorDisplayName ??
-                      getActorName(createdByEvent.actorId)}
+                    {resolveActorName(
+                      createdByEvent.actorDisplayName,
+                      createdByEvent.actorId,
+                    )}
                   </span>
                 )}
               </span>

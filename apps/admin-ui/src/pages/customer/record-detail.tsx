@@ -948,6 +948,9 @@ export function CustomerRecordDetail(): React.ReactElement {
   } | null>(null);
   const [showCreateChild, setShowCreateChild] = useState(false);
   const [newChildTitle, setNewChildTitle] = useState("");
+  const [newChildAssignedTo, setNewChildAssignedTo] = useState("");
+  const [newChildDueDate, setNewChildDueDate] = useState("");
+  const [newChildDescription, setNewChildDescription] = useState("");
   const [creatingChild, setCreatingChild] = useState(false);
   const [createChildError, setCreateChildError] = useState<string | null>(null);
   const [archiveConfirm, setArchiveConfirm] = useState<{
@@ -1143,19 +1146,21 @@ export function CustomerRecordDetail(): React.ReactElement {
     setCreatingChild(true);
     setCreateChildError(null);
     try {
-      const titleKey =
-        fields.find(
-          (f) =>
-            f.name === "subject" || f.name === "title" || f.name === "name",
-        )?.name ?? "subject";
+      const childFields: Record<string, string> = {
+        title: newChildTitle.trim(),
+      };
+      if (newChildAssignedTo) childFields.assignedTo = newChildAssignedTo;
+      if (newChildDueDate) childFields.dueDate = newChildDueDate;
+      if (newChildDescription.trim())
+        childFields.description = newChildDescription.trim();
       await fetchWithAuth(`${API_URL}/entities/${id}/children`, {
         method: "POST",
-        body: JSON.stringify({
-          entityTypeId,
-          fields: { [titleKey]: newChildTitle.trim() },
-        }),
+        body: JSON.stringify({ entityTypeId, fields: childFields }),
       });
       setNewChildTitle("");
+      setNewChildAssignedTo("");
+      setNewChildDueDate("");
+      setNewChildDescription("");
       setShowCreateChild(false);
       void loadChildren();
     } catch (err) {
@@ -2325,14 +2330,28 @@ export function CustomerRecordDetail(): React.ReactElement {
       {showCreateChild && (
         <div
           className="modal-overlay"
-          onClick={() => setShowCreateChild(false)}
+          onClick={() => {
+            setShowCreateChild(false);
+            setNewChildTitle("");
+            setNewChildAssignedTo("");
+            setNewChildDueDate("");
+            setNewChildDescription("");
+            setCreateChildError(null);
+          }}
         >
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3 className="modal-title">New sub-task</h3>
               <button
                 className="modal-close"
-                onClick={() => setShowCreateChild(false)}
+                onClick={() => {
+                  setShowCreateChild(false);
+                  setNewChildTitle("");
+                  setNewChildAssignedTo("");
+                  setNewChildDueDate("");
+                  setNewChildDescription("");
+                  setCreateChildError(null);
+                }}
               >
                 ×
               </button>
@@ -2354,17 +2373,56 @@ export function CustomerRecordDetail(): React.ReactElement {
                   placeholder="Sub-task title…"
                   value={newChildTitle}
                   onChange={(e) => setNewChildTitle(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") void createChild();
-                  }}
                   autoFocus
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Assign to</label>
+                <select
+                  className="form-input"
+                  value={newChildAssignedTo}
+                  onChange={(e) => setNewChildAssignedTo(e.target.value)}
+                >
+                  <option value="">Unassigned</option>
+                  {users.map((u) => (
+                    <option key={u.userId} value={u.userId}>
+                      {u.displayName ?? u.email}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Due date</label>
+                <input
+                  className="form-input"
+                  type="date"
+                  value={newChildDueDate}
+                  onChange={(e) => setNewChildDueDate(e.target.value)}
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Description</label>
+                <textarea
+                  className="form-input"
+                  rows={3}
+                  placeholder="What needs to be done…"
+                  value={newChildDescription}
+                  onChange={(e) => setNewChildDescription(e.target.value)}
+                  style={{ resize: "vertical" }}
                 />
               </div>
             </div>
             <div className="modal-footer">
               <button
                 className="btn-secondary"
-                onClick={() => setShowCreateChild(false)}
+                onClick={() => {
+                  setShowCreateChild(false);
+                  setNewChildTitle("");
+                  setNewChildAssignedTo("");
+                  setNewChildDueDate("");
+                  setNewChildDescription("");
+                  setCreateChildError(null);
+                }}
               >
                 Cancel
               </button>

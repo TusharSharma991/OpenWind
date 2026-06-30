@@ -1923,6 +1923,8 @@ h1, h2, h3, h4, h5, h6 {
   .wfd-breadcrumb-name { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; }
   /* flow diagram: shrink node spacing */
   .wfd-flow-wrap { font-size: 11px; }
+  /* settings tab two-col → single col */
+  .wfd-settings-grid { grid-template-columns: 1fr !important; }
 }
 
 /* ═══════════════════════════════════════════════════════════════

@@ -2,6 +2,7 @@ import { createMiddleware } from "hono/factory";
 import { eq } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import type { Context, Next, MiddlewareHandler } from "hono";
+import { env } from "@platform/config";
 import type { DbOrTx } from "@platform/db";
 import {
   db,
@@ -20,6 +21,28 @@ import {
 } from "./tenant-status-cache.js";
 
 type AuthVariables = { Variables: { auth: AuthContext } };
+
+// Calls /oidc/v1/userinfo with the user's own access token.
+// Returns enriched name/email when the JWT itself is missing profile claims
+// (e.g. instance admins, machine users, or tokens issued before token settings were updated).
+async function fetchUserInfo(
+  bearerToken: string,
+): Promise<{ name: string | null; email: string | null } | null> {
+  try {
+    const url = `${env.ZITADEL_ISSUER}/oidc/v1/userinfo`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${bearerToken}` },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as Record<string, unknown>;
+    return {
+      name: typeof data["name"] === "string" ? data["name"] : null,
+      email: typeof data["email"] === "string" ? data["email"] : null,
+    };
+  } catch {
+    return null;
+  }
+}
 
 /**
  * requireAuth — validates Bearer JWT (Zitadel JWKS) or API key (sk_... prefix).
@@ -104,7 +127,7 @@ export const requireAuth = (db?: DbOrTx): MiddlewareHandler =>
         return c.json({ error: "UNAUTHORIZED", message: "Invalid token" }, 401);
       }
 
-      const auth = extractAuthContext(claims);
+      let auth = extractAuthContext(claims);
       if (!auth) {
         logger.warn(
           {
@@ -117,6 +140,19 @@ export const requireAuth = (db?: DbOrTx): MiddlewareHandler =>
           { error: "UNAUTHORIZED", message: "Missing required claims" },
           401,
         );
+      }
+
+      // If JWT is missing email or name (e.g. instance admins, tokens issued before
+      // "include profile info" was enabled), enrich from the userinfo endpoint.
+      if (!auth.email || auth.displayName === auth.userId) {
+        const info = await fetchUserInfo(token);
+        if (info) {
+          auth = {
+            ...auth,
+            email: info.email ?? auth.email,
+            displayName: info.name ?? info.email ?? auth.displayName,
+          };
+        }
       }
 
       c.set("auth", auth);

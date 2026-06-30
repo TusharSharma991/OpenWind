@@ -21,8 +21,8 @@ export const workflows = pgTable("workflows", {
   name: text("name").notNull(),
   initialState: text("initial_state").notNull(),
   isActive: boolean("is_active").default(true).notNull(),
-  /** Zitadel user ID of the designated workflow admin. NULL = unassigned. */
-  assignedTo: text("assigned_to"),
+  /** Zitadel user IDs of the designated workflow admins. NULL = unassigned. */
+  assignedTo: text("assigned_to").array(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),

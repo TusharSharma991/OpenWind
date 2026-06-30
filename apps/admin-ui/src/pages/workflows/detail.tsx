@@ -85,7 +85,7 @@ function useHistoryBlocker(when: boolean): {
 import { fetchWithAuth, API_URL } from "../../lib/api.js";
 import { useEntityTypes } from "../../entity-type-context.js";
 import { userManager } from "../../authProvider.js";
-import { UserPicker } from "../../components/user-picker.js";
+import { MultiUserPicker } from "../../components/user-picker.js";
 import type { UserOption } from "../../components/user-picker.js";
 
 function toWorkflowSlug(name: string): string {
@@ -121,7 +121,7 @@ type WorkflowFull = {
   entityTypeId: string;
   initialState: string;
   isActive: boolean;
-  assignedTo: string | null;
+  assignedTo: string[] | null;
   createdAt: string;
   states: WorkflowState[];
   transitions: WorkflowTransition[];
@@ -1074,6 +1074,9 @@ export function WorkflowDetail(): React.ReactElement {
     null,
   );
 
+  const [activeTab, setActiveTab] = useState<
+    "canvas" | "states" | "transitions" | "fields" | "settings"
+  >("settings");
   const [togglingActive, setTogglingActive] = useState(false);
   const [canvasView, setCanvasView] = useState<"canvas" | "pipeline">("canvas");
   const [canvasDirty, setCanvasDirty] = useState(false);
@@ -1131,7 +1134,7 @@ export function WorkflowDetail(): React.ReactElement {
 
   // User assignment
   const [orgUsers, setOrgUsers] = useState<UserOption[]>([]);
-  const [assignedTo, setAssignedTo] = useState<string | null>(null);
+  const [assignedTo, setAssignedTo] = useState<string[]>([]);
   const [savingAssign, setSavingAssign] = useState(false);
 
   // Available roles from Zitadel (for transition role picker)
@@ -1159,19 +1162,19 @@ export function WorkflowDetail(): React.ReactElement {
 
   useEffect(() => {
     if (data?.data) {
-      setAssignedTo((data.data as WorkflowFull).assignedTo ?? null);
+      setAssignedTo((data.data as WorkflowFull).assignedTo ?? []);
     }
   }, [data?.data]);
 
-  async function handleAssign(userId: string | null): Promise<void> {
+  async function handleAssign(userIds: string[]): Promise<void> {
     if (!id) return;
     setSavingAssign(true);
     try {
       await fetchWithAuth(`${API_URL}/workflows/${id}`, {
         method: "PATCH",
-        body: JSON.stringify({ assignedTo: userId }),
+        body: JSON.stringify({ assignedTo: userIds }),
       });
-      setAssignedTo(userId);
+      setAssignedTo(userIds);
       void refetch();
     } catch {
       // ignore — keep current assignment
@@ -1488,8 +1491,8 @@ export function WorkflowDetail(): React.ReactElement {
   const isAdmin = currentUserRoles.includes("admin");
   const isWorkflowAdmin =
     currentUserId !== null &&
-    workflow.assignedTo !== null &&
-    currentUserId === workflow.assignedTo;
+    (workflow.assignedTo?.length ?? 0) > 0 &&
+    (workflow.assignedTo?.includes(currentUserId) ?? false);
   if (currentUserId !== null && !isAdmin && !isWorkflowAdmin) {
     return <Navigate to="/dashboard" replace />;
   }
@@ -1499,6 +1502,22 @@ export function WorkflowDetail(): React.ReactElement {
   );
   const stateNames = sortedStates.map((s) => s.name);
   const slaStates = workflow.states.filter((s) => s.slaHours !== null).length;
+
+  const TABS = [
+    { id: "settings" as const, label: "Settings" },
+    { id: "canvas" as const, label: "Canvas" },
+    { id: "states" as const, label: "States", count: workflow.states.length },
+    {
+      id: "transitions" as const,
+      label: "Transitions",
+      count: workflow.transitions.length,
+    },
+    {
+      id: "fields" as const,
+      label: "Fields",
+      count: fieldsLoading ? undefined : fields.length,
+    },
+  ] as const;
 
   return (
     <div>
@@ -1529,7 +1548,7 @@ export function WorkflowDetail(): React.ReactElement {
         </span>
       </div>
 
-      {/* ── Page Header ────────────────────────────────────── */}
+      {/* ── Top info card ──────────────────────────────────── */}
       <div
         style={{
           background: "var(--bg-secondary)",
@@ -1654,17 +1673,14 @@ export function WorkflowDetail(): React.ReactElement {
                     display: "inline-block",
                   }}
                 />
-                <Link
-                  to={`/entity-types/${workflow.entityTypeId}`}
-                  style={{
-                    fontSize: "12px",
-                    color: "var(--accent-primary)",
-                    textDecoration: "none",
-                    fontWeight: 600,
-                  }}
+                <span
+                  style={{ fontSize: "12px", color: "var(--text-secondary)" }}
                 >
-                  Manage Fields ↗
-                </Link>
+                  Initial state:{" "}
+                  <strong style={{ color: "var(--text-primary)" }}>
+                    {workflow.initialState}
+                  </strong>
+                </span>
               </div>
             </div>
           </div>
@@ -1703,47 +1719,6 @@ export function WorkflowDetail(): React.ReactElement {
               </svg>
               View Records
             </button>
-            {isAdmin && (
-              <button
-                className={
-                  workflow.isActive ? "btn btn-secondary" : "btn-primary"
-                }
-                onClick={() => void handleToggleActive()}
-                disabled={togglingActive}
-                style={{ minWidth: "110px" }}
-              >
-                {togglingActive
-                  ? "Saving…"
-                  : workflow.isActive
-                    ? "Deactivate"
-                    : "Activate"}
-              </button>
-            )}
-            {isAdmin && (
-              <button
-                className="icon-btn icon-btn-delete"
-                style={{ width: "36px", height: "36px" }}
-                onClick={() => setShowDeleteWorkflow(true)}
-                title="Delete workflow"
-                aria-label="Delete workflow"
-              >
-                <svg
-                  width="15"
-                  height="15"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <polyline points="3 6 5 6 21 6" />
-                  <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
-                  <path d="M10 11v6M14 11v6" />
-                  <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" />
-                </svg>
-              </button>
-            )}
           </div>
         </div>
 
@@ -1780,64 +1755,73 @@ export function WorkflowDetail(): React.ReactElement {
         </div>
       </div>
 
-      {/* ── Assign Workflow ─────────────────────────────────────────────── */}
+      {/* ── Horizontal Tab Bar ─────────────────────────────── */}
       <div
-        className="data-panel"
         style={{
-          marginBottom: "20px",
+          background: "var(--bg-secondary)",
+          border: "1px solid var(--border-color)",
+          borderBottom: "none",
+          borderTopLeftRadius: "var(--radius-lg)",
+          borderTopRightRadius: "var(--radius-lg)",
+          borderBottomLeftRadius: 0,
+          borderBottomRightRadius: 0,
           display: "flex",
-          alignItems: "center",
-          gap: "16px",
-          padding: "14px 20px",
-          flexWrap: "wrap",
+          gap: "0",
+          marginBottom: "0",
+          overflowX: "auto",
         }}
       >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            minWidth: "120px",
-          }}
-        >
-          <svg
-            width="15"
-            height="15"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-          >
-            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-            <circle cx="12" cy="7" r="4" />
-          </svg>
-          <span
+        {TABS.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
             style={{
+              padding: "12px 20px",
               fontSize: "13px",
-              fontWeight: 600,
-              color: "var(--text-secondary)",
+              fontWeight: activeTab === tab.id ? 700 : 500,
+              color:
+                activeTab === tab.id
+                  ? "var(--accent-primary)"
+                  : "var(--text-secondary)",
+              background: "none",
+              border: "none",
+              borderBottom:
+                activeTab === tab.id
+                  ? "2px solid var(--accent-primary)"
+                  : "2px solid transparent",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+              whiteSpace: "nowrap",
+              transition: "color 0.15s, border-color 0.15s",
             }}
           >
-            Workflow Admin
-          </span>
-        </div>
-        <UserPicker
-          users={orgUsers}
-          value={assignedTo}
-          onChange={(uid) => void handleAssign(uid)}
-          placeholder="Assign workflow admin…"
-          disabled={savingAssign}
-        />
-        {savingAssign && (
-          <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>
-            Saving…
-          </span>
-        )}
-        {!savingAssign && assignedTo && (
-          <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>
-            This user has full admin access over this workflow.
-          </span>
-        )}
+            {tab.label}
+            {"count" in tab && tab.count !== undefined && (
+              <span
+                style={{
+                  fontSize: "11px",
+                  fontWeight: 700,
+                  background:
+                    activeTab === tab.id
+                      ? "hsla(250,84%,60%,.15)"
+                      : "var(--bg-tertiary)",
+                  color:
+                    activeTab === tab.id
+                      ? "var(--accent-primary)"
+                      : "var(--text-muted)",
+                  borderRadius: "20px",
+                  padding: "1px 7px",
+                  minWidth: "20px",
+                  textAlign: "center",
+                }}
+              >
+                {tab.count}
+              </span>
+            )}
+          </button>
+        ))}
       </div>
 
       {inlineError && (
@@ -1867,42 +1851,113 @@ export function WorkflowDetail(): React.ReactElement {
         </div>
       )}
 
-      {/* ── Two-column layout ──────────────────────────────── */}
-      <div
-        className="wfd-two-col"
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 300px",
-          gap: "20px",
-          alignItems: "start",
-        }}
-      >
-        {/* ── Left column ── */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-          {/* State Flow / Canvas */}
-          <div
-            className="data-panel"
-            style={{ borderTop: "3px solid var(--accent-primary)" }}
-          >
-            {workflow.states.length > 20 || workflow.transitions.length > 40 ? (
-              <>
-                <div
-                  className="alert"
+      {/* ── Canvas Tab ─────────────────────────────────────── */}
+      {activeTab === "canvas" && (
+        <div
+          className="data-panel"
+          style={{
+            borderTop: "none",
+            borderTopLeftRadius: 0,
+            borderTopRightRadius: 0,
+            marginBottom: "20px",
+          }}
+        >
+          {workflow.states.length > 20 || workflow.transitions.length > 40 ? (
+            <>
+              <div
+                className="alert"
+                style={{
+                  marginBottom: "14px",
+                  fontSize: "12px",
+                  background: "hsla(38,92%,50%,.08)",
+                  border: "1px solid hsla(38,92%,50%,.25)",
+                  borderRadius: "8px",
+                  padding: "10px 14px",
+                  color: "var(--warning)",
+                  fontWeight: 500,
+                }}
+              >
+                Canvas view is disabled for workflows with more than 20 states
+                or 40 transitions. Using pipeline view.
+              </div>
+              <SectionHeader label="State Pipeline" />
+              <StateFlowDiagram
+                states={workflow.states}
+                transitions={workflow.transitions}
+                initialState={workflow.initialState}
+                workflowId={id}
+                onStateUpdated={() => void refetch()}
+              />
+            </>
+          ) : (
+            <>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  marginBottom: "14px",
+                }}
+              >
+                <span
                   style={{
-                    marginBottom: "14px",
-                    fontSize: "12px",
-                    background: "hsla(38,92%,50%,.08)",
-                    border: "1px solid hsla(38,92%,50%,.25)",
-                    borderRadius: "8px",
-                    padding: "10px 14px",
-                    color: "var(--warning)",
-                    fontWeight: 500,
+                    fontSize: "11px",
+                    fontWeight: 700,
+                    color: "var(--text-muted)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.8px",
                   }}
                 >
-                  Canvas view is disabled for workflows with more than 20 states
-                  or 40 transitions. Using pipeline view.
+                  {canvasView === "canvas"
+                    ? "Workflow Canvas"
+                    : "State Pipeline"}
+                </span>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "2px",
+                    background: "var(--bg-tertiary)",
+                    borderRadius: "8px",
+                    padding: "3px",
+                    border: "1px solid var(--border-color)",
+                  }}
+                >
+                  {(["canvas", "pipeline"] as const).map((v) => (
+                    <button
+                      key={v}
+                      onClick={() => setCanvasView(v)}
+                      style={{
+                        padding: "3px 12px",
+                        fontSize: "11px",
+                        fontWeight: 600,
+                        borderRadius: "6px",
+                        border: "none",
+                        cursor: "pointer",
+                        background:
+                          canvasView === v
+                            ? "var(--accent-primary)"
+                            : "transparent",
+                        color:
+                          canvasView === v ? "#fff" : "var(--text-secondary)",
+                        transition: "background 0.15s",
+                      }}
+                    >
+                      {v === "canvas" ? "Canvas" : "Pipeline"}
+                    </button>
+                  ))}
                 </div>
-                <SectionHeader label="State Pipeline" />
+              </div>
+              {canvasView === "canvas" ? (
+                <WorkflowCanvas
+                  states={workflow.states}
+                  transitions={workflow.transitions}
+                  initialState={workflow.initialState}
+                  workflowId={id ?? ""}
+                  isAdmin={isAdmin}
+                  onSave={handleCanvasSave}
+                  onDirtyChange={setCanvasDirty}
+                />
+              ) : (
                 <StateFlowDiagram
                   states={workflow.states}
                   transitions={workflow.transitions}
@@ -1910,330 +1965,323 @@ export function WorkflowDetail(): React.ReactElement {
                   workflowId={id}
                   onStateUpdated={() => void refetch()}
                 />
-              </>
-            ) : (
-              <>
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    marginBottom: "14px",
-                  }}
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ── States Tab ─────────────────────────────────────── */}
+      {activeTab === "states" && (
+        <div
+          className="data-panel"
+          style={{
+            borderTop: "none",
+            borderTopLeftRadius: 0,
+            borderTopRightRadius: 0,
+            marginBottom: "20px",
+          }}
+        >
+          <SectionHeader
+            label="States"
+            count={workflow.states.length}
+            action={
+              isAdmin ? (
+                <button
+                  className="btn-primary btn-sm"
+                  onClick={() => setShowAddState(true)}
                 >
-                  <span
-                    style={{
-                      fontSize: "11px",
-                      fontWeight: 700,
-                      color: "var(--text-muted)",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.8px",
-                    }}
-                  >
-                    {canvasView === "canvas"
-                      ? "Workflow Canvas"
-                      : "State Pipeline"}
-                  </span>
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: "2px",
-                      background: "var(--bg-tertiary)",
-                      borderRadius: "8px",
-                      padding: "3px",
-                      border: "1px solid var(--border-color)",
-                    }}
-                  >
-                    {(["canvas", "pipeline"] as const).map((v) => (
-                      <button
-                        key={v}
-                        onClick={() => setCanvasView(v)}
+                  + Add State
+                </button>
+              ) : undefined
+            }
+          />
+          <div className="table-scroll">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>State</th>
+                  <th>Type</th>
+                  <th className="wfd-table-hide-xs">SLA</th>
+                  <th className="wfd-table-hide-xs">Order</th>
+                  <th style={{ width: "80px" }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {sortedStates.map((state) => (
+                  <tr key={state.id}>
+                    <td>
+                      <div
                         style={{
-                          padding: "3px 12px",
-                          fontSize: "11px",
-                          fontWeight: 600,
-                          borderRadius: "6px",
-                          border: "none",
-                          cursor: "pointer",
-                          background:
-                            canvasView === v
-                              ? "var(--accent-primary)"
-                              : "transparent",
-                          color:
-                            canvasView === v ? "#fff" : "var(--text-secondary)",
-                          transition: "background 0.15s",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "8px",
                         }}
                       >
-                        {v === "canvas" ? "Canvas" : "Pipeline"}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                {canvasView === "canvas" ? (
-                  <WorkflowCanvas
-                    states={workflow.states}
-                    transitions={workflow.transitions}
-                    initialState={workflow.initialState}
-                    workflowId={id ?? ""}
-                    isAdmin={isAdmin}
-                    onSave={handleCanvasSave}
-                    onDirtyChange={setCanvasDirty}
-                  />
-                ) : (
-                  <StateFlowDiagram
-                    states={workflow.states}
-                    transitions={workflow.transitions}
-                    initialState={workflow.initialState}
-                    workflowId={id}
-                    onStateUpdated={() => void refetch()}
-                  />
-                )}
-              </>
-            )}
-          </div>
-
-          {/* Fields */}
-          <div
-            className="data-panel"
-            style={{ borderTop: "3px solid hsl(265,84%,60%)" }}
-          >
-            <SectionHeader
-              label="Fields"
-              count={fields.length}
-              action={
-                isAdmin ? (
-                  <button
-                    className="btn-primary btn-sm"
-                    onClick={() => setShowAddField(true)}
-                  >
-                    + Add Field
-                  </button>
-                ) : undefined
-              }
-            />
-            {fieldsLoading ? (
-              <div style={{ padding: "20px", textAlign: "center" }}>
-                <div className="spinner" style={{ margin: "0 auto" }} />
-              </div>
-            ) : fields.length === 0 ? (
-              <div
-                className="empty-state-inline"
-                style={{ padding: "28px", fontSize: "13px" }}
-              >
-                No fields yet. Add fields to capture data on records.
-              </div>
-            ) : (
-              <div className="table-scroll">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Field</th>
-                      <th className="wfd-table-hide-xs">Type</th>
-                      <th className="wfd-table-hide-xs">Required</th>
-                      <th style={{ width: "80px" }}></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[...fields]
-                      .sort((a, b) => a.sortOrder - b.sortOrder)
-                      .map((f) => (
-                        <tr key={f.id}>
-                          <td>
-                            <div>
-                              <div
-                                style={{ fontWeight: 600, fontSize: "13px" }}
-                              >
-                                {f.label}
-                              </div>
-                              <code
-                                className="code-inline"
-                                style={{ fontSize: "11px" }}
-                              >
-                                {f.name}
-                              </code>
-                            </div>
-                          </td>
-                          <td className="wfd-table-hide-xs">
-                            <span className="badge badge-muted">
-                              {f.fieldType}
-                            </span>
-                          </td>
-                          <td className="wfd-table-hide-xs">
-                            {f.isRequired ? (
-                              <span className="badge badge-primary">Yes</span>
-                            ) : (
-                              <span className="text-muted-sm">—</span>
-                            )}
-                          </td>
-                          <td
-                            style={{ textAlign: "right", whiteSpace: "nowrap" }}
+                        <StateDot color={state.color} />
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: "13px" }}>
+                            {state.label}
+                          </div>
+                          <code
+                            className="code-inline"
+                            style={{ fontSize: "11px" }}
                           >
-                            {isAdmin && (
-                              <div
-                                style={{
-                                  display: "flex",
-                                  gap: "6px",
-                                  justifyContent: "flex-end",
-                                }}
-                              >
-                                <button
-                                  className="icon-btn icon-btn-edit"
-                                  onClick={() => {
-                                    setEditingField(f);
-                                    setFieldForm({
-                                      name: f.name,
-                                      label: f.label,
-                                      fieldType: f.fieldType,
-                                      isRequired: f.isRequired,
-                                    });
-                                    setFieldError(null);
-                                  }}
-                                  title="Edit field"
+                            {state.name}
+                          </code>
+                        </div>
+                      </div>
+                    </td>
+                    <td>
+                      {state.isTerminal ? (
+                        <span className="badge badge-muted">Terminal</span>
+                      ) : state.name === workflow.initialState ? (
+                        <span className="badge badge-primary">Initial</span>
+                      ) : (
+                        <span className="badge badge-success">Active</span>
+                      )}
+                    </td>
+                    <td
+                      className="wfd-table-hide-xs"
+                      style={{ fontSize: "13px" }}
+                    >
+                      {state.slaHours !== null ? (
+                        <span
+                          style={{ color: "var(--warning)", fontWeight: 600 }}
+                        >
+                          {state.slaHours}h
+                        </span>
+                      ) : (
+                        <span className="text-muted-sm">—</span>
+                      )}
+                    </td>
+                    <td
+                      className="wfd-table-hide-xs"
+                      style={{ fontSize: "13px", color: "var(--text-muted)" }}
+                    >
+                      {state.sortOrder}
+                    </td>
+                    <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                      {isAdmin && (
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: "6px",
+                            justifyContent: "flex-end",
+                          }}
+                        >
+                          <button
+                            className="icon-btn icon-btn-edit"
+                            onClick={() => {
+                              setEditingState(state);
+                              setStateForm({
+                                name: state.name,
+                                label: state.label,
+                                color: state.color ?? "#6366f1",
+                                isTerminal: state.isTerminal,
+                                slaHours:
+                                  state.slaHours !== null
+                                    ? String(state.slaHours)
+                                    : "",
+                                sortOrder: String(state.sortOrder),
+                              });
+                              setStateError(null);
+                            }}
+                            title="Edit state"
+                          >
+                            <svg
+                              width="13"
+                              height="13"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                              <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                            </svg>
+                          </button>
+                          {state.name !== workflow.initialState ? (
+                            <button
+                              className="icon-btn icon-btn-delete"
+                              disabled={deletingStateId === state.id}
+                              onClick={() =>
+                                setConfirmDelete({
+                                  message: `Delete state "${state.label}"?`,
+                                  onConfirm: () => {
+                                    setConfirmDelete(null);
+                                    void handleDeleteState(state.id);
+                                  },
+                                })
+                              }
+                              title="Delete state"
+                            >
+                              {deletingStateId === state.id ? (
+                                <span style={{ fontSize: "11px" }}>…</span>
+                              ) : (
+                                <svg
+                                  width="13"
+                                  height="13"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
                                 >
-                                  <svg
-                                    width="13"
-                                    height="13"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                  >
-                                    <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
-                                    <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
-                                  </svg>
-                                </button>
-                                <button
-                                  className="icon-btn icon-btn-delete"
-                                  disabled={deletingFieldId === f.id}
-                                  onClick={() =>
-                                    setConfirmDelete({
-                                      message: `Delete field "${f.label}"?`,
-                                      onConfirm: () => {
-                                        setConfirmDelete(null);
-                                        void handleDeleteField(f.id);
-                                      },
-                                    })
-                                  }
-                                  title="Delete field"
-                                >
-                                  {deletingFieldId === f.id ? (
-                                    <span style={{ fontSize: "11px" }}>…</span>
-                                  ) : (
-                                    <svg
-                                      width="13"
-                                      height="13"
-                                      viewBox="0 0 24 24"
-                                      fill="none"
-                                      stroke="currentColor"
-                                      strokeWidth="2"
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                    >
-                                      <polyline points="3 6 5 6 21 6" />
-                                      <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
-                                      <path d="M10 11v6M14 11v6" />
-                                    </svg>
-                                  )}
-                                </button>
-                              </div>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                                  <polyline points="3 6 5 6 21 6" />
+                                  <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+                                  <path d="M10 11v6M14 11v6" />
+                                </svg>
+                              )}
+                            </button>
+                          ) : (
+                            <span
+                              style={{ display: "inline-block", width: "30px" }}
+                            />
+                          )}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
+        </div>
+      )}
 
-          {/* States */}
-          <div
-            className="data-panel"
-            style={{ borderTop: "3px solid hsl(185,80%,40%)" }}
-          >
-            <SectionHeader
-              label="States"
-              count={workflow.states.length}
-              action={
-                isAdmin ? (
-                  <button
-                    className="btn-primary btn-sm"
-                    onClick={() => setShowAddState(true)}
-                  >
-                    + Add State
-                  </button>
-                ) : undefined
-              }
-            />
+      {/* ── Transitions Tab ────────────────────────────────── */}
+      {activeTab === "transitions" && (
+        <div
+          className="data-panel"
+          style={{
+            borderTop: "none",
+            borderTopLeftRadius: 0,
+            borderTopRightRadius: 0,
+            marginBottom: "20px",
+          }}
+        >
+          <SectionHeader
+            label="Transitions"
+            count={workflow.transitions.length}
+            action={
+              isAdmin ? (
+                <button
+                  className="btn-primary btn-sm"
+                  onClick={() => setShowAddTransition(true)}
+                >
+                  + Add Transition
+                </button>
+              ) : undefined
+            }
+          />
+          {workflow.transitions.length === 0 ? (
+            <div
+              className="empty-state-inline"
+              style={{ padding: "28px", fontSize: "13px" }}
+            >
+              No transitions yet. Add transitions to define how records move
+              between states.
+            </div>
+          ) : (
             <div className="table-scroll">
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>State</th>
-                    <th>Type</th>
-                    <th className="wfd-table-hide-xs">SLA</th>
-                    <th className="wfd-table-hide-xs">Order</th>
+                    <th>Route</th>
+                    <th className="wfd-table-hide-xs">Label</th>
+                    <th className="wfd-table-hide-xs">Allowed Roles</th>
+                    <th className="wfd-table-hide-xs">Requirements</th>
                     <th style={{ width: "80px" }}></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {sortedStates.map((state) => (
-                    <tr key={state.id}>
+                  {workflow.transitions.map((t) => (
+                    <tr key={t.id}>
                       <td>
                         <div
                           style={{
                             display: "flex",
                             alignItems: "center",
-                            gap: "8px",
+                            gap: "6px",
+                            flexWrap: "wrap",
                           }}
                         >
-                          <StateDot color={state.color} />
-                          <div>
-                            <div style={{ fontWeight: 600, fontSize: "13px" }}>
-                              {state.label}
-                            </div>
-                            <code
-                              className="code-inline"
-                              style={{ fontSize: "11px" }}
-                            >
-                              {state.name}
-                            </code>
-                          </div>
-                        </div>
-                      </td>
-                      <td>
-                        {state.isTerminal ? (
-                          <span className="badge badge-muted">Terminal</span>
-                        ) : state.name === workflow.initialState ? (
-                          <span className="badge badge-primary">Initial</span>
-                        ) : (
-                          <span className="badge badge-success">Active</span>
-                        )}
-                      </td>
-                      <td
-                        className="wfd-table-hide-xs"
-                        style={{ fontSize: "13px" }}
-                      >
-                        {state.slaHours !== null ? (
+                          <code
+                            className="code-inline"
+                            style={{ fontSize: "11px" }}
+                          >
+                            {t.fromState}
+                          </code>
                           <span
                             style={{
-                              color: "var(--warning)",
-                              fontWeight: 600,
+                              color: "var(--accent-primary)",
+                              fontWeight: 700,
+                              fontSize: "14px",
                             }}
                           >
-                            {state.slaHours}h
+                            →
                           </span>
-                        ) : (
-                          <span className="text-muted-sm">—</span>
-                        )}
+                          <code
+                            className="code-inline"
+                            style={{ fontSize: "11px" }}
+                          >
+                            {t.toState}
+                          </code>
+                        </div>
                       </td>
                       <td
                         className="wfd-table-hide-xs"
-                        style={{ fontSize: "13px", color: "var(--text-muted)" }}
+                        style={{ fontWeight: 500, fontSize: "13px" }}
                       >
-                        {state.sortOrder}
+                        {t.label || <span className="text-muted-sm">—</span>}
+                      </td>
+                      <td className="wfd-table-hide-xs">
+                        {t.allowedRoles.length === 0 ? (
+                          <span className="text-muted-sm">Any</span>
+                        ) : (
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: "4px",
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            {t.allowedRoles.map((r) => (
+                              <span key={r} className="badge badge-primary">
+                                {r}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </td>
+                      <td className="wfd-table-hide-xs">
+                        {!t.requiresComment && t.requiresFields.length === 0 ? (
+                          <span className="text-muted-sm">—</span>
+                        ) : (
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: "4px",
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            {t.requiresComment && (
+                              <span className="badge badge-warning">
+                                Comment
+                              </span>
+                            )}
+                            {t.requiresFields.length > 0 && (
+                              <span className="badge badge-warning">
+                                {t.requiresFields.length} field
+                                {t.requiresFields.length > 1 ? "s" : ""}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </td>
                       <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                         {isAdmin && (
@@ -2247,21 +2295,17 @@ export function WorkflowDetail(): React.ReactElement {
                             <button
                               className="icon-btn icon-btn-edit"
                               onClick={() => {
-                                setEditingState(state);
-                                setStateForm({
-                                  name: state.name,
-                                  label: state.label,
-                                  color: state.color ?? "#6366f1",
-                                  isTerminal: state.isTerminal,
-                                  slaHours:
-                                    state.slaHours !== null
-                                      ? String(state.slaHours)
-                                      : "",
-                                  sortOrder: String(state.sortOrder),
+                                setEditingTransition(t);
+                                setTransForm({
+                                  fromState: t.fromState,
+                                  toState: t.toState,
+                                  label: t.label,
+                                  allowedRoles: [...t.allowedRoles],
+                                  requiresComment: t.requiresComment,
                                 });
-                                setStateError(null);
+                                setTransError(null);
                               }}
-                              title="Edit state"
+                              title="Edit transition"
                             >
                               <svg
                                 width="13"
@@ -2277,48 +2321,39 @@ export function WorkflowDetail(): React.ReactElement {
                                 <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
                               </svg>
                             </button>
-                            {state.name !== workflow.initialState ? (
-                              <button
-                                className="icon-btn icon-btn-delete"
-                                disabled={deletingStateId === state.id}
-                                onClick={() =>
-                                  setConfirmDelete({
-                                    message: `Delete state "${state.label}"?`,
-                                    onConfirm: () => {
-                                      setConfirmDelete(null);
-                                      void handleDeleteState(state.id);
-                                    },
-                                  })
-                                }
-                                title="Delete state"
-                              >
-                                {deletingStateId === state.id ? (
-                                  <span style={{ fontSize: "11px" }}>…</span>
-                                ) : (
-                                  <svg
-                                    width="13"
-                                    height="13"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                  >
-                                    <polyline points="3 6 5 6 21 6" />
-                                    <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
-                                    <path d="M10 11v6M14 11v6" />
-                                  </svg>
-                                )}
-                              </button>
-                            ) : (
-                              <span
-                                style={{
-                                  display: "inline-block",
-                                  width: "30px",
-                                }}
-                              />
-                            )}
+                            <button
+                              className="icon-btn icon-btn-delete"
+                              disabled={deletingTransId === t.id}
+                              onClick={() =>
+                                setConfirmDelete({
+                                  message: `Delete transition "${t.label || `${t.fromState} → ${t.toState}`}"?`,
+                                  onConfirm: () => {
+                                    setConfirmDelete(null);
+                                    void handleDeleteTransition(t.id);
+                                  },
+                                })
+                              }
+                              title="Delete transition"
+                            >
+                              {deletingTransId === t.id ? (
+                                <span style={{ fontSize: "11px" }}>…</span>
+                              ) : (
+                                <svg
+                                  width="13"
+                                  height="13"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <polyline points="3 6 5 6 21 6" />
+                                  <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+                                  <path d="M10 11v6M14 11v6" />
+                                </svg>
+                              )}
+                            </button>
                           </div>
                         )}
                       </td>
@@ -2327,131 +2362,85 @@ export function WorkflowDetail(): React.ReactElement {
                 </tbody>
               </table>
             </div>
-          </div>
+          )}
+        </div>
+      )}
 
-          {/* Transitions */}
-          <div
-            className="data-panel"
-            style={{ borderTop: "3px solid hsl(35,90%,50%)" }}
-          >
-            <SectionHeader
-              label="Transitions"
-              count={workflow.transitions.length}
-              action={
-                isAdmin ? (
-                  <button
-                    className="btn-primary btn-sm"
-                    onClick={() => setShowAddTransition(true)}
-                  >
-                    + Add Transition
-                  </button>
-                ) : undefined
-              }
-            />
-            {workflow.transitions.length === 0 ? (
-              <div
-                className="empty-state-inline"
-                style={{ padding: "28px", fontSize: "13px" }}
-              >
-                No transitions yet. Add transitions to define how records move
-                between states.
-              </div>
-            ) : (
-              <div className="table-scroll">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Route</th>
-                      <th className="wfd-table-hide-xs">Label</th>
-                      <th className="wfd-table-hide-xs">Allowed Roles</th>
-                      <th className="wfd-table-hide-xs">Requirements</th>
-                      <th style={{ width: "80px" }}></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {workflow.transitions.map((t) => (
-                      <tr key={t.id}>
+      {/* ── Fields Tab ─────────────────────────────────────── */}
+      {activeTab === "fields" && (
+        <div
+          className="data-panel"
+          style={{
+            borderTop: "none",
+            borderTopLeftRadius: 0,
+            borderTopRightRadius: 0,
+            marginBottom: "20px",
+          }}
+        >
+          <SectionHeader
+            label="Fields"
+            count={fields.length}
+            action={
+              isAdmin ? (
+                <button
+                  className="btn-primary btn-sm"
+                  onClick={() => setShowAddField(true)}
+                >
+                  + Add Field
+                </button>
+              ) : undefined
+            }
+          />
+          {fieldsLoading ? (
+            <div style={{ padding: "20px", textAlign: "center" }}>
+              <div className="spinner" style={{ margin: "0 auto" }} />
+            </div>
+          ) : fields.length === 0 ? (
+            <div
+              className="empty-state-inline"
+              style={{ padding: "28px", fontSize: "13px" }}
+            >
+              No fields yet. Add fields to capture data on records.
+            </div>
+          ) : (
+            <div className="table-scroll">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th className="wfd-table-hide-xs">Type</th>
+                    <th className="wfd-table-hide-xs">Required</th>
+                    <th style={{ width: "80px" }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...fields]
+                    .sort((a, b) => a.sortOrder - b.sortOrder)
+                    .map((f) => (
+                      <tr key={f.id}>
                         <td>
-                          <div
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "6px",
-                              flexWrap: "wrap",
-                            }}
-                          >
+                          <div>
+                            <div style={{ fontWeight: 600, fontSize: "13px" }}>
+                              {f.label}
+                            </div>
                             <code
                               className="code-inline"
                               style={{ fontSize: "11px" }}
                             >
-                              {t.fromState}
-                            </code>
-                            <span
-                              style={{
-                                color: "var(--accent-primary)",
-                                fontWeight: 700,
-                                fontSize: "14px",
-                              }}
-                            >
-                              →
-                            </span>
-                            <code
-                              className="code-inline"
-                              style={{ fontSize: "11px" }}
-                            >
-                              {t.toState}
+                              {f.name}
                             </code>
                           </div>
                         </td>
-                        <td
-                          className="wfd-table-hide-xs"
-                          style={{ fontWeight: 500, fontSize: "13px" }}
-                        >
-                          {t.label || <span className="text-muted-sm">—</span>}
+                        <td className="wfd-table-hide-xs">
+                          <span className="badge badge-muted">
+                            {f.fieldType}
+                          </span>
                         </td>
                         <td className="wfd-table-hide-xs">
-                          {t.allowedRoles.length === 0 ? (
-                            <span className="text-muted-sm">Any</span>
+                          {f.isRequired ? (
+                            <span className="badge badge-primary">Yes</span>
                           ) : (
-                            <div
-                              style={{
-                                display: "flex",
-                                gap: "4px",
-                                flexWrap: "wrap",
-                              }}
-                            >
-                              {t.allowedRoles.map((r) => (
-                                <span key={r} className="badge badge-primary">
-                                  {r}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </td>
-                        <td className="wfd-table-hide-xs">
-                          {!t.requiresComment &&
-                          t.requiresFields.length === 0 ? (
                             <span className="text-muted-sm">—</span>
-                          ) : (
-                            <div
-                              style={{
-                                display: "flex",
-                                gap: "4px",
-                                flexWrap: "wrap",
-                              }}
-                            >
-                              {t.requiresComment && (
-                                <span className="badge badge-warning">
-                                  Comment
-                                </span>
-                              )}
-                              {t.requiresFields.length > 0 && (
-                                <span className="badge badge-warning">
-                                  {t.requiresFields.length} field
-                                  {t.requiresFields.length > 1 ? "s" : ""}
-                                </span>
-                              )}
-                            </div>
                           )}
                         </td>
                         <td
@@ -2468,17 +2457,16 @@ export function WorkflowDetail(): React.ReactElement {
                               <button
                                 className="icon-btn icon-btn-edit"
                                 onClick={() => {
-                                  setEditingTransition(t);
-                                  setTransForm({
-                                    fromState: t.fromState,
-                                    toState: t.toState,
-                                    label: t.label,
-                                    allowedRoles: [...t.allowedRoles],
-                                    requiresComment: t.requiresComment,
+                                  setEditingField(f);
+                                  setFieldForm({
+                                    name: f.name,
+                                    label: f.label,
+                                    fieldType: f.fieldType,
+                                    isRequired: f.isRequired,
                                   });
-                                  setTransError(null);
+                                  setFieldError(null);
                                 }}
-                                title="Edit transition"
+                                title="Edit field"
                               >
                                 <svg
                                   width="13"
@@ -2496,19 +2484,19 @@ export function WorkflowDetail(): React.ReactElement {
                               </button>
                               <button
                                 className="icon-btn icon-btn-delete"
-                                disabled={deletingTransId === t.id}
+                                disabled={deletingFieldId === f.id}
                                 onClick={() =>
                                   setConfirmDelete({
-                                    message: `Delete transition "${t.label || `${t.fromState} → ${t.toState}`}"?`,
+                                    message: `Delete field "${f.label}"?`,
                                     onConfirm: () => {
                                       setConfirmDelete(null);
-                                      void handleDeleteTransition(t.id);
+                                      void handleDeleteField(f.id);
                                     },
                                   })
                                 }
-                                title="Delete transition"
+                                title="Delete field"
                               >
-                                {deletingTransId === t.id ? (
+                                {deletingFieldId === f.id ? (
                                   <span style={{ fontSize: "11px" }}>…</span>
                                 ) : (
                                   <svg
@@ -2532,201 +2520,298 @@ export function WorkflowDetail(): React.ReactElement {
                         </td>
                       </tr>
                     ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* ── Right sidebar ── */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          {/* Summary card */}
-          <div
-            className="data-panel"
-            style={{ borderTop: "3px solid var(--accent-primary)" }}
-          >
-            <SectionHeader label="Workflow Info" />
-            <div
-              style={{ display: "flex", flexDirection: "column", gap: "12px" }}
-            >
-              {[
-                { label: "Workflow ID", value: id?.slice(0, 8) + "…" },
-                { label: "Initial State", value: workflow.initialState },
-                {
-                  label: "Terminal States",
-                  value:
-                    workflow.states
-                      .filter((s) => s.isTerminal)
-                      .map((s) => s.label)
-                      .join(", ") || "None",
-                },
-                {
-                  label: "SLA Coverage",
-                  value:
-                    slaStates > 0
-                      ? `${slaStates} of ${workflow.states.length} states`
-                      : "No SLAs set",
-                },
-              ].map((row) => (
-                <div key={row.label}>
-                  <div
-                    style={{
-                      fontSize: "10px",
-                      fontWeight: 700,
-                      color: "var(--text-muted)",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.5px",
-                      marginBottom: "3px",
-                    }}
-                  >
-                    {row.label}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: "13px",
-                      fontWeight: 500,
-                      color: "var(--text-primary)",
-                      wordBreak: "break-all",
-                    }}
-                  >
-                    {row.value}
-                  </div>
-                </div>
-              ))}
+                </tbody>
+              </table>
             </div>
-          </div>
+          )}
+        </div>
+      )}
 
-          {/* State color legend */}
-          {workflow.states.length > 0 && (
-            <div className="data-panel">
-              <SectionHeader label="State Colors" />
-              <div
-                style={{ display: "flex", flexDirection: "column", gap: "8px" }}
-              >
-                {sortedStates.map((s) => (
-                  <div
-                    key={s.id}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "10px",
-                      padding: "6px 10px",
-                      borderRadius: "var(--radius-sm)",
-                      background: "var(--bg-tertiary)",
-                    }}
-                  >
-                    <span
-                      style={{
-                        width: "10px",
-                        height: "10px",
-                        borderRadius: "50%",
-                        background: s.color ?? "var(--accent-primary)",
-                        flexShrink: 0,
-                      }}
-                    />
-                    <span
-                      style={{
-                        fontSize: "12px",
-                        fontWeight: 500,
-                        color: "var(--text-primary)",
-                        flex: 1,
-                      }}
-                    >
-                      {s.label}
-                    </span>
-                    {s.name === workflow.initialState && (
-                      <span
+      {/* ── Settings Tab ───────────────────────────────────── */}
+      {activeTab === "settings" && (
+        <div
+          style={{
+            background: "var(--bg-secondary)",
+            border: "1px solid var(--border-color)",
+            borderTop: "none",
+            borderTopLeftRadius: 0,
+            borderTopRightRadius: 0,
+            borderBottomLeftRadius: "var(--radius-lg)",
+            borderBottomRightRadius: "var(--radius-lg)",
+            padding: "24px",
+            marginBottom: "20px",
+          }}
+        >
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: "20px",
+              alignItems: "start",
+            }}
+            className="wfd-settings-grid"
+          >
+            {/* Left: workflow details + state colors */}
+            <div
+              style={{ display: "flex", flexDirection: "column", gap: "20px" }}
+            >
+              <div className="data-panel">
+                <SectionHeader label="Workflow Details" />
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "14px",
+                  }}
+                >
+                  {[
+                    { label: "Workflow ID", value: id ?? "" },
+                    { label: "Initial State", value: workflow.initialState },
+                    {
+                      label: "Terminal States",
+                      value:
+                        workflow.states
+                          .filter((s) => s.isTerminal)
+                          .map((s) => s.label)
+                          .join(", ") || "None",
+                    },
+                    {
+                      label: "SLA Coverage",
+                      value:
+                        slaStates > 0
+                          ? `${slaStates} of ${workflow.states.length} states`
+                          : "No SLAs set",
+                    },
+                    {
+                      label: "Status",
+                      value: workflow.isActive ? "Active" : "Inactive",
+                    },
+                    {
+                      label: "Created",
+                      value: new Date(workflow.createdAt).toLocaleDateString(
+                        undefined,
+                        { year: "numeric", month: "long", day: "numeric" },
+                      ),
+                    },
+                  ].map((row) => (
+                    <div key={row.label}>
+                      <div
                         style={{
-                          fontSize: "9px",
-                          fontWeight: 700,
-                          color: "var(--accent-primary)",
-                          textTransform: "uppercase",
-                          letterSpacing: "0.4px",
-                        }}
-                      >
-                        start
-                      </span>
-                    )}
-                    {s.isTerminal && (
-                      <span
-                        style={{
-                          fontSize: "9px",
+                          fontSize: "10px",
                           fontWeight: 700,
                           color: "var(--text-muted)",
                           textTransform: "uppercase",
-                          letterSpacing: "0.4px",
+                          letterSpacing: "0.5px",
+                          marginBottom: "3px",
                         }}
                       >
-                        end
-                      </span>
-                    )}
-                  </div>
-                ))}
+                        {row.label}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: "13px",
+                          fontWeight: 500,
+                          color: "var(--text-primary)",
+                          wordBreak: "break-all",
+                          fontFamily:
+                            row.label === "Workflow ID"
+                              ? "var(--font-mono, monospace)"
+                              : undefined,
+                        }}
+                      >
+                        {row.value}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
 
-          {/* Quick actions */}
-          <div className="data-panel">
-            <SectionHeader label="Quick Actions" />
+              {/* State color legend */}
+              {workflow.states.length > 0 && (
+                <div className="data-panel">
+                  <SectionHeader label="State Colors" />
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "8px",
+                    }}
+                  >
+                    {sortedStates.map((s) => (
+                      <div
+                        key={s.id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "10px",
+                          padding: "8px 12px",
+                          borderRadius: "var(--radius-sm)",
+                          background: "var(--bg-tertiary)",
+                        }}
+                      >
+                        <span
+                          style={{
+                            width: "12px",
+                            height: "12px",
+                            borderRadius: "50%",
+                            background: s.color ?? "var(--accent-primary)",
+                            flexShrink: 0,
+                            boxShadow: `0 0 0 2px ${s.color ?? "var(--accent-primary)"}33`,
+                          }}
+                        />
+                        <span
+                          style={{
+                            fontSize: "13px",
+                            fontWeight: 500,
+                            color: "var(--text-primary)",
+                            flex: 1,
+                          }}
+                        >
+                          {s.label}
+                        </span>
+                        <code
+                          className="code-inline"
+                          style={{ fontSize: "10px" }}
+                        >
+                          {s.color ?? "—"}
+                        </code>
+                        {s.name === workflow.initialState && (
+                          <span
+                            style={{
+                              fontSize: "9px",
+                              fontWeight: 700,
+                              color: "var(--accent-primary)",
+                              textTransform: "uppercase",
+                              letterSpacing: "0.4px",
+                            }}
+                          >
+                            start
+                          </span>
+                        )}
+                        {s.isTerminal && (
+                          <span
+                            style={{
+                              fontSize: "9px",
+                              fontWeight: 700,
+                              color: "var(--text-muted)",
+                              textTransform: "uppercase",
+                              letterSpacing: "0.4px",
+                            }}
+                          >
+                            end
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Right: admin assignment + danger zone */}
             <div
-              style={{ display: "flex", flexDirection: "column", gap: "8px" }}
+              style={{ display: "flex", flexDirection: "column", gap: "20px" }}
             >
-              {isAdmin && (
-                <button
-                  className="btn btn-secondary"
+              {/* Admin assignment */}
+              <div className="data-panel">
+                <SectionHeader label="Workflow Admins" />
+                <p
                   style={{
-                    width: "100%",
-                    textAlign: "left",
-                    justifyContent: "flex-start",
+                    fontSize: "13px",
+                    color: "var(--text-secondary)",
+                    marginBottom: "14px",
+                    lineHeight: 1.5,
                   }}
-                  onClick={() => setShowAddState(true)}
                 >
-                  + Add State
-                </button>
-              )}
+                  Assigned users have full admin access over this workflow —
+                  they can manage states, transitions, and fields.
+                </p>
+                <MultiUserPicker
+                  users={orgUsers}
+                  value={assignedTo}
+                  onChange={(uids) => void handleAssign(uids)}
+                  placeholder="Add workflow admins…"
+                  disabled={savingAssign}
+                />
+                {savingAssign && (
+                  <p
+                    style={{
+                      fontSize: "12px",
+                      color: "var(--text-muted)",
+                      marginTop: "8px",
+                    }}
+                  >
+                    Saving…
+                  </p>
+                )}
+              </div>
+
+              {/* Activate / Deactivate */}
               {isAdmin && (
-                <button
-                  className="btn btn-secondary"
-                  style={{
-                    width: "100%",
-                    textAlign: "left",
-                    justifyContent: "flex-start",
-                  }}
-                  onClick={() => setShowAddTransition(true)}
-                >
-                  + Add Transition
-                </button>
+                <div className="data-panel">
+                  <SectionHeader label="Workflow Status" />
+                  <p
+                    style={{
+                      fontSize: "13px",
+                      color: "var(--text-secondary)",
+                      marginBottom: "14px",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {workflow.isActive
+                      ? "This workflow is currently active. Deactivating it will prevent new records from being created."
+                      : "This workflow is inactive. Activate it to allow new records to be created."}
+                  </p>
+                  <button
+                    className={
+                      workflow.isActive ? "btn btn-secondary" : "btn-primary"
+                    }
+                    onClick={() => void handleToggleActive()}
+                    disabled={togglingActive}
+                    style={{ minWidth: "130px" }}
+                  >
+                    {togglingActive
+                      ? "Saving…"
+                      : workflow.isActive
+                        ? "Deactivate Workflow"
+                        : "Activate Workflow"}
+                  </button>
+                </div>
               )}
+
+              {/* Danger zone */}
               {isAdmin && (
-                <button
-                  className="btn btn-secondary"
+                <div
+                  className="data-panel"
                   style={{
-                    width: "100%",
-                    textAlign: "left",
-                    justifyContent: "flex-start",
+                    borderTop: "3px solid var(--danger)",
+                    background: "hsla(0,84%,60%,.03)",
                   }}
-                  onClick={() => setShowAddField(true)}
                 >
-                  + Add Field
-                </button>
+                  <SectionHeader label="Danger Zone" />
+                  <p
+                    style={{
+                      fontSize: "13px",
+                      color: "var(--text-secondary)",
+                      marginBottom: "14px",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    Permanently delete this workflow and all its states and
+                    transitions. This cannot be undone.
+                  </p>
+                  <button
+                    className="btn btn-danger-sm"
+                    onClick={() => setShowDeleteWorkflow(true)}
+                  >
+                    Delete Workflow
+                  </button>
+                </div>
               )}
-              <button
-                className="btn-primary"
-                style={{ width: "100%" }}
-                onClick={() =>
-                  navigate(
-                    `/workflows/${toWorkflowSlug(workflow.name)}/records`,
-                  )
-                }
-              >
-                View Records →
-              </button>
             </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* ── Modals ─────────────────────────────────────────── */}
 

@@ -514,9 +514,7 @@ export function WorkflowRecords(): React.ReactElement {
   const [workflowId, setWorkflowId] = useState<string>("");
   const [entityTypeId, setEntityTypeId] = useState<string>("");
   const [workflowName, setWorkflowName] = useState<string>("");
-  const [workflowAssignedTo, setWorkflowAssignedTo] = useState<string | null>(
-    null,
-  );
+  const [workflowAssignedTo, setWorkflowAssignedTo] = useState<string[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [currentUserRoles, setCurrentUserRoles] = useState<string[]>([]);
   const [fields, setFields] = useState<EntityField[]>([]);
@@ -596,7 +594,7 @@ export function WorkflowRecords(): React.ReactElement {
               id: string;
               name: string;
               entityTypeId: string;
-              assignedTo: string | null;
+              assignedTo: string[] | null;
               states: WorkflowState[];
               transitions: Transition[];
             };
@@ -606,7 +604,7 @@ export function WorkflowRecords(): React.ReactElement {
         setWorkflowId(wf.id);
         setWorkflowName(wf.name);
         setEntityTypeId(wf.entityTypeId);
-        setWorkflowAssignedTo(wf.assignedTo ?? null);
+        setWorkflowAssignedTo((wf.assignedTo as string[] | null) ?? []);
 
         const loadedStates = wf.states as WorkflowState[];
         const loadedTransitions = wf.transitions as Transition[];
@@ -680,7 +678,8 @@ export function WorkflowRecords(): React.ReactElement {
   const showSettings =
     currentUserId !== null &&
     (currentUserRoles.includes("admin") ||
-      (workflowAssignedTo !== null && currentUserId === workflowAssignedTo));
+      (workflowAssignedTo.length > 0 &&
+        workflowAssignedTo.includes(currentUserId)));
 
   const orderedStates: WorkflowState[] = colOrder
     .map((name) => states.find((s) => s.name === name))

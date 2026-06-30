@@ -32,7 +32,7 @@ function rowToWorkflow(r: typeof workflows.$inferSelect): WorkflowDefinition {
     name: r.name,
     initialState: r.initialState,
     isActive: r.isActive,
-    assignedTo: r.assignedTo as string | null,
+    assignedTo: (r.assignedTo as string[] | null) ?? [],
     createdAt: r.createdAt,
   };
 }

@@ -53,7 +53,25 @@ export interface EntityRelation {
   toInstanceId: string;
   relationType: string;
   createdAt: Date;
+  deletedAt: Date | null;
 }
+
+export type CreateChildRelationInput = {
+  parentId: string;
+  childFields: Record<string, unknown>;
+  entityTypeId: string;
+  assignedTo?: string | undefined;
+  createdBy?: string | undefined;
+};
+
+export type MoveChildRelationInput = {
+  childId: string;
+  newParentId: string | null;
+};
+
+export type ArchiveResult =
+  | { requiresConfirm: true; childCount: number }
+  | { archived: true; count: number };
 
 export type CreateEntityInput = {
   entityTypeId: string;

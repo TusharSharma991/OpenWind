@@ -10,6 +10,7 @@ import {
   index,
   customType,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 const tsvector = customType<{ data: string }>({
   dataType() {
@@ -124,12 +125,14 @@ export const entityRelations = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
   (t) => ({
-    fromIdx: index("entity_relations_from_idx").on(
-      t.tenantId,
-      t.fromInstanceId,
-    ),
-    toIdx: index("entity_relations_to_idx").on(t.tenantId, t.toInstanceId),
+    activeFromIdx: index("entity_relations_active_from_idx")
+      .on(t.tenantId, t.fromInstanceId)
+      .where(sql`${t.deletedAt} IS NULL`),
+    activeToIdx: index("entity_relations_active_to_idx")
+      .on(t.tenantId, t.toInstanceId)
+      .where(sql`${t.deletedAt} IS NULL`),
   }),
 );

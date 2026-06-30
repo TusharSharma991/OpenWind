@@ -23,6 +23,12 @@ export const workflows = pgTable("workflows", {
   isActive: boolean("is_active").default(true).notNull(),
   /** Zitadel user IDs of the designated workflow admins. NULL = unassigned. */
   assignedTo: text("assigned_to").array(),
+  /** Max depth of parent→child chains. 0 = children disabled. Default 1. */
+  maxChildDepth: integer("max_child_depth").default(1).notNull(),
+  /** Max number of direct children per parent ticket. Default 10. */
+  maxChildrenPerParent: integer("max_children_per_parent")
+    .default(10)
+    .notNull(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),

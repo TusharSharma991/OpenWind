@@ -9,6 +9,8 @@ import { handleWorkflowError } from "../../lib/handle-workflow-error.js";
 const UpdateWorkflowSchema = z.object({
   isActive: z.boolean().optional(),
   assignedTo: z.array(z.string()).optional(),
+  maxChildDepth: z.number().int().min(0).max(10).nullable().optional(),
+  maxChildrenPerParent: z.number().int().min(1).max(100).nullable().optional(),
 });
 
 export const updateWorkflowHandler = factory.createHandlers(

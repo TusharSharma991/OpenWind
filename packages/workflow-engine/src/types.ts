@@ -7,6 +7,10 @@ export interface WorkflowDefinition {
   isActive: boolean;
   /** Zitadel user IDs of the designated workflow admins. Empty array = unassigned. */
   assignedTo: string[];
+  /** Max parent→child chain depth. 0 = children disabled. Default 1. */
+  maxChildDepth: number;
+  /** Max direct children per parent. Default 10. */
+  maxChildrenPerParent: number;
   createdAt: Date;
 }
 
@@ -94,6 +98,8 @@ export type CreateWorkflowInput = {
 export type UpdateWorkflowInput = {
   isActive?: boolean | undefined;
   assignedTo?: string[] | undefined;
+  maxChildDepth?: number | null | undefined;
+  maxChildrenPerParent?: number | null | undefined;
 };
 
 export type CreateWorkflowStateInput = {

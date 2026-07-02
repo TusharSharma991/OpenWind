@@ -1,4 +1,14 @@
-import { eq, and, asc, gt, isNull, or, inArray, sql } from "drizzle-orm";
+import {
+  eq,
+  and,
+  asc,
+  gt,
+  isNull,
+  or,
+  inArray,
+  sql,
+  notExists,
+} from "drizzle-orm";
 import type { DbOrTx } from "@platform/db";
 import {
   entityInstances,
@@ -7,6 +17,7 @@ import {
   workflows,
   workflowStates,
   workflowEvents,
+  entityRelations,
 } from "@platform/db";
 import { logger } from "@platform/logger";
 import type {
@@ -275,29 +286,38 @@ export async function updateEntity(
       throw new ValidationError(transformZodErrors(partialResult.error));
     }
 
-    // Step 2: merge and validate the full result (catches required-field clearing)
+    // Step 2: merge and validate the full result (catches required-field clearing).
+    // Skip for child tickets — they are intentionally created with minimal fields
+    // and do not satisfy the parent entity type's required fields.
+    const isChildTicket =
+      typeof (existing.fields as Record<string, unknown>).child_status ===
+      "string";
     const merged = {
       ...(existing.fields as Record<string, unknown>),
       ...(partialResult.data as Record<string, unknown>),
     };
-    const fullSchema = await getValidationSchema(
-      db,
-      existing.entityTypeId,
-      tenantId,
-      "create",
-    );
-    const fullResult = fullSchema.safeParse(merged);
-    if (!fullResult.success) {
-      throw new ValidationError(transformZodErrors(fullResult.error));
+    if (!isChildTicket) {
+      const fullSchema = await getValidationSchema(
+        db,
+        existing.entityTypeId,
+        tenantId,
+        "create",
+      );
+      const fullResult = fullSchema.safeParse(merged);
+      if (!fullResult.success) {
+        throw new ValidationError(transformZodErrors(fullResult.error));
+      }
     }
 
     const entityType = await loadEntityType(db, existing.entityTypeId);
-    const crossErrors = runCrossFieldValidators(
-      entityType.name,
-      fullResult.data as Record<string, unknown>,
-      "update",
-    );
-    if (crossErrors.length > 0) throw new ValidationError(crossErrors);
+    if (!isChildTicket) {
+      const crossErrors = runCrossFieldValidators(
+        entityType.name,
+        merged,
+        "update",
+      );
+      if (crossErrors.length > 0) throw new ValidationError(crossErrors);
+    }
 
     const allFields = await loadEntityFields(
       db,
@@ -333,10 +353,7 @@ export async function updateEntity(
       if (allRefErrors.length > 0) throw new ValidationError(allRefErrors);
     }
 
-    const fieldsWithFormulas = await applyFormulaFields(
-      allFields,
-      fullResult.data as Record<string, unknown>,
-    );
+    const fieldsWithFormulas = await applyFormulaFields(allFields, merged);
 
     const updates: Partial<typeof entityInstances.$inferInsert> = {
       fields: fieldsWithFormulas,
@@ -346,7 +363,18 @@ export async function updateEntity(
       updates.assignedTo = input.assignedTo;
     }
     if (input.currentState !== undefined && input.currentState !== null) {
-      if (existing.workflowId) {
+      const childTicketStates = ["open", "in-progress", "closed"];
+      if (isChildTicket) {
+        if (!childTicketStates.includes(input.currentState)) {
+          throw new ValidationError([
+            {
+              field: "currentState",
+              code: "invalid",
+              message: `Child ticket state must be one of: ${childTicketStates.join(", ")}`,
+            },
+          ]);
+        }
+      } else if (existing.workflowId) {
         const states = await db
           .select({ name: workflowStates.name })
           .from(workflowStates)
@@ -378,8 +406,37 @@ export async function updateEntity(
 
     if (!row) throw new EntityError("ENTITY_NOT_FOUND", { instanceId });
 
-    // Logging logic
-    if (row.workflowId) {
+    // Logging logic — for child tickets with null workflowId (legacy data before
+    // inheritance fix), fall back to the parent's workflowId via the relation.
+    let effectiveWorkflowId = row.workflowId;
+    if (!effectiveWorkflowId) {
+      const [parentRel] = await db
+        .select({ toInstanceId: entityRelations.toInstanceId })
+        .from(entityRelations)
+        .where(
+          and(
+            eq(entityRelations.fromInstanceId, instanceId),
+            eq(entityRelations.tenantId, tenantId),
+            eq(entityRelations.relationType, "child_of"),
+            isNull(entityRelations.deletedAt),
+          ),
+        )
+        .limit(1);
+      if (parentRel) {
+        const [parent] = await db
+          .select({ workflowId: entityInstances.workflowId })
+          .from(entityInstances)
+          .where(
+            and(
+              eq(entityInstances.id, parentRel.toInstanceId),
+              eq(entityInstances.tenantId, tenantId),
+            ),
+          )
+          .limit(1);
+        effectiveWorkflowId = parent?.workflowId ?? null;
+      }
+    }
+    if (effectiveWorkflowId) {
       const oldFields = existing.fields as Record<string, unknown>;
       const newFields = row.fields as Record<string, unknown>;
       const changed: Record<string, { old: unknown; new: unknown }> = {};
@@ -408,7 +465,7 @@ export async function updateEntity(
         await db.insert(workflowEvents).values({
           tenantId,
           instanceId,
-          workflowId: row.workflowId,
+          workflowId: effectiveWorkflowId,
           fromState: existing.currentState,
           toState: row.currentState,
           triggeredBy: "user",
@@ -450,6 +507,9 @@ export async function updateEntity(
 
   // Fields not provided — updating assignedTo and/or currentState
   if (input.assignedTo !== undefined || input.currentState !== undefined) {
+    const isChildTicket2 =
+      typeof (existing.fields as Record<string, unknown>).child_status ===
+      "string";
     const updates: Partial<typeof entityInstances.$inferInsert> = {
       updatedAt: new Date(),
     };
@@ -457,7 +517,18 @@ export async function updateEntity(
       updates.assignedTo = input.assignedTo;
     }
     if (input.currentState !== undefined && input.currentState !== null) {
-      if (existing.workflowId) {
+      const childTicketStates = ["open", "in-progress", "closed"];
+      if (isChildTicket2) {
+        if (!childTicketStates.includes(input.currentState)) {
+          throw new ValidationError([
+            {
+              field: "currentState",
+              code: "invalid",
+              message: `Child ticket state must be one of: ${childTicketStates.join(", ")}`,
+            },
+          ]);
+        }
+      } else if (existing.workflowId) {
         const states = await db
           .select({ name: workflowStates.name })
           .from(workflowStates)
@@ -490,7 +561,35 @@ export async function updateEntity(
     if (!row) throw new EntityError("ENTITY_NOT_FOUND", { instanceId });
 
     // Logging logic for assignedTo and/or currentState update
-    if (row.workflowId) {
+    let effectiveWorkflowId2 = row.workflowId;
+    if (!effectiveWorkflowId2) {
+      const [parentRel2] = await db
+        .select({ toInstanceId: entityRelations.toInstanceId })
+        .from(entityRelations)
+        .where(
+          and(
+            eq(entityRelations.fromInstanceId, instanceId),
+            eq(entityRelations.tenantId, tenantId),
+            eq(entityRelations.relationType, "child_of"),
+            isNull(entityRelations.deletedAt),
+          ),
+        )
+        .limit(1);
+      if (parentRel2) {
+        const [parent2] = await db
+          .select({ workflowId: entityInstances.workflowId })
+          .from(entityInstances)
+          .where(
+            and(
+              eq(entityInstances.id, parentRel2.toInstanceId),
+              eq(entityInstances.tenantId, tenantId),
+            ),
+          )
+          .limit(1);
+        effectiveWorkflowId2 = parent2?.workflowId ?? null;
+      }
+    }
+    if (effectiveWorkflowId2) {
       const changed: Record<string, { old: unknown; new: unknown }> = {};
       if (existing.assignedTo !== row.assignedTo) {
         changed["assignedTo"] = {
@@ -512,7 +611,7 @@ export async function updateEntity(
         await db.insert(workflowEvents).values({
           tenantId,
           instanceId,
-          workflowId: row.workflowId,
+          workflowId: effectiveWorkflowId2,
           fromState: existing.currentState,
           toState: row.currentState,
           triggeredBy: "user",
@@ -610,6 +709,22 @@ export async function listEntities(
   ) {
     conditions.push(
       sql`${entityInstances.fields} @> ${JSON.stringify(input.fieldFilters)}::jsonb`,
+    );
+  }
+  if (input.rootOnly) {
+    conditions.push(
+      notExists(
+        db
+          .select({ id: entityRelations.id })
+          .from(entityRelations)
+          .where(
+            and(
+              eq(entityRelations.fromInstanceId, entityInstances.id),
+              eq(entityRelations.relationType, "child_of"),
+              isNull(entityRelations.deletedAt),
+            ),
+          ),
+      ),
     );
   }
   if (input.cursor) {

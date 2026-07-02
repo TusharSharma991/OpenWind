@@ -24,6 +24,10 @@ import { moveParentHandler } from "./move-parent.js";
 import { setChildStatusHandler } from "./set-child-status.js";
 import { archiveEntityHandler } from "./archive.js";
 import { restoreEntityHandler } from "./restore.js";
+import { getAccessHandler } from "./get-access.js";
+import { grantAccessHandler } from "./grant-access.js";
+import { revokeAccessHandler } from "./revoke-access.js";
+import { updateAccessHandler } from "./update-access.js";
 
 const router = new Hono<{ Variables: { auth: AuthContext } }>();
 
@@ -60,5 +64,10 @@ router.patch("/:id/parent", ...moveParentHandler);
 router.patch("/:id/child-status", ...setChildStatusHandler);
 router.post("/:id/archive", ...archiveEntityHandler);
 router.post("/:id/restore", ...restoreEntityHandler);
+
+router.get("/:id/access", ...getAccessHandler);
+router.post("/:id/access", ...grantAccessHandler);
+router.patch("/:id/access/:userId", ...updateAccessHandler);
+router.delete("/:id/access/:userId", ...revokeAccessHandler);
 
 export { router as entitiesRouter };

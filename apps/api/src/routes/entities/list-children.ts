@@ -1,7 +1,7 @@
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { requireAuth } from "@platform/auth";
-import { db } from "@platform/db";
+import { withTenantContext } from "@platform/db";
 import {
   listChildInstances,
   DEFAULT_PAGE_SIZE,
@@ -29,10 +29,12 @@ export const listChildrenHandler = factory.createHandlers(
     const { tenantId } = c.get("auth");
 
     try {
-      const page = await listChildInstances(db, tenantId, parentId, {
-        ...(query.cursor !== undefined && { cursor: query.cursor }),
-        limit: query.limit,
-      });
+      const page = await withTenantContext(tenantId, (tx) =>
+        listChildInstances(tx, tenantId, parentId, {
+          ...(query.cursor !== undefined && { cursor: query.cursor }),
+          limit: query.limit,
+        }),
+      );
       return c.json({ data: page.data, nextCursor: page.nextCursor });
     } catch (err) {
       return handleEntityError(c, err);

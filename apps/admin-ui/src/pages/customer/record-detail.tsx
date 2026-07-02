@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import { fetchWithAuth, API_URL } from "../../lib/api.js";
 import { useEntityTypes } from "../../entity-type-context.js";
 import { userManager } from "../../authProvider.js";
@@ -419,6 +419,7 @@ function CommentComposer({
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionAnchor, setMentionAnchor] = useState(0);
   const [mentionIdx, setMentionIdx] = useState(0);
+  const [mentionedIds, setMentionedIds] = useState<Set<string>>(new Set());
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const mentionResults =
@@ -482,29 +483,19 @@ function CommentComposer({
     const before = text.slice(0, mentionAnchor);
     const after = text.slice(mentionAnchor).replace(/^@[\w.]*/, "");
     setText(`${before}@${name} ${after}`);
+    setMentionedIds((prev) => new Set([...prev, u.userId]));
     setMentionQuery(null);
     textareaRef.current?.focus();
-  }
-
-  function extractMentions(): string[] {
-    const nameToId = new Map(
-      users.map((u) => [u.displayName ?? u.email, u.userId]),
-    );
-    const ids: string[] = [];
-    for (const m of text.matchAll(/@([\w. ]+?)(?=\s|$)/g)) {
-      const uid = nameToId.get(m[1]?.trim() ?? "");
-      if (uid) ids.push(uid);
-    }
-    return [...new Set(ids)];
   }
 
   async function handleSubmit(): Promise<void> {
     if (!text.trim() || submitting) return;
     setSubmitting(true);
     try {
-      await onSubmit(text.trim(), extractMentions(), replyTo?.id ?? null);
+      await onSubmit(text.trim(), [...mentionedIds], replyTo?.id ?? null);
       setText("");
       setMentionQuery(null);
+      setMentionedIds(new Set());
     } finally {
       setSubmitting(false);
     }
@@ -905,13 +896,17 @@ function formatFieldValue(value: unknown): string {
 /* ══════════════════════════════════════════════════════════════ */
 export function CustomerRecordDetail(): React.ReactElement {
   const { typeSlug, id } = useParams<{ typeSlug: string; id: string }>();
+  const navigate = useNavigate();
   const { getTypeBySlug } = useEntityTypes();
   const entityType = typeSlug ? getTypeBySlug(typeSlug) : undefined;
   const entityTypeId = entityType?.id;
 
   const [fields, setFields] = useState<EntityField[]>([]);
   const [record, setRecord] = useState<EntityInstance | null>(null);
-  const [history, setHistory] = useState<WorkflowEvent[]>([]);
+  const [comments, setComments] = useState<WorkflowEvent[]>([]);
+  const [historyEvents, setHistoryEvents] = useState<WorkflowEvent[]>([]);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [transitioning, setTransitioning] = useState<string | null>(null);
@@ -925,6 +920,7 @@ export function CustomerRecordDetail(): React.ReactElement {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [allStates, setAllStates] = useState<WorkflowState[]>([]);
   const [transitions, setTransitions] = useState<Transition[]>([]);
+  const [_maxChildDepth, setMaxChildDepth] = useState<number>(1);
   const [currentState, setCurrentState] = useState("");
   const [users, setUsers] = useState<OrgUser[]>([]);
   const [detailsExpanded, setDetailsExpanded] = useState(false);
@@ -937,6 +933,8 @@ export function CustomerRecordDetail(): React.ReactElement {
     new Set(),
   );
   const initializedCollapse = useRef(false);
+  const commentsScrollRef = useRef<HTMLDivElement>(null);
+  const historyScrollRef = useRef<HTMLDivElement>(null);
 
   // Child tickets state
   const [children, setChildren] = useState<ChildInstance[]>([]);
@@ -958,7 +956,35 @@ export function CustomerRecordDetail(): React.ReactElement {
   } | null>(null);
   const [archiving, setArchiving] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  // Access list — persisted from API as {userId, level, tag}[]
+  type AccessLevel = "read_only" | "read_comment" | "read_write";
+  type AccessTag = "creator" | "assigned" | "mention" | "manual";
+  type AccessEntry = { userId: string; level: AccessLevel; tag: AccessTag };
+  const [accessList, setAccessList] = useState<AccessEntry[]>([]);
+
+  // Access change modal (revoke / change level)
+  const [accessChangeModal, setAccessChangeModal] = useState<{
+    userId: string;
+    displayName: string;
+    currentLevel: AccessLevel;
+    isAssigned: boolean;
+    isCreator: boolean;
+  } | null>(null);
+  const [accessChangeSelection, setAccessChangeSelection] = useState<
+    AccessLevel | "remove"
+  >("read_comment");
+  const [accessChangeSaving, setAccessChangeSaving] = useState(false);
+
+  // Pending mention-grant: comment waiting for access level confirmation
+  const [pendingMentionGrant, setPendingMentionGrant] = useState<{
+    text: string;
+    mentions: string[]; // all mention userIds
+    replyTo: string | null;
+    newUsers: OrgUser[]; // users without existing access
+    selectedLevel: AccessLevel; // level to grant new users
+  } | null>(null);
   const [currentUserRoles, setCurrentUserRoles] = useState<string[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   useEffect(() => {
     userManager
       .getUser()
@@ -970,7 +996,7 @@ export function CustomerRecordDetail(): React.ReactElement {
         setCurrentUserRoles(roleClaim ? Object.keys(roleClaim) : []);
         // Inject the current user into the users list so their name always resolves,
         // even when the /users API treats them as a ghost entry (no email/displayName in DB).
-        const sub = u.profile.sub;
+        const sub = u.profile.sub as string | undefined;
         const name =
           (u.profile.name as string | undefined) ??
           (u.profile.preferred_username as string | undefined) ??
@@ -978,6 +1004,7 @@ export function CustomerRecordDetail(): React.ReactElement {
           null;
         const email = (u.profile.email as string | undefined) ?? "";
         if (sub) {
+          setCurrentUserId(sub);
           setUsers((prev) => {
             if (prev.some((p) => p.userId === sub)) return prev;
             return [
@@ -998,6 +1025,143 @@ export function CustomerRecordDetail(): React.ReactElement {
   }, []);
   const isAdminOrAgent =
     currentUserRoles.includes("admin") || currentUserRoles.includes("agent");
+
+  // Derived: true when viewing a child ticket (has a parent)
+  const isChildTicket = !!record?.parentId;
+
+  // Child tickets use a fixed 3-state machine regardless of parent workflow
+  const CHILD_TICKET_STATES: WorkflowState[] = [
+    {
+      id: "child-open",
+      name: "open",
+      label: "Open",
+      color: "#6366f1",
+      isTerminal: false,
+    },
+    {
+      id: "child-in-progress",
+      name: "in-progress",
+      label: "In Progress",
+      color: "#f59e0b",
+      isTerminal: false,
+    },
+    {
+      id: "child-closed",
+      name: "closed",
+      label: "Closed",
+      color: "#10b981",
+      isTerminal: true,
+    },
+  ];
+  const effectiveStates = isChildTicket ? CHILD_TICKET_STATES : allStates;
+
+  // Synthetic transitions for child tickets (direct state changes via PATCH, no workflow engine)
+  const CHILD_TICKET_TRANSITIONS: Transition[] = [
+    {
+      id: "ct-open-inprogress",
+      fromState: "open",
+      toState: "in-progress",
+      label: "Start",
+      requiresComment: false,
+    },
+    {
+      id: "ct-open-closed",
+      fromState: "open",
+      toState: "closed",
+      label: "Close",
+      requiresComment: false,
+    },
+    {
+      id: "ct-inprogress-open",
+      fromState: "in-progress",
+      toState: "open",
+      label: "Reopen",
+      requiresComment: false,
+    },
+    {
+      id: "ct-inprogress-closed",
+      fromState: "in-progress",
+      toState: "closed",
+      label: "Close",
+      requiresComment: false,
+    },
+    {
+      id: "ct-closed-open",
+      fromState: "closed",
+      toState: "open",
+      label: "Reopen",
+      requiresComment: false,
+    },
+    {
+      id: "ct-closed-inprogress",
+      fromState: "closed",
+      toState: "in-progress",
+      label: "Restart",
+      requiresComment: false,
+    },
+  ];
+  const effectiveTransitions = isChildTicket
+    ? CHILD_TICKET_TRANSITIONS
+    : transitions;
+
+  // Access control — derived from accessList (loaded upfront, no history needed)
+  const creatorId = accessList.find((e) => e.tag === "creator")?.userId ?? null;
+  const canChangeState =
+    isAdminOrAgent ||
+    (currentUserId !== null &&
+      (currentUserId === creatorId || currentUserId === record?.assignedTo));
+  const canChangeAssignedTo =
+    isAdminOrAgent || (currentUserId !== null && currentUserId === creatorId);
+
+  async function _loadAccessList(): Promise<void> {
+    if (!id) return;
+    try {
+      const res = await fetchWithAuth(`${API_URL}/entities/${id}/access`).catch(
+        () => ({ data: [] }),
+      );
+      setAccessList((res as { data: AccessEntry[] }).data);
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  async function handleAccessChange(): Promise<void> {
+    if (!id || !accessChangeModal) return;
+    setAccessChangeSaving(true);
+    try {
+      const { userId: targetId } = accessChangeModal;
+      if (accessChangeSelection === "remove") {
+        await fetchWithAuth(`${API_URL}/entities/${id}/access/${targetId}`, {
+          method: "DELETE",
+        });
+        setAccessList((prev) => prev.filter((e) => e.userId !== targetId));
+        if (record?.assignedTo === targetId) {
+          setRecord((prev) => (prev ? { ...prev, assignedTo: null } : prev));
+        }
+      } else {
+        await fetchWithAuth(`${API_URL}/entities/${id}/access/${targetId}`, {
+          method: "PATCH",
+          body: JSON.stringify({ level: accessChangeSelection }),
+        });
+        setAccessList((prev) =>
+          prev.map((e) =>
+            e.userId === targetId
+              ? { ...e, level: accessChangeSelection as AccessLevel }
+              : e,
+          ),
+        );
+        if (
+          record?.assignedTo === targetId &&
+          accessChangeSelection !== "read_write"
+        ) {
+          setRecord((prev) => (prev ? { ...prev, assignedTo: null } : prev));
+        }
+      }
+      setAccessChangeModal(null);
+    } finally {
+      setAccessChangeSaving(false);
+    }
+  }
 
   function toggleThread(id: string): void {
     setCollapsedThreads((prev) => {
@@ -1045,19 +1209,18 @@ export function CustomerRecordDetail(): React.ReactElement {
     return Promise.all([
       fetchWithAuth(`${API_URL}/entity-types/${entityTypeId}/fields`),
       fetchWithAuth(`${API_URL}/entities/${id}`),
-      fetchWithAuth(`${API_URL}/entities/${id}/transitions/history`).catch(
-        () => ({ data: [] }),
-      ),
       fetchWithAuth(`${API_URL}/users`).catch(() => ({ data: [] })),
+      fetchWithAuth(`${API_URL}/entities/${id}/access`).catch(() => ({
+        data: [],
+      })),
     ])
-      .then(([fieldsRes, recRes, histRes, usersRes]) => {
+      .then(([fieldsRes, recRes, usersRes, accessRes]) => {
         setFields(
           (fieldsRes as { data: EntityField[] }).data.filter(
             (f) => !f.isSystem,
           ),
         );
         setRecord((recRes as { data: EntityInstance }).data);
-        setHistory((histRes as { data?: WorkflowEvent[] }).data ?? []);
         const apiUsers =
           (
             usersRes as {
@@ -1074,6 +1237,7 @@ export function CustomerRecordDetail(): React.ReactElement {
           const apiIds = new Set(apiUsers.map((u) => u.userId));
           return [...apiUsers, ...prev.filter((u) => !apiIds.has(u.userId))];
         });
+        setAccessList((accessRes as { data?: AccessEntry[] }).data ?? []);
       })
       .catch((err: unknown) =>
         setError(err instanceof Error ? err.message : "Failed to load"),
@@ -1081,10 +1245,31 @@ export function CustomerRecordDetail(): React.ReactElement {
       .finally(() => setLoading(false));
   }
 
+  async function loadComments(): Promise<void> {
+    if (!id) return;
+    const res = await fetchWithAuth(
+      `${API_URL}/entities/${id}/transitions/history?eventType=comment`,
+    ).catch(() => ({ data: [] }));
+    setComments((res as { data?: WorkflowEvent[] }).data ?? []);
+  }
+
+  async function loadHistory(): Promise<void> {
+    if (!id || historyLoaded) return;
+    setHistoryLoading(true);
+    try {
+      const res = await fetchWithAuth(
+        `${API_URL}/entities/${id}/transitions/history?eventType=history`,
+      ).catch(() => ({ data: [] }));
+      setHistoryEvents((res as { data?: WorkflowEvent[] }).data ?? []);
+      setHistoryLoaded(true);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
   // Collapse all parent threads on first load (and after a full reload)
   useEffect(() => {
-    if (history.length === 0) return;
-    const comments = history.filter((e) => e.metadata?.type === "comment");
+    if (comments.length === 0) return;
     const parentIds = new Set(
       comments
         .map(
@@ -1099,14 +1284,24 @@ export function CustomerRecordDetail(): React.ReactElement {
       initializedCollapse.current = true;
       setCollapsedThreads(parentIds);
     }
-  }, [history]);
+  }, [comments]);
 
-  async function refreshHistory(): Promise<void> {
-    if (!id) return;
-    const histRes = await fetchWithAuth(
-      `${API_URL}/entities/${id}/transitions/history`,
-    ).catch(() => ({ data: [] }));
-    setHistory((histRes as { data?: WorkflowEvent[] }).data ?? []);
+  // Auto-scroll comments to bottom when first loaded
+  useEffect(() => {
+    if (comments.length === 0) return;
+    const el = commentsScrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [comments]);
+
+  // Auto-scroll history to bottom when first loaded
+  useEffect(() => {
+    if (!historyLoaded || historyEvents.length === 0) return;
+    const el = historyScrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [historyLoaded, historyEvents]);
+
+  async function refreshComments(): Promise<void> {
+    await loadComments();
   }
 
   async function loadChildren(): Promise<void> {
@@ -1149,13 +1344,16 @@ export function CustomerRecordDetail(): React.ReactElement {
       const childFields: Record<string, string> = {
         title: newChildTitle.trim(),
       };
-      if (newChildAssignedTo) childFields.assignedTo = newChildAssignedTo;
       if (newChildDueDate) childFields.dueDate = newChildDueDate;
       if (newChildDescription.trim())
         childFields.description = newChildDescription.trim();
       await fetchWithAuth(`${API_URL}/entities/${id}/children`, {
         method: "POST",
-        body: JSON.stringify({ entityTypeId, fields: childFields }),
+        body: JSON.stringify({
+          entityTypeId,
+          fields: childFields,
+          ...(newChildAssignedTo ? { assignedTo: newChildAssignedTo } : {}),
+        }),
       });
       setNewChildTitle("");
       setNewChildAssignedTo("");
@@ -1229,21 +1427,67 @@ export function CustomerRecordDetail(): React.ReactElement {
     }
   }
 
-  async function submitComment(
+  async function doSubmitComment(
     text: string,
-    mentions: string[],
+    mentionEntries: Array<{ userId: string; level: AccessLevel }>,
     replyTo: string | null,
   ): Promise<void> {
     if (!id) return;
     await fetchWithAuth(`${API_URL}/entities/${id}/comments`, {
       method: "POST",
-      body: JSON.stringify({ text, mentions, replyTo }),
+      body: JSON.stringify({ text, mentions: mentionEntries, replyTo }),
     });
-    await refreshHistory();
+    // Optimistically add newly-granted users to local access list
+    for (const m of mentionEntries) {
+      if (!accessList.some((e) => e.userId === m.userId)) {
+        setAccessList((prev) => [
+          ...prev,
+          { userId: m.userId, level: m.level, tag: "mention" },
+        ]);
+      }
+    }
+    await refreshComments();
+  }
+
+  async function submitComment(
+    text: string,
+    mentionIds: string[],
+    replyTo: string | null,
+  ): Promise<void> {
+    if (!id) return;
+    const existingIds = new Set(accessList.map((e) => e.userId));
+    const newToAccess = mentionIds.filter((uid) => !existingIds.has(uid));
+    if (newToAccess.length > 0) {
+      const newUsers = users.filter((u) => newToAccess.includes(u.userId));
+      setPendingMentionGrant({
+        text,
+        mentions: mentionIds,
+        replyTo,
+        newUsers,
+        selectedLevel: "read_comment",
+      });
+      return;
+    }
+    // All mentioned users already have access — post directly
+    const mentionEntries = mentionIds.map((uid) => {
+      const existing = accessList.find((e) => e.userId === uid);
+      return {
+        userId: uid,
+        level: (existing?.level ?? "read_comment") as AccessLevel,
+      };
+    });
+    await doSubmitComment(text, mentionEntries, replyTo);
   }
 
   useEffect(() => {
-    void loadRecord();
+    void loadRecord().then(() => {
+      void loadComments();
+    });
+    // Reset history state when navigating to a new record
+    setHistoryLoaded(false);
+    setHistoryEvents([]);
+    setComments([]);
+    initializedCollapse.current = false;
   }, [entityTypeId, id]);
 
   useEffect(() => {
@@ -1271,7 +1515,11 @@ export function CustomerRecordDetail(): React.ReactElement {
         const wf = record?.workflowId
           ? (
               res as {
-                data: { states: WorkflowState[]; transitions: Transition[] };
+                data: {
+                  states: WorkflowState[];
+                  transitions: Transition[];
+                  maxChildDepth?: number;
+                };
               }
             ).data
           : ((
@@ -1279,12 +1527,16 @@ export function CustomerRecordDetail(): React.ReactElement {
                 data?: Array<{
                   states?: WorkflowState[];
                   transitions?: Transition[];
+                  maxChildDepth?: number;
                 }>;
               }
             ).data ?? [])[0];
         if (wf) {
           setAllStates(wf.states as WorkflowState[]);
           setTransitions(wf.transitions as Transition[]);
+          setMaxChildDepth(
+            (wf as { maxChildDepth?: number }).maxChildDepth ?? 1,
+          );
         } else {
           setAllStates([]);
           setTransitions([]);
@@ -1340,13 +1592,21 @@ export function CustomerRecordDetail(): React.ReactElement {
     setTransitioning(transition.id);
     setTransError(null);
     try {
-      await fetchWithAuth(`${API_URL}/entities/${id}/transitions`, {
-        method: "POST",
-        body: JSON.stringify({
-          transitionId: transition.id,
-          ...(userComment ? { comment: userComment } : {}),
-        }),
-      });
+      if (isChildTicket && transition.id.startsWith("ct-")) {
+        // Child ticket: no workflow transitions — update state directly via PATCH
+        await fetchWithAuth(`${API_URL}/entities/${id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ currentState: transition.toState }),
+        });
+      } else {
+        await fetchWithAuth(`${API_URL}/entities/${id}/transitions`, {
+          method: "POST",
+          body: JSON.stringify({
+            transitionId: transition.id,
+            ...(userComment ? { comment: userComment } : {}),
+          }),
+        });
+      }
       setComment("");
       setStateModal(null);
       setLoading(true);
@@ -1369,21 +1629,26 @@ export function CustomerRecordDetail(): React.ReactElement {
     return (
       <div className="rcd-page">
         <div className="portal-alert-error">{error ?? "Record not found"}</div>
-        <Link
-          to={`/records/${typeSlug ?? ""}`}
+        <button
+          type="button"
           className="portal-back-link"
-          style={{ marginTop: "12px", display: "inline-block" }}
+          style={{
+            marginTop: "12px",
+            display: "inline-block",
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            padding: 0,
+          }}
+          onClick={() => navigate(-1)}
         >
           ← Back
-        </Link>
+        </button>
       </div>
     );
   }
 
-  const historyEvents = history;
-  const commentEvents = historyEvents.filter(
-    (e) => e.metadata?.type === "comment",
-  );
+  const commentEvents = comments.filter((e) => e.metadata?.type === "comment");
   const timelineEvents = historyEvents.filter(
     (e) => e.metadata?.type !== "comment",
   );
@@ -1424,6 +1689,19 @@ export function CustomerRecordDetail(): React.ReactElement {
   const createdByEvent = historyEvents.find(
     (e) => e.metadata?.type === "create",
   );
+
+  // Merge access list entries with local user metadata
+  const accessUsers: Array<OrgUser & { level: AccessLevel; tag: AccessTag }> =
+    accessList
+      .map((entry) => {
+        const u = users.find((u) => u.userId === entry.userId);
+        if (!u) return null;
+        return { ...u, level: entry.level, tag: entry.tag };
+      })
+      .filter(
+        (u): u is OrgUser & { level: AccessLevel; tag: AccessTag } =>
+          u !== null,
+      );
 
   function renderCommentBubble(event: WorkflowEvent): React.ReactElement {
     const meta = event.metadata;
@@ -1565,12 +1843,85 @@ export function CustomerRecordDetail(): React.ReactElement {
     const isCreate = meta?.type === "create";
     const isUpdate = meta?.type === "update";
     const isComment = meta?.type === "comment";
+    const isAccessGrant = meta?.type === "access_grant";
+    const isAccessUpdate = meta?.type === "access_update";
+    const isAccessRevoke = meta?.type === "access_revoke";
 
     if (isComment) {
-      // standalone (no replies, not a reply) — used only for history tab
       return (
         <div key={event.id} className="rcd-feed-comment">
           {renderCommentBubble(event)}
+        </div>
+      );
+    }
+
+    if (isAccessGrant || isAccessUpdate || isAccessRevoke) {
+      const actor = resolveActorName(event.actorDisplayName, event.actorId);
+      const targetId = (meta as Record<string, unknown>)["targetUserId"] as
+        | string
+        | undefined;
+      const target = targetId ? getActorName(targetId) : "someone";
+      const levelMap: Record<string, string> = {
+        read_only: "Read Only",
+        read_comment: "Comment",
+        read_write: "Full Access",
+      };
+      const level =
+        levelMap[String((meta as Record<string, unknown>)["level"] ?? "")] ??
+        String((meta as Record<string, unknown>)["level"] ?? "");
+      return (
+        <div key={event.id} className="rcd-feed-event">
+          <div className="rcd-feed-event-icon-wrap">
+            <div className="rcd-tl-icon rcd-tl-icon-update">
+              <svg
+                width="11"
+                height="11"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+              </svg>
+            </div>
+            <div className="rcd-feed-event-line" />
+          </div>
+          <div className="rcd-feed-event-body">
+            <span className="rcd-feed-event-text">
+              <strong>{actor}</strong>{" "}
+              {isAccessGrant && (
+                <>
+                  granted <strong>{target}</strong> access
+                  {level ? ` (${level})` : ""}
+                </>
+              )}
+              {isAccessUpdate && (
+                <>
+                  changed <strong>{target}</strong>'s access
+                  {level ? ` to ${level}` : ""}
+                </>
+              )}
+              {isAccessRevoke && (
+                <>
+                  removed <strong>{target}</strong>'s access
+                </>
+              )}
+            </span>
+            <div className="rcd-feed-event-time">
+              {new Date(event.triggeredAt).toLocaleString(undefined, {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </div>
+          </div>
         </div>
       );
     }
@@ -1670,7 +2021,11 @@ export function CustomerRecordDetail(): React.ReactElement {
     <div className="rcd-page">
       {/* ── Breadcrumb nav ───────────────────────────────── */}
       <div className="rcd-nav">
-        <Link to={`/records/${typeSlug ?? ""}`} className="rcd-bc-link">
+        <button
+          type="button"
+          className="rcd-bc-link"
+          onClick={() => navigate(-1)}
+        >
           <svg
             width="13"
             height="13"
@@ -1685,7 +2040,7 @@ export function CustomerRecordDetail(): React.ReactElement {
             <polyline points="15 18 9 12 15 6" />
           </svg>
           {entityType?.plural ?? "Records"}
-        </Link>
+        </button>
         <span className="rcd-bc-sep">/</span>
         <span className="rcd-bc-current">{recordTitle}</span>
       </div>
@@ -1713,7 +2068,7 @@ export function CustomerRecordDetail(): React.ReactElement {
               <div className="rcd-card-header-meta">
                 <StateBadge
                   stateName={record.currentState}
-                  allStates={allStates}
+                  allStates={effectiveStates}
                 />
                 <span className="rcd-id-chip">{record.id.slice(0, 8)}</span>
               </div>
@@ -1833,9 +2188,9 @@ export function CustomerRecordDetail(): React.ReactElement {
               <div className="rcd-info-val">
                 <StateDropdown
                   currentState={record.currentState}
-                  allStates={allStates}
-                  transitions={transitions}
-                  disabled={!!transitioning}
+                  allStates={effectiveStates}
+                  transitions={effectiveTransitions}
+                  disabled={!!transitioning || !canChangeState}
                   onTransition={(t) => {
                     if (t.requiresComment) {
                       setStateModal(t);
@@ -1856,7 +2211,7 @@ export function CustomerRecordDetail(): React.ReactElement {
                 <AssignDropdown
                   value={record.assignedTo ?? ""}
                   users={users}
-                  disabled={quickAssigning}
+                  disabled={quickAssigning || !canChangeAssignedTo}
                   onChange={(userId) => void quickAssign(userId)}
                 />
               </div>
@@ -1945,118 +2300,6 @@ export function CustomerRecordDetail(): React.ReactElement {
             </div>
           )}
 
-          {/* Sub-tasks panel */}
-          <div className="rcd-subtasks">
-            <div className="rcd-subtasks-header">
-              <span className="rcd-subtasks-title">
-                Sub-tasks
-                <span className="rcd-subtasks-count">{children.length}</span>
-              </span>
-              {isAdminOrAgent && !record.deletedAt && (
-                <button
-                  type="button"
-                  className="rcd-subtasks-add"
-                  onClick={() => {
-                    setShowCreateChild(true);
-                    setNewChildTitle("");
-                    setCreateChildError(null);
-                  }}
-                >
-                  <svg
-                    width="11"
-                    height="11"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <line x1="12" y1="5" x2="12" y2="19" />
-                    <line x1="5" y1="12" x2="19" y2="12" />
-                  </svg>
-                  Add
-                </button>
-              )}
-            </div>
-
-            {childrenLoading ? (
-              <div className="rcd-subtasks-loading">Loading…</div>
-            ) : children.length === 0 ? (
-              <p className="rcd-subtasks-empty">No sub-tasks yet.</p>
-            ) : (
-              <>
-                {/* Progress bar */}
-                {(() => {
-                  const closed = children.filter(
-                    (c) => c.deletedAt !== null || c.currentState === "closed",
-                  ).length;
-                  const pct = Math.round((closed / children.length) * 100);
-                  return (
-                    <div
-                      className="rcd-subtasks-progress-wrap"
-                      title={`${closed} of ${children.length} closed`}
-                    >
-                      <div className="rcd-subtasks-progress-bar">
-                        <div
-                          className="rcd-subtasks-progress-fill"
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                      <span className="rcd-subtasks-progress-label">
-                        {closed}/{children.length}
-                      </span>
-                    </div>
-                  );
-                })()}
-
-                <ul className="rcd-subtasks-list">
-                  {children.map((child) => {
-                    const childTitleField = ["subject", "title", "name"].find(
-                      (k) => child.fields[k],
-                    );
-                    const childTitle = childTitleField
-                      ? String(child.fields[childTitleField])
-                      : `#${child.id.slice(0, 8)}`;
-                    const isClosed =
-                      child.deletedAt !== null ||
-                      child.currentState === "closed";
-                    const assignee = users.find(
-                      (u) => u.userId === child.assignedTo,
-                    );
-                    return (
-                      <li key={child.id} className="rcd-subtask-item">
-                        <span
-                          className={`rcd-subtask-dot ${isClosed ? "rcd-subtask-dot-closed" : "rcd-subtask-dot-open"}`}
-                        />
-                        <Link
-                          to={`/records/${typeSlug ?? ""}/${child.id}`}
-                          className={`rcd-subtask-title ${isClosed ? "rcd-subtask-title-closed" : ""}`}
-                        >
-                          {childTitle}
-                        </Link>
-                        {assignee && (
-                          <span
-                            className="rcd-subtask-avatar"
-                            title={assignee.displayName ?? assignee.email}
-                          >
-                            {(assignee.displayName ?? assignee.email)
-                              .slice(0, 1)
-                              .toUpperCase()}
-                          </span>
-                        )}
-                        <span className="rcd-subtask-id">
-                          #{child.id.slice(0, 6)}
-                        </span>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </>
-            )}
-          </div>
-
           {/* Expandable: all fields / edit form */}
           <div
             className={`rcd-expand-body ${detailsExpanded ? "rcd-expand-body-open" : ""}`}
@@ -2073,7 +2316,7 @@ export function CustomerRecordDetail(): React.ReactElement {
                     </div>
                   )}
                   <div className="portal-edit-grid">
-                    {allStates.length > 0 && (
+                    {effectiveStates.length > 0 && (
                       <div className="portal-field-group portal-field-full">
                         <label className="portal-field-label">State</label>
                         <select
@@ -2081,7 +2324,7 @@ export function CustomerRecordDetail(): React.ReactElement {
                           value={currentState}
                           onChange={(e) => setCurrentState(e.target.value)}
                         >
-                          {allStates.map((st) => (
+                          {effectiveStates.map((st) => (
                             <option key={st.id} value={st.name}>
                               {st.label}
                             </option>
@@ -2104,7 +2347,12 @@ export function CustomerRecordDetail(): React.ReactElement {
                         ))}
                       </select>
                     </div>
-                    {fields.map((f) => (
+                    {(isChildTicket
+                      ? fields.filter((f) =>
+                          /^(due_?date|due|description|desc)$/i.test(f.name),
+                        )
+                      : fields
+                    ).map((f) => (
                       <div
                         key={f.id}
                         className={`portal-field-group ${f.fieldType === "longtext" ? "portal-field-full" : ""}`}
@@ -2147,7 +2395,12 @@ export function CustomerRecordDetail(): React.ReactElement {
                 </>
               ) : (
                 <div className="rcd-fields-grid">
-                  {fields.map((f) => (
+                  {(isChildTicket
+                    ? fields.filter((f) =>
+                        /^(due_?date|due|description|desc)$/i.test(f.name),
+                      )
+                    : fields
+                  ).map((f) => (
                     <div key={f.id} className="rcd-field-item">
                       <div className="rcd-field-lbl">{f.label}</div>
                       <div className="rcd-field-val">
@@ -2159,12 +2412,19 @@ export function CustomerRecordDetail(): React.ReactElement {
                       </div>
                     </div>
                   ))}
-                  {fields.length === 0 && (
+                  {(isChildTicket
+                    ? fields.filter((f) =>
+                        /^(due_?date|due|description|desc)$/i.test(f.name),
+                      )
+                    : fields
+                  ).length === 0 && (
                     <p
                       className="rcd-empty-hint"
                       style={{ padding: "0", gridColumn: "1/-1" }}
                     >
-                      No custom fields defined.
+                      {isChildTicket
+                        ? "No details set."
+                        : "No custom fields defined."}
                     </p>
                   )}
                 </div>
@@ -2173,7 +2433,11 @@ export function CustomerRecordDetail(): React.ReactElement {
           </div>
         </div>
 
-        {/* ══ CARD 2: Activity tabs ════════════════════════ */}
+        {/* ══ Two-column area: activity (70%) + sidebar (30%) ═ */}
+      </div>
+      {/* close rcd-cards */}
+      <div className="rcd-two-col">
+        {/* Activity panel */}
         <div className="rcd-card rcd-activity-card">
           {/* Tab bar */}
           <div className="rcd-tabs">
@@ -2203,7 +2467,10 @@ export function CustomerRecordDetail(): React.ReactElement {
             <button
               type="button"
               className={`rcd-tab ${activeTab === "history" ? "rcd-tab-active" : ""}`}
-              onClick={() => setActiveTab("history")}
+              onClick={() => {
+                setActiveTab("history");
+                void loadHistory();
+              }}
             >
               <svg
                 width="13"
@@ -2220,7 +2487,7 @@ export function CustomerRecordDetail(): React.ReactElement {
                 <polyline points="12 6 12 12 16 14" />
               </svg>
               History
-              {timelineEvents.length > 0 && (
+              {historyLoaded && timelineEvents.length > 0 && (
                 <span className="rcd-tab-count">{timelineEvents.length}</span>
               )}
             </button>
@@ -2230,7 +2497,7 @@ export function CustomerRecordDetail(): React.ReactElement {
           <div className="rcd-tab-panel">
             {activeTab === "comments" ? (
               <>
-                <div className="rcd-tab-scroll">
+                <div className="rcd-tab-scroll" ref={commentsScrollRef}>
                   {topLevelComments.length === 0 ? (
                     <p className="rcd-empty-hint rcd-empty-hint-feed">
                       No comments yet. Be the first to comment.
@@ -2259,8 +2526,16 @@ export function CustomerRecordDetail(): React.ReactElement {
                 </div>
               </>
             ) : (
-              <div className="rcd-tab-scroll">
-                {timelineEvents.length === 0 ? (
+              <div className="rcd-tab-scroll" ref={historyScrollRef}>
+                {historyLoading ? (
+                  <div className="portal-loading" style={{ padding: "32px 0" }}>
+                    <div className="spinner" />
+                  </div>
+                ) : !historyLoaded ? (
+                  <p className="rcd-empty-hint rcd-empty-hint-feed">
+                    Loading history…
+                  </p>
+                ) : timelineEvents.length === 0 ? (
                   <p className="rcd-empty-hint rcd-empty-hint-feed">
                     No history yet.
                   </p>
@@ -2279,7 +2554,791 @@ export function CustomerRecordDetail(): React.ReactElement {
             )}
           </div>
         </div>
+        {/* close rcd-activity-card */}
+
+        {/* ── Right sidebar ──────────────────────────────── */}
+        <div className="rcd-sidebar">
+          {/* Child tickets — hidden for child tickets themselves */}
+          {!record.parentId && (
+            <div className="rcd-sidebar-section">
+              <div className="rcd-sidebar-hdr">
+                <span className="rcd-sidebar-hdr-title">
+                  Sub-tasks
+                  {children.length > 0 && (
+                    <span className="rcd-sidebar-count">{children.length}</span>
+                  )}
+                </span>
+                {isAdminOrAgent && !record.deletedAt && (
+                  <button
+                    type="button"
+                    className="rcd-sidebar-add"
+                    onClick={() => {
+                      setShowCreateChild(true);
+                      setNewChildTitle("");
+                      setCreateChildError(null);
+                    }}
+                  >
+                    <svg
+                      width="11"
+                      height="11"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <line x1="12" y1="5" x2="12" y2="19" />
+                      <line x1="5" y1="12" x2="19" y2="12" />
+                    </svg>
+                    Add
+                  </button>
+                )}
+              </div>
+
+              <div className="rcd-sidebar-body">
+                {childrenLoading ? (
+                  <p className="rcd-sidebar-hint" style={{ padding: "8px 0" }}>
+                    Loading…
+                  </p>
+                ) : children.length === 0 ? (
+                  <p className="rcd-sidebar-hint" style={{ padding: "8px 0" }}>
+                    No sub-tasks yet.
+                  </p>
+                ) : (
+                  <>
+                    {(() => {
+                      const closed = children.filter(
+                        (c) =>
+                          c.deletedAt !== null || c.currentState === "closed",
+                      ).length;
+                      const pct = Math.round((closed / children.length) * 100);
+                      return (
+                        <div
+                          className="rcd-subtasks-progress-wrap"
+                          title={`${closed} of ${children.length} closed`}
+                        >
+                          <div className="rcd-subtasks-progress-bar">
+                            <div
+                              className="rcd-subtasks-progress-fill"
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          <span className="rcd-subtasks-progress-label">
+                            {closed}/{children.length}
+                          </span>
+                        </div>
+                      );
+                    })()}
+                    <div className="rcd-sidebar-children">
+                      {children.map((child) => {
+                        const childTitleField = [
+                          "subject",
+                          "title",
+                          "name",
+                        ].find((k) => child.fields[k]);
+                        const childTitle = childTitleField
+                          ? String(child.fields[childTitleField])
+                          : `#${child.id.slice(0, 8)}`;
+                        const isClosed =
+                          child.deletedAt !== null ||
+                          child.currentState === "closed";
+                        const assignee = users.find(
+                          (u) => u.userId === child.assignedTo,
+                        );
+                        const childState = allStates.find(
+                          (s) => s.name === child.currentState,
+                        );
+                        const dueDateField = [
+                          "due_date",
+                          "dueDate",
+                          "due",
+                        ].find((k) => child.fields[k]);
+                        const dueDate =
+                          dueDateField &&
+                          !isNaN(
+                            new Date(
+                              child.fields[dueDateField] as string,
+                            ).getTime(),
+                          )
+                            ? new Date(child.fields[dueDateField] as string)
+                            : null;
+
+                        // Urgency: days until due (negative = overdue)
+                        const now = new Date();
+                        now.setHours(0, 0, 0, 0);
+                        const dueDaysDiff = dueDate
+                          ? Math.ceil(
+                              (dueDate.getTime() - now.getTime()) / 86400000,
+                            )
+                          : null;
+                        const isPastDue =
+                          dueDaysDiff !== null && dueDaysDiff < 0;
+                        const isDueToday = dueDaysDiff === 0;
+                        const isDueSoon =
+                          dueDaysDiff !== null && dueDaysDiff === 1;
+
+                        // Border colour: red ≤0d, amber 1d, green otherwise (no colour for closed)
+                        let urgencyBorder = "var(--border-color)";
+                        let urgencyBg = "transparent";
+                        if (!isClosed && dueDaysDiff !== null) {
+                          if (isPastDue || isDueToday) {
+                            urgencyBorder = "#ef4444";
+                            urgencyBg = "rgba(239,68,68,0.04)";
+                          } else if (isDueSoon) {
+                            urgencyBorder = "#f59e0b";
+                            urgencyBg = "rgba(245,158,11,0.04)";
+                          } else {
+                            urgencyBorder = "rgba(34,197,94,0.5)";
+                            urgencyBg = "rgba(34,197,94,0.03)";
+                          }
+                        }
+
+                        const dueDateStr = dueDate
+                          ? dueDate.toLocaleDateString(undefined, {
+                              month: "short",
+                              day: "numeric",
+                            })
+                          : null;
+                        const dueDateLabel = (() => {
+                          if (!dueDateStr || isClosed) return dueDateStr;
+                          if (isPastDue) return `Overdue · ${dueDateStr}`;
+                          if (isDueToday) return `Due today`;
+                          if (isDueSoon) return `Due tomorrow`;
+                          return dueDateStr;
+                        })();
+
+                        return (
+                          <Link
+                            key={child.id}
+                            to={`/records/${typeSlug ?? ""}/${child.id}`}
+                            className={`rcd-child-card ${isClosed ? "rcd-child-card-closed" : ""}`}
+                            style={{
+                              borderColor: urgencyBorder,
+                              background: urgencyBg,
+                            }}
+                          >
+                            {/* Title + ID */}
+                            <div className="rcd-child-card-title-row">
+                              <span className="rcd-child-card-title">
+                                {childTitle}
+                              </span>
+                              <span className="rcd-child-id">
+                                #{child.id.slice(0, 6)}
+                              </span>
+                            </div>
+
+                            {/* State + due date */}
+                            <div className="rcd-child-card-meta">
+                              {childState && (
+                                <span
+                                  className="rcd-child-state"
+                                  style={
+                                    childState.color
+                                      ? {
+                                          color: childState.color,
+                                          background: `${childState.color}18`,
+                                          borderColor: `${childState.color}40`,
+                                        }
+                                      : undefined
+                                  }
+                                >
+                                  <span
+                                    className="rcd-state-dot"
+                                    style={
+                                      childState.color
+                                        ? { background: childState.color }
+                                        : undefined
+                                    }
+                                  />
+                                  {childState.label}
+                                </span>
+                              )}
+                              {dueDateLabel && (
+                                <span
+                                  className={`rcd-child-due${isPastDue || isDueToday ? " rcd-child-due-overdue" : isDueSoon ? " rcd-child-due-warn" : ""}`}
+                                >
+                                  {dueDateLabel}
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Assignee */}
+                            <div className="rcd-child-card-assignee">
+                              {assignee ? (
+                                <>
+                                  <span className="rcd-child-card-avatar">
+                                    {(assignee.displayName ?? assignee.email)
+                                      .slice(0, 1)
+                                      .toUpperCase()}
+                                  </span>
+                                  <span className="rcd-child-card-assignee-name">
+                                    {assignee.displayName ?? assignee.email}
+                                  </span>
+                                </>
+                              ) : (
+                                <span className="rcd-child-card-assignee-name rcd-child-unassigned">
+                                  Unassigned
+                                </span>
+                              )}
+                            </div>
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
+              {/* close rcd-sidebar-body */}
+            </div>
+          )}
+          {/* end depth-limit guard */}
+
+          {/* People with access — always visible */}
+          <div className="rcd-sidebar-section">
+            <div className="rcd-sidebar-hdr">
+              <span className="rcd-sidebar-hdr-title">
+                Access
+                {accessUsers.length > 0 && (
+                  <span className="rcd-sidebar-count">
+                    {accessUsers.length}
+                  </span>
+                )}
+              </span>
+            </div>
+            <div className="rcd-sidebar-body">
+              {accessUsers.length === 0 ? (
+                <p className="rcd-sidebar-hint" style={{ padding: "8px 0" }}>
+                  No one has access yet.
+                </p>
+              ) : (
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "6px",
+                  }}
+                >
+                  {accessUsers.map((u) => {
+                    const name = u.displayName ?? u.email;
+                    const initials = name
+                      .split(" ")
+                      .slice(0, 2)
+                      .map((p) => p[0] ?? "")
+                      .join("")
+                      .toUpperCase();
+                    const isCreator = u.tag === "creator";
+                    const isAssigned = u.tag === "assigned";
+
+                    // Badge text + colors
+                    let badgeLabel = "Access";
+                    let badgeBg = "#f3f4f6";
+                    let badgeColor = "var(--text-muted, #6b7280)";
+                    let badgeBorder = "#e5e7eb";
+                    if (isCreator) {
+                      badgeLabel = "Creator";
+                      badgeBg = "#ede9fe";
+                      badgeColor = "#7c3aed";
+                      badgeBorder = "#c4b5fd";
+                    } else if (isAssigned) {
+                      badgeLabel = "Assigned";
+                      badgeBg = "var(--accent-color, #6366f1)18";
+                      badgeColor = "var(--accent-color, #6366f1)";
+                      badgeBorder = "var(--accent-color, #6366f1)40";
+                    } else if (u.level === "read_comment") {
+                      badgeLabel = "Comment";
+                      badgeBg = "#eff6ff";
+                      badgeColor = "#2563eb";
+                      badgeBorder = "#bfdbfe";
+                    } else if (u.level === "read_only") {
+                      badgeLabel = "Read Only";
+                      badgeBg = "#f9fafb";
+                      badgeColor = "#6b7280";
+                      badgeBorder = "#d1d5db";
+                    }
+
+                    return (
+                      <div
+                        key={u.userId}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "10px",
+                          padding: "8px 10px",
+                          background: "var(--bg-secondary, #f9fafb)",
+                          border: "1px solid var(--border-color, #e5e7eb)",
+                          borderRadius: "8px",
+                        }}
+                      >
+                        <span
+                          style={{
+                            flexShrink: 0,
+                            width: "32px",
+                            height: "32px",
+                            borderRadius: "50%",
+                            background: isCreator
+                              ? "#7c3aed"
+                              : "var(--accent-color, #6366f1)",
+                            color: "#fff",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontSize: "12px",
+                            fontWeight: 700,
+                          }}
+                        >
+                          {initials}
+                        </span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div
+                            style={{
+                              fontSize: "13px",
+                              fontWeight: 600,
+                              color: "var(--text-primary, #111827)",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {name}
+                          </div>
+                          {u.displayName && (
+                            <div
+                              style={{
+                                fontSize: "11px",
+                                color: "var(--text-muted, #6b7280)",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {u.email}
+                            </div>
+                          )}
+                        </div>
+                        <span
+                          style={{
+                            flexShrink: 0,
+                            fontSize: "10px",
+                            fontWeight: 600,
+                            padding: "2px 6px",
+                            borderRadius: "4px",
+                            background: badgeBg,
+                            color: badgeColor,
+                            border: `1px solid ${badgeBorder}`,
+                            textTransform: "uppercase",
+                            letterSpacing: "0.04em",
+                          }}
+                        >
+                          {badgeLabel}
+                        </span>
+                        {/* Edit access button — hidden for creator */}
+                        {isAdminOrAgent && !record.deletedAt && !isCreator && (
+                          <button
+                            type="button"
+                            title="Change access"
+                            onClick={() => {
+                              setAccessChangeModal({
+                                userId: u.userId,
+                                displayName: name,
+                                currentLevel: u.level,
+                                isAssigned,
+                                isCreator,
+                              });
+                              setAccessChangeSelection(u.level);
+                            }}
+                            style={{
+                              flexShrink: 0,
+                              background: "none",
+                              border: "1px solid transparent",
+                              borderRadius: "5px",
+                              cursor: "pointer",
+                              padding: "3px 5px",
+                              color: "var(--text-muted, #9ca3af)",
+                              fontSize: "14px",
+                              lineHeight: 1,
+                            }}
+                            onMouseEnter={(e) => {
+                              (
+                                e.currentTarget as HTMLButtonElement
+                              ).style.color = "#ef4444";
+                              (
+                                e.currentTarget as HTMLButtonElement
+                              ).style.borderColor = "#fca5a5";
+                            }}
+                            onMouseLeave={(e) => {
+                              (
+                                e.currentTarget as HTMLButtonElement
+                              ).style.color = "var(--text-muted, #9ca3af)";
+                              (
+                                e.currentTarget as HTMLButtonElement
+                              ).style.borderColor = "transparent";
+                            }}
+                          >
+                            <svg
+                              width="12"
+                              height="12"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2.5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              aria-hidden="true"
+                            >
+                              <line x1="18" y1="6" x2="6" y2="18" />
+                              <line x1="6" y1="6" x2="18" y2="18" />
+                            </svg>
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            {/* close rcd-sidebar-body */}
+          </div>
+        </div>
+        {/* close rcd-sidebar */}
       </div>
+      {/* close rcd-two-col */}
+
+      {/* ── Access change modal (change level / remove) ──── */}
+      {accessChangeModal && (
+        <div
+          className="modal-overlay"
+          onClick={() => setAccessChangeModal(null)}
+        >
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">
+                Change access — {accessChangeModal.displayName}
+              </h3>
+              <button
+                className="modal-close"
+                onClick={() => setAccessChangeModal(null)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "8px",
+                  marginBottom: "12px",
+                }}
+              >
+                {(["read_only", "read_comment"] as const).map((level) => {
+                  const label = level === "read_only" ? "Read Only" : "Comment";
+                  const desc =
+                    level === "read_only"
+                      ? "Can view this ticket"
+                      : "Can view and post comments";
+                  const selected = accessChangeSelection === level;
+                  return (
+                    <label
+                      key={level}
+                      style={{
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: "10px",
+                        padding: "10px 12px",
+                        border: `1.5px solid ${selected ? "#6366f1" : "rgba(255,255,255,0.12)"}`,
+                        borderRadius: "8px",
+                        cursor: "pointer",
+                        background: selected
+                          ? "rgba(99,102,241,0.15)"
+                          : "rgba(255,255,255,0.04)",
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="accessLevel"
+                        value={level}
+                        checked={selected}
+                        onChange={() => setAccessChangeSelection(level)}
+                        style={{ marginTop: "2px", accentColor: "#6366f1" }}
+                      />
+                      <span>
+                        <span
+                          style={{
+                            fontSize: "13px",
+                            fontWeight: 600,
+                            display: "block",
+                            color: "var(--text-primary, #f1f5f9)",
+                          }}
+                        >
+                          {label}
+                        </span>
+                        <span
+                          style={{
+                            fontSize: "12px",
+                            color: "var(--text-muted, #94a3b8)",
+                          }}
+                        >
+                          {desc}
+                        </span>
+                      </span>
+                    </label>
+                  );
+                })}
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: "10px",
+                    padding: "10px 12px",
+                    border: `1.5px solid ${accessChangeSelection === "remove" ? "#ef4444" : "rgba(255,255,255,0.12)"}`,
+                    borderRadius: "8px",
+                    cursor: "pointer",
+                    background:
+                      accessChangeSelection === "remove"
+                        ? "rgba(239,68,68,0.12)"
+                        : "rgba(255,255,255,0.04)",
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="accessLevel"
+                    value="remove"
+                    checked={accessChangeSelection === "remove"}
+                    onChange={() => setAccessChangeSelection("remove")}
+                    style={{ marginTop: "2px", accentColor: "#ef4444" }}
+                  />
+                  <span>
+                    <span
+                      style={{
+                        fontSize: "13px",
+                        fontWeight: 600,
+                        display: "block",
+                        color:
+                          accessChangeSelection === "remove"
+                            ? "#ef4444"
+                            : "var(--text-primary, #f1f5f9)",
+                      }}
+                    >
+                      Remove access
+                    </span>
+                    <span
+                      style={{
+                        fontSize: "12px",
+                        color: "var(--text-muted, #94a3b8)",
+                      }}
+                    >
+                      {accessChangeModal.isAssigned
+                        ? "Will also unassign this user from the ticket"
+                        : "Remove all access to this ticket"}
+                    </span>
+                  </span>
+                </label>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button
+                className="btn-secondary"
+                onClick={() => setAccessChangeModal(null)}
+                disabled={accessChangeSaving}
+              >
+                Cancel
+              </button>
+              <button
+                style={{
+                  background:
+                    accessChangeSelection === "remove"
+                      ? "#ef4444"
+                      : "var(--accent-color, #6366f1)",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: "6px",
+                  padding: "7px 16px",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  cursor: accessChangeSaving ? "not-allowed" : "pointer",
+                  opacity: accessChangeSaving ? 0.7 : 1,
+                }}
+                disabled={accessChangeSaving}
+                onClick={() => void handleAccessChange()}
+              >
+                {accessChangeSaving
+                  ? "Saving…"
+                  : accessChangeSelection === "remove"
+                    ? "Remove access"
+                    : "Save changes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Mention-grant confirmation modal ─────────────── */}
+      {pendingMentionGrant && (
+        <div
+          className="modal-overlay"
+          onClick={() => setPendingMentionGrant(null)}
+        >
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">Grant ticket access</h3>
+              <button
+                className="modal-close"
+                onClick={() => setPendingMentionGrant(null)}
+              >
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              {/* Yellow warning banner */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: "10px",
+                  padding: "10px 12px",
+                  background: "#fffbeb",
+                  border: "1px solid #fde68a",
+                  borderRadius: "8px",
+                  marginBottom: "14px",
+                }}
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="#d97706"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={{ flexShrink: 0, marginTop: "1px" }}
+                  aria-hidden="true"
+                >
+                  <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                  <line x1="12" y1="9" x2="12" y2="13" />
+                  <line x1="12" y1="17" x2="12.01" y2="17" />
+                </svg>
+                <div style={{ fontSize: "13px", color: "#92400e" }}>
+                  <strong>
+                    {pendingMentionGrant.newUsers
+                      .map((u) => u.displayName ?? u.email)
+                      .join(", ")}
+                  </strong>{" "}
+                  {pendingMentionGrant.newUsers.length === 1
+                    ? "doesn't"
+                    : "don't"}{" "}
+                  have access to this ticket yet. Choose what they can do before
+                  posting.
+                </div>
+              </div>
+              {/* Level picker */}
+              <div
+                style={{ display: "flex", flexDirection: "column", gap: "8px" }}
+              >
+                {(
+                  [
+                    ["read_only", "Read Only", "Can view this ticket"],
+                    ["read_comment", "Comment", "Can view and post comments"],
+                  ] as const
+                ).map(([level, label, desc]) => {
+                  const selected = pendingMentionGrant.selectedLevel === level;
+                  return (
+                    <label
+                      key={level}
+                      style={{
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: "10px",
+                        padding: "10px 12px",
+                        border: `1.5px solid ${selected ? "#6366f1" : "rgba(255,255,255,0.12)"}`,
+                        borderRadius: "8px",
+                        cursor: "pointer",
+                        background: selected
+                          ? "rgba(99,102,241,0.15)"
+                          : "rgba(255,255,255,0.04)",
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="mentionLevel"
+                        value={level}
+                        checked={selected}
+                        onChange={() =>
+                          setPendingMentionGrant((p) =>
+                            p ? { ...p, selectedLevel: level } : p,
+                          )
+                        }
+                        style={{ marginTop: "2px", accentColor: "#6366f1" }}
+                      />
+                      <span>
+                        <span
+                          style={{
+                            fontSize: "13px",
+                            fontWeight: 600,
+                            display: "block",
+                            color: "var(--text-primary, #f1f5f9)",
+                          }}
+                        >
+                          {label}
+                          {level === "read_comment" && (
+                            <span
+                              style={{
+                                fontWeight: 400,
+                                color: "var(--text-muted, #94a3b8)",
+                                marginLeft: "6px",
+                                fontSize: "12px",
+                              }}
+                            >
+                              recommended
+                            </span>
+                          )}
+                        </span>
+                        <span
+                          style={{
+                            fontSize: "12px",
+                            color: "var(--text-muted, #94a3b8)",
+                          }}
+                        >
+                          {desc}
+                        </span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button
+                className="btn-secondary"
+                onClick={() => setPendingMentionGrant(null)}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn-primary"
+                onClick={() => {
+                  const { text, mentions, replyTo, selectedLevel } =
+                    pendingMentionGrant;
+                  setPendingMentionGrant(null);
+                  const existingIds = new Set(accessList.map((e) => e.userId));
+                  const mentionEntries = mentions.map((uid) => ({
+                    userId: uid,
+                    level: existingIds.has(uid)
+                      ? ((accessList.find((e) => e.userId === uid)?.level ??
+                          "read_comment") as AccessLevel)
+                      : selectedLevel,
+                  }));
+                  void doSubmitComment(text, mentionEntries, replyTo);
+                }}
+              >
+                Grant &amp; post
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Archive confirmation modal ───────────────────── */}
       {archiveConfirm && (

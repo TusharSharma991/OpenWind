@@ -428,10 +428,11 @@ export function MultiUserPicker({
   const dropdownRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Sync pending when dropdown opens (picks up external value changes)
+  // Keep pending in sync with external value whenever the dropdown is closed,
+  // and re-sync when the dropdown opens to capture any changes made externally.
   useEffect(() => {
-    if (open) setPending(value);
-  }, [open, value]);
+    setPending(value);
+  }, [value]);
 
   const selected = users.filter((u) => pending.includes(u.userId));
 

@@ -623,7 +623,9 @@ export function WorkflowRecords(): React.ReactElement {
 
         const [fieldsRes, recRes, usersRes] = await Promise.all([
           fetchWithAuth(`${API_URL}/entity-types/${wf.entityTypeId}/fields`),
-          fetchWithAuth(`${API_URL}/entities?entityTypeId=${wf.entityTypeId}`),
+          fetchWithAuth(
+            `${API_URL}/entities?entityTypeId=${wf.entityTypeId}&rootOnly=true`,
+          ),
           fetchWithAuth(`${API_URL}/users`).catch(() => ({ data: [] })),
         ]);
         setFields(

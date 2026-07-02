@@ -1,5 +1,5 @@
 import { requireAuth } from "@platform/auth";
-import { db, withTenantContext } from "@platform/db";
+import { withTenantContext } from "@platform/db";
 import {
   getEntity,
   getParentId,
@@ -15,11 +15,15 @@ export const getEntityHandler = factory.createHandlers(
     const { tenantId } = c.get("auth");
 
     try {
-      const [instance, parentId, childCount] = await Promise.all([
-        withTenantContext(tenantId, (tx) => getEntity(tx, tenantId, id)),
-        getParentId(db, tenantId, id),
-        countActiveChildren(db, tenantId, id),
-      ]);
+      const [instance, parentId, childCount] = await withTenantContext(
+        tenantId,
+        (tx) =>
+          Promise.all([
+            getEntity(tx, tenantId, id),
+            getParentId(tx, tenantId, id),
+            countActiveChildren(tx, tenantId, id),
+          ]),
+      );
       return c.json({ data: { ...instance, parentId, childCount } });
     } catch (err) {
       return handleEntityError(c, err);

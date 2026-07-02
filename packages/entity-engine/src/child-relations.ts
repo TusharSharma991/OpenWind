@@ -1,6 +1,11 @@
-import { eq, and, isNull, sql, count } from "drizzle-orm";
+import { eq, and, isNull, sql, count, inArray } from "drizzle-orm";
 import type { DbOrTx } from "@platform/db";
-import { entityRelations, entityInstances, workflows } from "@platform/db";
+import {
+  entityRelations,
+  entityInstances,
+  workflows,
+  workflowEvents,
+} from "@platform/db";
 import {
   encodeCursor,
   decodeCursor,
@@ -223,13 +228,21 @@ export async function createChildRelation(
     });
   }
 
-  // Insert child instance (no workflow_id; child_status=open in fields JSONB)
+  // Insert child instance — inherit parent's workflowId so comments/history work
   const [childInstance] = await db
     .insert(entityInstances)
     .values({
       tenantId,
       entityTypeId,
-      fields: { ...childFields, child_status: "open" },
+      workflowId: parent.workflowId,
+      fields: {
+        ...childFields,
+        child_status: "open",
+        // Seed access list with assignee (if any) — stored as {userId: {level, tag}}
+        __accessUsers: assignedTo
+          ? { [assignedTo]: { level: "read_write", tag: "assigned" } }
+          : {},
+      },
       assignedTo: assignedTo ?? null,
       createdBy: createdBy ?? null,
       currentState: "open",
@@ -237,6 +250,19 @@ export async function createChildRelation(
     .returning();
 
   if (!childInstance) throw new EntityError("ENTITY_NOT_FOUND", {});
+
+  // Emit create event so history and comments work on the child
+  await db.insert(workflowEvents).values({
+    tenantId,
+    instanceId: childInstance.id,
+    workflowId: parent.workflowId,
+    fromState: null,
+    toState: "open",
+    triggeredBy: "user",
+    actorId: createdBy ?? "system",
+    comment: null,
+    metadata: { type: "create", actorName: createdBy ?? null },
+  });
 
   // Insert both relation rows atomically
   const relationRows = await db
@@ -580,7 +606,7 @@ export async function listChildInstances(
     .where(
       and(
         eq(entityInstances.tenantId, tenantId),
-        sql`${entityInstances.id} = ANY(${childIds})`,
+        inArray(entityInstances.id, childIds),
         isNull(entityInstances.deletedAt),
       ),
     );

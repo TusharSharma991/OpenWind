@@ -33,6 +33,8 @@ function rowToWorkflow(r: typeof workflows.$inferSelect): WorkflowDefinition {
     initialState: r.initialState,
     isActive: r.isActive,
     assignedTo: (r.assignedTo as string[] | null) ?? [],
+    maxChildDepth: r.maxChildDepth,
+    maxChildrenPerParent: r.maxChildrenPerParent,
     createdAt: r.createdAt,
   };
 }
@@ -221,6 +223,20 @@ export async function updateWorkflow(
   const updates: Partial<typeof workflows.$inferInsert> = {};
   if (input.isActive !== undefined) updates.isActive = input.isActive;
   if (input.assignedTo !== undefined) updates.assignedTo = input.assignedTo;
+  if (input.maxChildDepth !== undefined)
+    updates.maxChildDepth = input.maxChildDepth ?? 1;
+  if (input.maxChildrenPerParent !== undefined)
+    updates.maxChildrenPerParent = input.maxChildrenPerParent ?? 10;
+
+  if (Object.keys(updates).length === 0) {
+    const [current] = await db
+      .select()
+      .from(workflows)
+      .where(eq(workflows.id, workflowId))
+      .limit(1);
+    if (!current) throw new WorkflowError("WORKFLOW_NOT_FOUND", { workflowId });
+    return rowToWorkflow(current);
+  }
 
   const [updated] = await db
     .update(workflows)

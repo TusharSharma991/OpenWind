@@ -104,6 +104,7 @@ export type ListEntitiesInput = {
   limit?: number | undefined;
   cursor?: string | undefined;
   includeDeleted?: boolean | undefined;
+  rootOnly?: boolean | undefined;
 };
 
 export type SearchEntitiesInput = {

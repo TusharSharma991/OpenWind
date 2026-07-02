@@ -1,7 +1,7 @@
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { requireAuth, requireRole } from "@platform/auth";
-import { db } from "@platform/db";
+import { withTenantContext } from "@platform/db";
 import { createChildRelation } from "@platform/entity-engine";
 import { factory } from "./factory.js";
 import { handleEntityError } from "../../lib/handle-entity-error.js";
@@ -22,13 +22,15 @@ export const createChildHandler = factory.createHandlers(
     const { tenantId, userId } = c.get("auth");
 
     try {
-      const result = await createChildRelation(db, tenantId, {
-        parentId,
-        entityTypeId: input.entityTypeId,
-        childFields: input.fields,
-        assignedTo: input.assignedTo,
-        createdBy: userId,
-      });
+      const result = await withTenantContext(tenantId, (tx) =>
+        createChildRelation(tx, tenantId, {
+          parentId,
+          entityTypeId: input.entityTypeId,
+          childFields: input.fields,
+          assignedTo: input.assignedTo,
+          createdBy: userId,
+        }),
+      );
       return c.json({ data: result }, 201);
     } catch (err) {
       return handleEntityError(c, err);

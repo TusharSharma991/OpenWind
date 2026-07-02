@@ -2863,6 +2863,163 @@ export function WorkflowDetail(): React.ReactElement {
                   Assigned users have full admin access over this workflow —
                   they can manage states, transitions, and fields.
                 </p>
+
+                {/* Selected admin cards */}
+                {assignedTo.length > 0 && (
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "8px",
+                      marginBottom: "12px",
+                    }}
+                  >
+                    {orgUsers
+                      .filter((u) => assignedTo.includes(u.userId))
+                      .map((u) => {
+                        const initials = u.displayName
+                          .split(" ")
+                          .slice(0, 2)
+                          .map((p) => p[0] ?? "")
+                          .join("")
+                          .toUpperCase();
+                        return (
+                          <div
+                            key={u.userId}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "12px",
+                              padding: "10px 12px",
+                              background: "var(--bg-tertiary)",
+                              border: "1px solid var(--border-color)",
+                              borderRadius: "var(--radius-md)",
+                            }}
+                          >
+                            <span
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                width: "36px",
+                                height: "36px",
+                                borderRadius: "50%",
+                                background: "var(--accent-primary)",
+                                color: "#fff",
+                                fontSize: "13px",
+                                fontWeight: 700,
+                                flexShrink: 0,
+                              }}
+                            >
+                              {initials}
+                            </span>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div
+                                style={{
+                                  fontSize: "13px",
+                                  fontWeight: 600,
+                                  color: "var(--text-primary)",
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {u.displayName}
+                              </div>
+                              <div
+                                style={{
+                                  fontSize: "11px",
+                                  color: "var(--text-muted)",
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap",
+                                  marginTop: "1px",
+                                }}
+                              >
+                                {u.email || u.loginName}
+                              </div>
+                            </div>
+                            <span
+                              style={{
+                                fontSize: "10px",
+                                fontWeight: 700,
+                                color: "var(--accent-primary)",
+                                background: "hsla(250,84%,60%,.1)",
+                                border: "1px solid hsla(250,84%,60%,.2)",
+                                borderRadius: "20px",
+                                padding: "2px 8px",
+                                whiteSpace: "nowrap",
+                                flexShrink: 0,
+                              }}
+                            >
+                              Admin
+                            </span>
+                            <button
+                              type="button"
+                              disabled={savingAssign}
+                              onClick={() =>
+                                void handleAssign(
+                                  assignedTo.filter((id) => id !== u.userId),
+                                )
+                              }
+                              title="Remove admin"
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                width: "26px",
+                                height: "26px",
+                                borderRadius: "6px",
+                                background: "none",
+                                border: "1px solid var(--border-color)",
+                                cursor: savingAssign
+                                  ? "not-allowed"
+                                  : "pointer",
+                                color: "var(--text-muted)",
+                                flexShrink: 0,
+                                opacity: savingAssign ? 0.5 : 1,
+                                transition: "background 0.12s, color 0.12s",
+                              }}
+                              onMouseEnter={(e) => {
+                                (
+                                  e.currentTarget as HTMLButtonElement
+                                ).style.background = "hsla(0,84%,60%,.08)";
+                                (
+                                  e.currentTarget as HTMLButtonElement
+                                ).style.color = "var(--danger)";
+                                (
+                                  e.currentTarget as HTMLButtonElement
+                                ).style.borderColor = "var(--danger)";
+                              }}
+                              onMouseLeave={(e) => {
+                                (
+                                  e.currentTarget as HTMLButtonElement
+                                ).style.background = "none";
+                                (
+                                  e.currentTarget as HTMLButtonElement
+                                ).style.color = "var(--text-muted)";
+                                (
+                                  e.currentTarget as HTMLButtonElement
+                                ).style.borderColor = "var(--border-color)";
+                              }}
+                            >
+                              <svg
+                                width="12"
+                                height="12"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2.5"
+                              >
+                                <path d="M18 6L6 18M6 6l12 12" />
+                              </svg>
+                            </button>
+                          </div>
+                        );
+                      })}
+                  </div>
+                )}
+
                 <MultiUserPicker
                   users={orgUsers}
                   value={assignedTo}

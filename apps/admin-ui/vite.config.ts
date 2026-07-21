@@ -3,14 +3,15 @@ import react from "@vitejs/plugin-react";
 import type { Plugin } from "vite";
 
 function envJsPlugin(vars: Record<string, string | undefined>): Plugin {
-  // ZITADEL_OIDC_CLIENT_SECRET is intentionally excluded — it must never reach the browser.
-  // The SPA uses PKCE; the client secret is only needed for confidential server-side clients.
+  // AuthNexus's SPA client is public/PKCE — there is no client secret to exclude here.
   const js = `window.__CONFIG__ = ${JSON.stringify({
-    ZITADEL_ISSUER: vars["ZITADEL_ISSUER"] ?? vars["VITE_ZITADEL_ISSUER"] ?? "",
-    ZITADEL_OIDC_CLIENT_ID:
-      vars["ZITADEL_OIDC_CLIENT_ID"] ??
-      vars["VITE_ZITADEL_OIDC_CLIENT_ID"] ??
-      "",
+    AUTHNEXUS_AUTHORITY:
+      vars["AUTHNEXUS_AUTHORITY"] ?? vars["VITE_AUTH_AUTHORITY"] ?? "",
+    AUTHNEXUS_CLIENT_ID:
+      vars["AUTHNEXUS_CLIENT_ID"] ?? vars["VITE_CLIENT_ID"] ?? "",
+    AUTHNEXUS_ORG_ID: vars["AUTHNEXUS_ORG_ID"] ?? vars["VITE_ORG_ID"] ?? "",
+    AUTHNEXUS_PROJECT_ID:
+      vars["AUTHNEXUS_PROJECT_ID"] ?? vars["VITE_PROJECT_ID"] ?? "",
   })};`;
   return {
     name: "serve-env-js",

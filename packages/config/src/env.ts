@@ -21,16 +21,9 @@ if (envLocalPath) {
   loadDotenv({ path: envLocalPath, override: false });
 }
 
-// Derive individual URL vars from ZITADEL_URL / APP_URL if not already set.
-// This lets .env.local use just two base vars and have everything flow from them.
+// Derive CORS_ORIGIN from APP_URL if not already set.
 // Individual vars still take priority when set explicitly (??= never overwrites).
 const _raw = process.env as Record<string, string | undefined>;
-if (_raw["ZITADEL_URL"]) {
-  const z = _raw["ZITADEL_URL"];
-  _raw["ZITADEL_ISSUER"] ??= z;
-  _raw["ZITADEL_INTROSPECTION_URL"] ??= `${z}/oauth/v2/introspect`;
-  _raw["ZITADEL_JWKS_URL"] ??= `${z}/oauth/v2/keys`;
-}
 if (_raw["APP_URL"]) {
   _raw["CORS_ORIGIN"] ??= _raw["APP_URL"];
 }
@@ -40,45 +33,32 @@ const EnvSchema = z
     NODE_ENV: z
       .enum(["development", "test", "production"])
       .default("development"),
-    // ── Base URL vars (new — set these in .env.local instead of the derived vars below) ──
-    // ZITADEL_URL: single source for all Zitadel endpoints (issuer, JWKS, introspection).
-    //   Local dev default: http://localhost:10405 (or http://zitadel:8080 inside Docker)
-    //   Production:        https://owzitadel.yourcompany.com
-    ZITADEL_URL: z.string().url().optional(),
     // APP_URL: the URL the frontend is served from. Drives CORS_ORIGIN.
-    //   Local dev default: http://localhost:3001
-    //   Production:        https://openwind.yourcompany.com
+    //   Local dev default: http://localhost:10406
+    //   Production:        https://openwind-nexus.rokkalabs.com
     APP_URL: z.string().url().optional(),
     DATABASE_URL: z.string().url(),
     DATABASE_POOL_MIN: z.coerce.number().int().min(1).default(2),
     DATABASE_POOL_MAX: z.coerce.number().int().min(1).default(10),
     REDIS_URL: z.string().url(),
-    ZITADEL_ISSUER: z.string().url(),
-    // Override the JWKS fetch URL when running inside Docker (issuer claim still
-    // matches localhost:8080 in the JWT, but we fetch keys via container hostname).
-    ZITADEL_JWKS_URL: z.string().url().optional(),
+    // AuthNexus (external OIDC provider) — no discovery document, so every
+    // endpoint is set explicitly rather than derived from one issuer URL.
+    AUTHNEXUS_ISSUER: z.string().url(),
+    AUTHNEXUS_JWKS_URL: z.string().url(),
     // Required — used by JWKS middleware to validate the JWT aud claim.
+    // AuthNexus puts the OIDC client id in aud (confirmed against a real
+    // token), not a Zitadel-style project urn — despite the project-scoped
+    // urn:zitadel:iam:... scope name requested at login.
     // .min(1): an empty string would otherwise pass z.string() and silently
     // disable audience validation at runtime (jwks.ts) instead of failing
     // closed here at boot.
-    // ZITADEL_PROJECT_ID may fall back to this value in zitadel-management.ts.
-    ZITADEL_AUDIENCE: z.string().min(1),
-    // Dev fallback: used as tenantId when urn:zitadel:iam:user:resourceowner:id is absent (instance admin login).
+    AUTHNEXUS_AUDIENCE: z.string().min(1),
+    // AuthNexus project id — used to select which nexus_projects[] grant's
+    // roles apply to this app (a user may belong to multiple projects).
+    AUTHNEXUS_PROJECT_ID: z.string().min(1),
+    // Dev fallback: used as tenantId when the org claim is absent (instance admin login).
     // Must never be set in production — it bypasses tenant isolation for instance-admin logins.
     DEV_TENANT_ID: z.string().optional(),
-    // Service account key JSON (raw JSON string from Zitadel console).
-    // Used to call the Zitadel Management API for live role/user queries.
-    // Store the full JSON string. Never commit this value.
-    ZITADEL_SERVICE_ACCOUNT_KEY: z.string().optional(),
-    // Base64-encoded service account key — written by bootstrap.
-    // Fallback when ZITADEL_SERVICE_ACCOUNT_KEY is absent.
-    ZITADEL_KEY_JSON: z.string().optional(),
-    // Project ID — defaults to ZITADEL_AUDIENCE which is the project ID in this setup.
-    ZITADEL_PROJECT_ID: z.string().optional(),
-    // Token introspection — used for sensitive ops that require active-token verification
-    ZITADEL_INTROSPECTION_URL: z.string().url(),
-    ZITADEL_INTROSPECTION_CLIENT_ID: z.string(),
-    ZITADEL_INTROSPECTION_CLIENT_SECRET: z.string(),
     // Required in production — the exact origin the admin-ui is served from.
     // In development/test the API accepts all http://localhost:* origins.
     CORS_ORIGIN: z.string().url().optional(),

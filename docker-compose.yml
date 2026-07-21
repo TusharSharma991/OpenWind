@@ -1,22 +1,23 @@
-name: openwind
+name: openwind-authnexus
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Local development environment.
+# Nexus-OpenWind: closed-source AuthNexus-integrated fork of OpenWind.
+# Isolated container/volume/port namespace so it can run side by side with the
+# upstream OSS OpenWind stack (Zitadel-based) on the same host.
 #
 # Core services (always started with docker compose up -d):
 #   postgres   — Primary database (RLS-enabled, multi-tenant)
 #   pgbouncer  — Connection pooler (transaction mode, required for RLS)
 #   redis      — Queue backend (BullMQ) + application cache
-#   zitadel    — Identity provider (OIDC/OAuth2/SAML)
-#   api        — Hono API server (port 3000)
-#   admin-ui   — React app with Vite HMR (port 3001) — admin + portal in one app, RBAC-controlled
+#   api        — Hono API server (port 3000, internal) — verifies AuthNexus JWTs via JWKS
+#   admin-ui   — React app with Vite HMR (port 10406) — admin + portal in one app, RBAC-controlled
 #
-# All users (admin, agent, customer) log in at http://localhost:3001.
+# Auth is AuthNexus (external OIDC provider) — no local identity-provider container.
+# All users (admin, agent, customer) log in at http://localhost:10406.
 # The app reads the role from the JWT and renders the appropriate view.
 #
 # Commented out (not integrated yet — uncomment when needed):
 #   openbao    — Secrets manager (enable when packages/auth uses Transit encryption)
-#   minio      — S3-compatible object storage (enable when packages/files is wired in)
 #
 # Optional services (require explicit profile):
 #   --profile notifications  → novu-api, novu-worker, novu-web, novu-mongo
@@ -28,14 +29,14 @@ name: openwind
 #   Wipe all data:   docker compose down -v
 #   Logs:            docker compose logs -f [service]
 #
-# App connects to:   postgres://app_user:...@localhost:6432/platform  (PgBouncer)
+# App connects to:   postgres://app_user:...@localhost:10409/platform  (PgBouncer)
 # OpenBao UI/API:    http://localhost:8200  (token: dev-root-token)
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
   # ── PostgreSQL ─────────────────────────────────────────────────────────────
   postgres:
-    container_name: ow-database
+    container_name: aw-database
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
@@ -58,7 +59,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
     ports:
-      - "${POSTGRES_HOST_PORT:-5432}:5432" # direct postgres for pnpm db:migrate from host
+      - "${POSTGRES_HOST_PORT:-10408}:5432" # direct postgres for pnpm db:migrate from host
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U platform -d platform"]
       interval: 5s
@@ -70,7 +71,7 @@ services:
   # Transaction mode is required so SET LOCAL app.tenant_id scoping works
   # correctly — session mode would let the setting leak across pooled connections.
   pgbouncer:
-    container_name: ow-pgbouncer
+    container_name: aw-pgbouncer
     image: edoburu/pgbouncer:latest
     restart: unless-stopped
     environment:
@@ -85,7 +86,7 @@ services:
       AUTH_TYPE: scram-sha-256
       SERVER_TLS_SSLMODE: disable
     ports:
-      - "6432:5432" # App connects here, not 5432
+      - "10409:5432" # App connects here, not 5432
     depends_on:
       postgres:
         condition: service_healthy
@@ -136,7 +137,7 @@ services:
 
   # ── Redis ──────────────────────────────────────────────────────────────────
   redis:
-    container_name: ow-cache
+    container_name: aw-cache
     image: redis:7-alpine
     restart: unless-stopped
     command: >
@@ -155,17 +156,17 @@ services:
 
   # ── MinIO (local S3) ──────────────────────────────────────────────────────
   minio:
-    container_name: ow-storage
+    container_name: aw-storage
     image: minio/minio:latest
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: platform_access_key
       MINIO_ROOT_PASSWORD: platform_secret_key_dev_only
-      MINIO_BROWSER_REDIRECT_URL: http://localhost:9001
+      MINIO_BROWSER_REDIRECT_URL: http://localhost:10411
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "10410:9000"
+      - "10411:9001"
     volumes:
       - minio_data:/data
     healthcheck:
@@ -175,7 +176,7 @@ services:
       retries: 5
 
   minio-init:
-    container_name: ow-storage-init
+    container_name: aw-storage-init
     image: minio/mc:latest
     depends_on:
       minio:
@@ -192,7 +193,7 @@ services:
   # ── Novu (Notifications) — profile:notifications ───────────────────────────
   # Not started by default. Run with: docker compose --profile notifications up -d
   novu-api:
-    container_name: ow-notify-api
+    container_name: aw-notify-api
     profiles: [notifications]
     image: ghcr.io/novuhq/novu/api:latest
     restart: unless-stopped
@@ -212,7 +213,7 @@ services:
       - redis
 
   novu-worker:
-    container_name: ow-notify-worker
+    container_name: aw-notify-worker
     profiles: [notifications]
     image: ghcr.io/novuhq/novu/worker:latest
     restart: unless-stopped
@@ -228,7 +229,7 @@ services:
       - redis
 
   novu-web:
-    container_name: ow-notify-web
+    container_name: aw-notify-web
     profiles: [notifications]
     image: ghcr.io/novuhq/novu/web:latest
     restart: unless-stopped
@@ -238,7 +239,7 @@ services:
       - "4200:4200"
 
   novu-mongo:
-    container_name: ow-notify-db
+    container_name: aw-notify-db
     profiles: [notifications]
     image: mongo:7
     restart: unless-stopped
@@ -247,7 +248,7 @@ services:
 
   # ── Mailhog (local email trap) — profile:tools ─────────────────────────────
   mailhog:
-    container_name: ow-mailhog
+    container_name: aw-mailhog
     profiles: [tools]
     image: mailhog/mailhog:latest
     restart: unless-stopped
@@ -262,7 +263,7 @@ services:
 
   # ── Bull Board (queue dashboard) — profile:tools ───────────────────────────
   bullboard:
-    container_name: ow-bullboard
+    container_name: aw-bullboard
     profiles: [tools]
     image: deadly0/bull-board:latest
     restart: unless-stopped
@@ -280,7 +281,7 @@ services:
   # env_file provides all secrets; environment overrides service URLs so
   # container-to-container networking works (pgbouncer:5432 not localhost:6432).
   ow-backend:
-    container_name: ow-backend
+    container_name: aw-backend
     build:
       context: .
       dockerfile: apps/api/Dockerfile
@@ -290,19 +291,18 @@ services:
     environment:
       DATABASE_URL: postgres://app_user:app_user_dev_password@pgbouncer:5432/platform
       REDIS_URL: redis://redis:6379
-      # Zitadel connection — if ZITADEL_URL is set in .env.local (production / custom deploy)
-      # the backend uses that public URL for JWKS and introspection.
-      # Without ZITADEL_URL the default falls back to the shared Docker network name
-      # (http://zitadel:8080) so local dev continues to work with no extra config.
-      ZITADEL_JWKS_URL: ${ZITADEL_URL:-http://zitadel:8080}/oauth/v2/keys
-      ZITADEL_INTROSPECTION_URL: ${ZITADEL_URL:-http://zitadel:8080}/oauth/v2/introspect
+      # AuthNexus connection — RS256 JWT verification via JWKS only (no introspection).
+      # AUTHNEXUS_ISSUER/JWKS_URL point at the AuthNexus instance; overridable via .env.local.
+      AUTHNEXUS_ISSUER: ${AUTHNEXUS_ISSUER:-https://auth.rokkalabs.com}
+      AUTHNEXUS_JWKS_URL: ${AUTHNEXUS_JWKS_URL:-https://auth.rokkalabs.com/api/v1/auth/jwks}
+      # aud claim is the OIDC client id (confirmed against a real token), not a
+      # Zitadel-style project urn — despite the project-scoped scope name at login.
+      AUTHNEXUS_AUDIENCE: ${AUTHNEXUS_AUDIENCE:-382580183942627331}
+      AUTHNEXUS_PROJECT_ID: ${AUTHNEXUS_PROJECT_ID:-382580151663198211}
       # OPENBAO_ADDR: http://openbao:8200  # uncomment when openbao service is enabled
       S3_ENDPOINT: http://minio:9000
-      S3_PUBLIC_URL: http://localhost:9000
+      S3_PUBLIC_URL: http://localhost:10410
     restart: unless-stopped
-    networks:
-      - default
-      - openwind_zitadel
     depends_on:
       pgbouncer:
         condition: service_healthy
@@ -315,12 +315,12 @@ services:
   # Dev mode: Vite dev server with HMR. Source files are mounted as volumes so
   # any change on the host is picked up instantly — no rebuild needed.
   ow-frontend:
-    container_name: ow-frontend
+    container_name: aw-frontend
     build:
       context: .
       dockerfile: apps/admin-ui/Dockerfile.dev
     ports:
-      - "${ADMIN_UI_HOST_PORT:-3001}:3001" # Vite dev server → http://localhost:3001
+      - "${ADMIN_UI_HOST_PORT:-10406}:3001" # Vite dev server → http://localhost:10406
     environment:
       # admin-ui's API_URL is always the relative "/api" — this makes Vite's dev
       # server proxy it to the backend over the Docker network. Without this,
@@ -341,7 +341,7 @@ services:
   # Usage:
   #   docker compose --profile bootstrap run --rm bootstrap
   bootstrap:
-    container_name: ow-bootstrap
+    container_name: aw-bootstrap
     profiles: [bootstrap]
     build:
       context: .
@@ -354,21 +354,13 @@ services:
       DATABASE_URL: postgres://app_user:app_user_dev_password@pgbouncer:5432/platform
       MIGRATION_DATABASE_URL: postgres://migration_user:migration_user_dev_password@postgres:5432/platform
       REDIS_URL: redis://redis:6379
-      ZITADEL_EXTERNAL_DOMAIN: "${ZITADEL_EXTERNAL_DOMAIN:-localhost}"
-      ZITADEL_HOST_PORT: "${ZITADEL_HOST_PORT:-8080}"
-      ZITADEL_EXTERNALSECURE: "${ZITADEL_EXTERNALSECURE:-false}"
-      # APP_URL is the public base URL of the OpenWind UI (e.g. https://openwind.rokkalabs.com).
-      # Bootstrap uses it to register the correct OIDC redirect URIs in Zitadel.
-      # Leave empty for local dev — localhost:3001 redirect URIs are always registered.
+      # AuthNexus is provisioned manually via its admin console (org/project/clients/roles/users
+      # already created) — bootstrap no longer auto-registers an OIDC app or redirect URIs.
+      # APP_URL is the public base URL of the OpenWind UI (e.g. https://openwind-nexus.rokkalabs.com),
+      # kept here only for reference/seeding — not used to register anything in AuthNexus.
       APP_URL: "${APP_URL:-}"
-      # Passed in by setup.bat/setup.sh via: docker compose run -e ZITADEL_SETUP_PAT=<token>
-      # Used on first boot only — after bootstrap saves ZITADEL_KEY_JSON this is no longer needed.
-      ZITADEL_SETUP_PAT: "${ZITADEL_SETUP_PAT:-}"
     volumes:
       - ./.env.local:/app/.env.local
-    networks:
-      - default
-      - openwind_zitadel
     depends_on:
       pgbouncer:
         condition: service_healthy
@@ -381,7 +373,3 @@ volumes:
   novu_mongo_data:
   mailhog_data:
   minio_data:
-networks:
-  openwind_zitadel:
-    external: true # created by the zitadel compose project (../zitadel/)
-    name: openwind_zitadel

@@ -1,4 +1,4 @@
-import { requireAuth, requireRole, requireIntrospection } from "@platform/auth";
+import { requireAuth, requireRole } from "@platform/auth";
 import { withTenantContext, apiKeys } from "@platform/db";
 import { and, eq } from "drizzle-orm";
 import { factory } from "./factory.js";
@@ -6,7 +6,6 @@ import { factory } from "./factory.js";
 export const deleteApiKeyHandler = factory.createHandlers(
   requireAuth(),
   requireRole("admin"),
-  requireIntrospection(),
   async (c) => {
     const id = c.req.param("id") ?? "";
     const { tenantId } = c.get("auth");

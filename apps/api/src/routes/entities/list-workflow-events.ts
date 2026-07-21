@@ -2,7 +2,7 @@ import { inArray } from "drizzle-orm";
 import { requireAuth } from "@platform/auth";
 import { tenantUsers, withTenantContext } from "@platform/db";
 import { getWorkflowEventLog } from "@platform/workflow-engine";
-import { listOrgUsers, getUserById } from "../../lib/zitadel-management.js";
+import { listOrgUsers, getUserById } from "../../lib/authnexus-management.js";
 import { logger } from "@platform/logger";
 import { factory } from "./factory.js";
 import { handleWorkflowError } from "../../lib/handle-workflow-error.js";
@@ -19,6 +19,7 @@ export const listWorkflowEventsHandler = factory.createHandlers(
   async (c) => {
     const id = c.req.param("id") ?? "";
     const { tenantId, orgId } = c.get("auth");
+    const bearerToken = c.req.header("Authorization")?.slice(7) ?? "";
 
     try {
       const events = await withTenantContext(tenantId, (tx) =>
@@ -40,12 +41,12 @@ export const listWorkflowEventsHandler = factory.createHandlers(
         if (meta.mentions) for (const m of meta.mentions) userIds.add(m);
       }
 
-      // Build name map: Zitadel is source of truth, tenant_users fills gaps
-      // (Same merge logic as GET /users — cached in Zitadel management layer)
+      // Build name map: AuthNexus is source of truth, tenant_users fills gaps
+      // (Same merge logic as GET /users — cached in AuthNexus management layer)
       const nameMap = new Map<string, string>();
       if (userIds.size > 0) {
-        const [zitadelUsers, dbRows] = await Promise.all([
-          orgId ? listOrgUsers(orgId) : Promise.resolve([]),
+        const [orgUsers, dbRows] = await Promise.all([
+          orgId ? listOrgUsers(orgId, bearerToken) : Promise.resolve([]),
           withTenantContext(tenantId, (tx) =>
             tx
               .select({
@@ -60,21 +61,21 @@ export const listWorkflowEventsHandler = factory.createHandlers(
 
         const dbByUserId = new Map(dbRows.map((r) => [r.userId, r]));
 
-        for (const u of zitadelUsers) {
+        for (const u of orgUsers) {
           if (!userIds.has(u.userId)) continue;
           const dbRow = dbByUserId.get(u.userId);
           const dbDisplayName =
             dbRow?.displayName && dbRow.displayName !== u.userId
               ? dbRow.displayName
               : null;
-          // Prefer DB display name, then Zitadel display name (if it's not just the userId),
+          // Prefer DB display name, then AuthNexus display name (if it's not just the userId),
           // then loginName (usually email), then raw email.
-          const zitadelName = u.displayName !== u.userId ? u.displayName : null;
-          const name = (dbDisplayName ?? zitadelName ?? u.loginName) || null;
+          const orgName = u.displayName !== u.userId ? u.displayName : null;
+          const name = (dbDisplayName ?? orgName ?? u.loginName) || null;
           if (name) nameMap.set(u.userId, name);
         }
 
-        // Fill any IDs not in Zitadel from DB (e.g. instance admin)
+        // Fill any IDs not in AuthNexus from DB (e.g. instance admin)
         for (const r of dbRows) {
           if (nameMap.has(r.userId)) continue;
           const realName =
@@ -84,15 +85,15 @@ export const listWorkflowEventsHandler = factory.createHandlers(
         }
 
         // Last resort: for any actor still unresolved (e.g. instance admin, cross-org user),
-        // fetch them individually from Zitadel's GetUserByID endpoint.
+        // fetch them individually from AuthNexus's GetUserByID endpoint.
         const stillMissing = [...userIds].filter((id) => !nameMap.has(id));
         if (stillMissing.length > 0) {
           await Promise.all(
             stillMissing.map(async (uid) => {
-              const u = await getUserById(uid);
+              const u = await getUserById(uid, bearerToken);
               if (!u) return;
-              const zitadelName = u.displayName !== uid ? u.displayName : null;
-              const name = (zitadelName ?? u.loginName) || null;
+              const orgName = u.displayName !== uid ? u.displayName : null;
+              const name = (orgName ?? u.loginName) || null;
               if (name) nameMap.set(uid, name);
             }),
           );

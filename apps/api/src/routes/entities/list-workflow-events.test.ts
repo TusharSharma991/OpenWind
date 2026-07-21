@@ -44,7 +44,7 @@ vi.mock("@platform/db", () => ({
     fn(mockTx),
 }));
 
-vi.mock("../../lib/zitadel-management.js", () => ({
+vi.mock("../../lib/authnexus-management.js", () => ({
   listOrgUsers: () => Promise.resolve([]),
   getUserById: () => Promise.resolve(null),
 }));

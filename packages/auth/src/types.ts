@@ -7,30 +7,22 @@ export interface AuthContext {
   orgId?: string | undefined;
 }
 
-// Zitadel JWT claim shapes
-export interface ZitadelClaims {
+// AuthNexus JWT / userinfo claim shape — confirmed against a real token, NOT
+// Zitadel's nested "urn:zitadel:iam:*" namespace. AuthNexus's OIDC scopes
+// borrow Zitadel-style scope *names* (e.g. urn:zitadel:iam:org:project:id:…:aud)
+// but the actual claims returned are flat/custom.
+export interface NexusProjectGrant {
+  id: string;
+  name?: string;
+  roles: string[];
+}
+
+export interface AuthNexusClaims {
   sub: string;
   email?: string;
   name?: string;
-  given_name?: string;
-  family_name?: string;
-  // Zitadel sets organization context via this claim — only present when the
-  // "urn:zitadel:iam:user:resourceowner" scope is requested at login.
-  "urn:zitadel:iam:user:resourceowner:id"?: string;
-  // Project-level roles: { [projectId]: { [roleName]: { [orgId]: string } } }
-  "urn:zitadel:iam:org:project:roles"?: Record<
-    string,
-    Record<string, Record<string, string>>
-  >;
-}
-
-export interface IntrospectionResult {
-  active: boolean;
-  sub?: string;
-  email?: string;
-  "urn:zitadel:iam:user:resourceowner:id"?: string;
-  "urn:zitadel:iam:org:project:roles"?: Record<
-    string,
-    Record<string, Record<string, string>>
-  >;
+  preferred_username?: string;
+  org_id?: string;
+  project_id?: string;
+  nexus_projects?: NexusProjectGrant[];
 }

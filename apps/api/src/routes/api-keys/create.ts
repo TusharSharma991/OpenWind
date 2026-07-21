@@ -1,12 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import {
-  requireAuth,
-  requireRole,
-  requireIntrospection,
-  hashApiKey,
-} from "@platform/auth";
+import { requireAuth, requireRole, hashApiKey } from "@platform/auth";
 import { withTenantContext, apiKeys } from "@platform/db";
 import { factory } from "./factory.js";
 
@@ -18,7 +13,6 @@ const CreateApiKeySchema = z.object({
 export const createApiKeyHandler = factory.createHandlers(
   requireAuth(),
   requireRole("admin"),
-  requireIntrospection(),
   zValidator("json", CreateApiKeySchema),
   async (c) => {
     const { name, scopes } = c.req.valid("json");

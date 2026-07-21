@@ -4,9 +4,10 @@ import type { AuthProvider } from "@refinedev/core";
 
 declare const window: Window & {
   __CONFIG__?: {
-    ZITADEL_ISSUER?: string;
-    ZITADEL_OIDC_CLIENT_ID?: string;
-    ZITADEL_OIDC_CLIENT_SECRET?: string;
+    AUTHNEXUS_AUTHORITY?: string;
+    AUTHNEXUS_CLIENT_ID?: string;
+    AUTHNEXUS_ORG_ID?: string;
+    AUTHNEXUS_PROJECT_ID?: string;
   };
 };
 
@@ -14,26 +15,43 @@ declare const window: Window & {
 // import.meta.env keys are not statically declared so we cast to a generic record.
 const viteEnv = import.meta.env as Record<string, string | undefined>;
 const cfg = window.__CONFIG__ ?? {};
-const issuer =
-  cfg.ZITADEL_ISSUER ??
-  viteEnv["VITE_ZITADEL_ISSUER"] ??
-  "http://localhost:8080";
-const clientId =
-  cfg.ZITADEL_OIDC_CLIENT_ID ?? viteEnv["VITE_ZITADEL_OIDC_CLIENT_ID"] ?? "";
-const clientSecret =
-  cfg.ZITADEL_OIDC_CLIENT_SECRET ??
-  viteEnv["VITE_ZITADEL_OIDC_CLIENT_SECRET"] ??
-  "";
+const authority =
+  cfg.AUTHNEXUS_AUTHORITY ??
+  viteEnv["VITE_AUTH_AUTHORITY"] ??
+  "https://auth.rokkalabs.com";
+const clientId = cfg.AUTHNEXUS_CLIENT_ID ?? viteEnv["VITE_CLIENT_ID"] ?? "";
+const orgId = cfg.AUTHNEXUS_ORG_ID ?? viteEnv["VITE_ORG_ID"] ?? "";
+const projectId = cfg.AUTHNEXUS_PROJECT_ID ?? viteEnv["VITE_PROJECT_ID"] ?? "";
 
+// AuthNexus has no OIDC discovery document — every endpoint is hardcoded here
+// rather than derived from `authority` (which would otherwise trigger a
+// GET {authority}/.well-known/openid-configuration lookup that AuthNexus doesn't serve).
 export const userManager = new UserManager({
-  authority: issuer,
+  authority,
   client_id: clientId,
-  client_secret: clientSecret,
   redirect_uri: window.location.origin + "/auth/callback",
-  response_type: "code",
-  scope:
-    "openid profile email urn:zitadel:iam:org:project:roles urn:zitadel:iam:user:resourceowner offline_access",
   post_logout_redirect_uri: window.location.origin + "/login",
+  response_type: "code",
+  // Public/PKCE client — no client_secret. oidc-client-ts generates the
+  // code_verifier/code_challenge automatically for response_type "code".
+  scope: `openid profile email role offline_access urn:zitadel:iam:user:resourceowner urn:zitadel:iam:org:project:id:${projectId}:aud`,
+  // AuthNexus's /login page needs org_id/project_id as query params (not just
+  // in the scope string) to resolve tenant context — without these it falls
+  // back to a literal "None" org_id rather than erroring.
+  extraQueryParams: {
+    org_id: orgId,
+    project_id: projectId,
+    project_name: "OpenWind",
+    primary_origin: window.location.origin,
+  },
+  metadata: {
+    issuer: authority,
+    authorization_endpoint: `${authority}/api/v1/auth/authorize`,
+    token_endpoint: `${authority}/api/v1/auth/token`,
+    userinfo_endpoint: `${authority}/oidc/v1/userinfo`,
+    jwks_uri: `${authority}/api/v1/auth/jwks`,
+    end_session_endpoint: `${authority}/oidc/v1/end_session`,
+  },
   userStore: new WebStorageStateStore({ store: window.localStorage }),
   automaticSilentRenew: true,
   loadUserInfo: true,

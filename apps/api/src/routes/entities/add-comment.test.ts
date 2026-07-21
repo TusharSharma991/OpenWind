@@ -34,7 +34,7 @@ vi.mock("@platform/auth", () => ({
     },
 }));
 
-vi.mock("../../lib/zitadel-management.js", () => ({
+vi.mock("../../lib/authnexus-management.js", () => ({
   listOrgUsers: vi.fn().mockResolvedValue([]),
 }));
 

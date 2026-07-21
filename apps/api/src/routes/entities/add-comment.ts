@@ -11,7 +11,7 @@ import {
   withTenantContext,
 } from "@platform/db";
 import { isNull } from "drizzle-orm";
-import { listOrgUsers } from "../../lib/zitadel-management.js";
+import { listOrgUsers } from "../../lib/authnexus-management.js";
 import { factory } from "./factory.js";
 
 const MentionSchema = z.object({
@@ -138,9 +138,10 @@ export const addCommentHandler = factory.createHandlers(
       actorName = dbUser.displayName;
     } else if (dbUser?.email && dbUser.email !== userId) {
       try {
-        const zUsers = orgId ? await listOrgUsers(orgId) : [];
-        const zUser = zUsers.find((u) => u.userId === userId);
-        actorName = zUser?.displayName ?? zUser?.loginName ?? dbUser.email;
+        const bearerToken = c.req.header("Authorization")?.slice(7) ?? "";
+        const orgUsers = orgId ? await listOrgUsers(orgId, bearerToken) : [];
+        const orgUser = orgUsers.find((u) => u.userId === userId);
+        actorName = orgUser?.displayName ?? orgUser?.loginName ?? dbUser.email;
       } catch {
         actorName = dbUser.email;
       }

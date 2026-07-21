@@ -13,7 +13,6 @@ import {
 } from "@platform/db";
 import { logger } from "@platform/logger";
 import { verifyJwt, extractAuthContext } from "./jwks.js";
-import { introspectToken } from "./introspection.js";
 import type { AuthContext } from "./types.js";
 import {
   getCachedTenantStatus,
@@ -29,7 +28,7 @@ async function fetchUserInfo(
   bearerToken: string,
 ): Promise<{ name: string | null; email: string | null } | null> {
   try {
-    const url = `${env.ZITADEL_ISSUER}/oidc/v1/userinfo`;
+    const url = `${env.AUTHNEXUS_ISSUER}/oidc/v1/userinfo`;
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${bearerToken}` },
     });
@@ -45,7 +44,7 @@ async function fetchUserInfo(
 }
 
 /**
- * requireAuth — validates Bearer JWT (Zitadel JWKS) or API key (sk_... prefix).
+ * requireAuth — validates Bearer JWT (AuthNexus JWKS) or API key (sk_... prefix).
  *
  * JWT path: verifies signature, extracts tenantId from org claim, roles from project claims.
  * API key path: hashes the raw key, looks up in api_keys table, loads tenant from key row.
@@ -135,7 +134,7 @@ export const requireAuth = (db?: DbOrTx): MiddlewareHandler =>
             orgId:
               claims["urn:zitadel:iam:user:resourceowner:id"] ?? "(missing)",
           },
-          "JWT missing required claims — sub or urn:zitadel:iam:user:resourceowner:id not present",
+          "JWT missing required claims — sub or org claim not present",
         );
         return c.json(
           { error: "UNAUTHORIZED", message: "Missing required claims" },
@@ -145,7 +144,7 @@ export const requireAuth = (db?: DbOrTx): MiddlewareHandler =>
 
       // In production there is no DEV_TENANT_ID fallback (the Zod schema
       // forbids it), so extractAuthContext's tenantId is just the raw
-      // Zitadel org id — never a valid `uuid`. Resolve the real tenant via
+      // AuthNexus org id — never a valid `uuid`. Resolve the real tenant via
       // the zitadel_org_id mapping and fail closed if none exists, rather
       // than let a malformed tenantId reach any tenant-scoped query.
       // See docs/specs/tenant-org-id-mapping.md.
@@ -156,7 +155,7 @@ export const requireAuth = (db?: DbOrTx): MiddlewareHandler =>
         if (!mappedTenantId) {
           logger.warn(
             { orgId: auth.orgId ?? "(missing)" },
-            "No tenant mapped to this Zitadel org — rejecting",
+            "No tenant mapped to this AuthNexus org — rejecting",
           );
           return c.json(
             { error: "TENANT_NOT_FOUND", message: "Not found" },
@@ -273,42 +272,6 @@ export const requireRole = (...roles: string[]): MiddlewareHandler =>
           403,
         );
       }
-      await next();
-      return;
-    },
-  );
-
-/**
- * requireIntrospection — use on sensitive operations (e.g. tenant deletion,
- * permission changes). Calls Zitadel's token introspection endpoint rather than
- * relying solely on JWT signature verification. Result is cached for 60s.
- *
- * Must be placed AFTER requireAuth so that c.get("auth") is already populated.
- */
-export const requireIntrospection = (): MiddlewareHandler =>
-  createMiddleware<AuthVariables>(
-    async (c: Context<AuthVariables>, next: Next): Promise<Response | void> => {
-      const authHeader = c.req.header("Authorization");
-      // Should always be present after requireAuth, but be defensive
-      if (!authHeader?.startsWith("Bearer ")) {
-        return c.json({ error: "UNAUTHORIZED", message: "Missing token" }, 401);
-      }
-
-      const token = authHeader.slice(7);
-      // API keys are not subject to introspection
-      if (token.startsWith("sk_")) {
-        await next();
-        return;
-      }
-
-      const result = await introspectToken(token);
-      if (!result.active) {
-        return c.json(
-          { error: "UNAUTHORIZED", message: "Token is not active" },
-          401,
-        );
-      }
-
       await next();
       return;
     },

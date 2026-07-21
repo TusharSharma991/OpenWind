@@ -10,7 +10,7 @@
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { asc, eq } from "drizzle-orm";
-import { requireAuth, requireRole, requireIntrospection } from "@platform/auth";
+import { requireAuth, requireRole } from "@platform/auth";
 import { db, tenants } from "@platform/db";
 import {
   ProvisionTenantSchema,
@@ -98,7 +98,6 @@ export const getTenantHandlers = factory.createHandlers(
 export const createTenantHandlers = factory.createHandlers(
   requireAuth(db),
   requireRole("superadmin"),
-  requireIntrospection(),
   zValidator("json", ProvisionTenantSchema),
   async (c) => {
     const input = c.req.valid("json");
@@ -127,7 +126,6 @@ export const createTenantHandlers = factory.createHandlers(
 export const suspendTenantHandlers = factory.createHandlers(
   requireAuth(db),
   requireRole("superadmin"),
-  requireIntrospection(),
   zValidator("param", TenantIdParamSchema),
   async (c) => {
     const { id } = c.req.valid("param");
@@ -164,7 +162,6 @@ export const suspendTenantHandlers = factory.createHandlers(
 export const reactivateTenantHandlers = factory.createHandlers(
   requireAuth(db),
   requireRole("superadmin"),
-  requireIntrospection(),
   zValidator("param", TenantIdParamSchema),
   async (c) => {
     const { id } = c.req.valid("param");
@@ -206,7 +203,6 @@ const ScheduleDeletionSchema = z.object({
 export const deleteTenantHandlers = factory.createHandlers(
   requireAuth(db),
   requireRole("superadmin"),
-  requireIntrospection(),
   zValidator("param", TenantIdParamSchema),
   zValidator("json", ScheduleDeletionSchema.partial()),
   async (c) => {

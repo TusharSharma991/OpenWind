@@ -2,63 +2,44 @@ import { createRemoteJWKSet, jwtVerify } from "jose";
 import type { JWTPayload, KeyLike } from "jose";
 import { env } from "@platform/config";
 import { logger } from "@platform/logger";
-import type { ZitadelClaims, AuthContext } from "./types.js";
+import type { AuthNexusClaims, AuthContext } from "./types.js";
 
 type JwksGetter = ReturnType<typeof createRemoteJWKSet>;
 
 let _jwks: JwksGetter | undefined;
 
 function getJwks(): JwksGetter {
-  if (!_jwks) {
-    // ZITADEL_JWKS_URL lets the API container fetch keys via the Docker-internal
-    // hostname (e.g. http://zitadel:8080) while still validating the iss claim
-    // against ZITADEL_ISSUER (http://localhost:8080 as seen by the browser).
-    const jwksUri = new URL(
-      (env.ZITADEL_JWKS_URL ?? `${env.ZITADEL_ISSUER}/oauth/v2/keys`) as string,
-    );
-    // Zitadel routes by Host header — provide a custom fetcher that sets Host
-    // to match EXTERNALDOMAIN even when connecting via internal Docker hostname.
-    const issuerHost = new URL(env.ZITADEL_ISSUER).hostname;
-    const hostOverride =
-      jwksUri.hostname !== issuerHost ? issuerHost : undefined;
-    _jwks = createRemoteJWKSet(jwksUri, {
-      ...(hostOverride !== undefined
-        ? {
-            headers: { Host: hostOverride },
-          }
-        : {}),
-    });
-  }
+  _jwks ??= createRemoteJWKSet(new URL(env.AUTHNEXUS_JWKS_URL));
   return _jwks;
 }
 
 export async function verifyJwt(
   token: string,
-): Promise<(JWTPayload & ZitadelClaims) | null> {
+): Promise<(JWTPayload & AuthNexusClaims) | null> {
   try {
     const { payload } = await jwtVerify(
       token,
       getJwks() as unknown as KeyLike,
       {
-        issuer: env.ZITADEL_ISSUER,
-        // Zitadel puts the PROJECT ID in aud, not the OIDC client ID.
-        // ZITADEL_AUDIENCE is required and non-empty (packages/config/src/env.ts),
+        issuer: env.AUTHNEXUS_ISSUER,
+        // AuthNexus puts the PROJECT ID in aud, not the OIDC client ID.
+        // AUTHNEXUS_AUDIENCE is required and non-empty (packages/config/src/env.ts),
         // so audience validation is always enforced here.
-        audience: env.ZITADEL_AUDIENCE,
-        // Allow up to 30 s of clock skew between Zitadel and the API container.
+        audience: env.AUTHNEXUS_AUDIENCE,
+        // Allow up to 30 s of clock skew between AuthNexus and the API container.
         // Without this, tokens with nbf = "now" fail if the server clock is a
-        // few seconds behind Zitadel, causing 401s on the very first request
+        // few seconds behind AuthNexus, causing 401s on the very first request
         // after login before the client retries with a refreshed token.
         clockTolerance: 30,
       },
     );
-    return payload as JWTPayload & ZitadelClaims;
+    return payload as JWTPayload & AuthNexusClaims;
   } catch (err) {
     logger.warn(
       {
         error: String(err),
-        issuer: env.ZITADEL_ISSUER,
-        audience: env.ZITADEL_AUDIENCE,
+        issuer: env.AUTHNEXUS_ISSUER,
+        audience: env.AUTHNEXUS_AUDIENCE,
       },
       "JWT verification failed",
     );
@@ -67,29 +48,29 @@ export async function verifyJwt(
 }
 
 export function extractAuthContext(
-  claims: JWTPayload & ZitadelClaims,
+  claims: JWTPayload & AuthNexusClaims,
 ): AuthContext | null {
   const userId = claims.sub;
-  const orgId = claims["urn:zitadel:iam:user:resourceowner:id"];
+  const orgId = claims.org_id;
 
   // In dev, always use DEV_TENANT_ID so all users (admin + org members) hit
-  // the same seeded tenant. Zitadel org UUIDs in the JWT would otherwise map
+  // the same seeded tenant. AuthNexus org UUIDs in the JWT would otherwise map
   // to non-existent tenants and return empty data for portal users.
   const tenantId =
     env.NODE_ENV !== "production" ? (env.DEV_TENANT_ID ?? orgId) : orgId;
 
   if (!userId || !tenantId) return null;
 
-  // Flatten all role names across all projects
-  const rolesMap = claims["urn:zitadel:iam:org:project:roles"] ?? {};
-  const roles = Object.keys(rolesMap);
+  // Roles are per-project, under nexus_projects[].roles — pull only the grant
+  // for our own project (the aud claim holds the client id, not the project
+  // id, so we can't rely on that to scope this).
+  const projectGrant = (claims.nexus_projects ?? []).find(
+    (p) => p.id === env.AUTHNEXUS_PROJECT_ID,
+  );
+  const roles = projectGrant?.roles ?? [];
 
   const displayName =
-    claims.name ??
-    ([claims.given_name, claims.family_name].filter(Boolean).join(" ") ||
-      null) ??
-    claims.email ??
-    userId;
+    claims.name ?? claims.preferred_username ?? claims.email ?? userId;
 
   return {
     userId,

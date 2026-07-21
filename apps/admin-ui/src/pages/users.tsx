@@ -1,14 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { fetchWithAuth, API_URL } from "../lib/api.js";
 
-declare const window: Window & { __CONFIG__?: Record<string, string> };
-const ZITADEL_ISSUER =
-  window.__CONFIG__?.ZITADEL_ISSUER ?? "http://localhost:8080";
-
-function zitadelUserUrl(userId: string): string {
-  return `${ZITADEL_ISSUER}/ui/console/users/${userId}`;
-}
-
 interface User {
   userId: string;
   displayName: string;
@@ -145,7 +137,7 @@ export function UsersPage(): React.ReactElement {
           <div className="empty-state-subtitle">
             {query
               ? "Try a different search term."
-              : "Users appear here after they log in, or when Zitadel is connected."}
+              : "Users appear here after they log in, or when AuthNexus is connected."}
           </div>
         </div>
       )}
@@ -155,7 +147,7 @@ export function UsersPage(): React.ReactElement {
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                {["Name", "Email", "Login", "User ID", ""].map((h) => (
+                {["Name", "Email", "Login", "User ID"].map((h) => (
                   <th
                     key={h}
                     style={{
@@ -260,51 +252,6 @@ export function UsersPage(): React.ReactElement {
                       }}
                     >
                       {u.userId}
-                    </td>
-                    <td style={{ padding: "12px 16px", textAlign: "right" }}>
-                      <a
-                        href={zitadelUserUrl(u.userId)}
-                        target="_blank"
-                        rel="noreferrer"
-                        title="Open in Zitadel"
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          width: "28px",
-                          height: "28px",
-                          borderRadius: "6px",
-                          color: "var(--text-muted)",
-                          textDecoration: "none",
-                          transition: "background 0.15s, color 0.15s",
-                        }}
-                        onMouseEnter={(e) => {
-                          const el = e.currentTarget as HTMLAnchorElement;
-                          el.style.background = "var(--bg-subtle)";
-                          el.style.color = "var(--accent, #6366f1)";
-                        }}
-                        onMouseLeave={(e) => {
-                          const el = e.currentTarget as HTMLAnchorElement;
-                          el.style.background = "";
-                          el.style.color = "var(--text-muted)";
-                        }}
-                      >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          width="14"
-                          height="14"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"
-                          />
-                        </svg>
-                      </a>
                     </td>
                   </tr>
                 );

@@ -8,12 +8,9 @@ import { Hono } from "hono";
 let mockNodeEnv: string | undefined;
 vi.mock("@platform/config", () => ({
   env: {
-    ZITADEL_ISSUER: "https://zitadel.example.com",
-    ZITADEL_AUDIENCE: "platform-api",
-    ZITADEL_INTROSPECTION_URL:
-      "https://zitadel.example.com/oauth/v2/introspect",
-    ZITADEL_INTROSPECTION_CLIENT_ID: "client-id",
-    ZITADEL_INTROSPECTION_CLIENT_SECRET: "client-secret",
+    AUTHNEXUS_ISSUER: "https://auth.rokkalabs.com",
+    AUTHNEXUS_AUDIENCE: "platform-api",
+    AUTHNEXUS_PROJECT_ID: "project-xyz",
     get NODE_ENV() {
       return mockNodeEnv;
     },
@@ -40,11 +37,6 @@ const mockExtractAuthContext = vi.fn();
 vi.mock("./jwks.js", () => ({
   verifyJwt: (...args: unknown[]) => mockVerifyJwt(...args),
   extractAuthContext: (...args: unknown[]) => mockExtractAuthContext(...args),
-}));
-
-const mockIntrospectToken = vi.fn();
-vi.mock("./introspection.js", () => ({
-  introspectToken: (...args: unknown[]) => mockIntrospectToken(...args),
 }));
 
 // Module-level db fallback for both resolveTenantStatus (status) and the new
@@ -128,8 +120,7 @@ vi.mock("drizzle-orm", () => ({
   sql: (...args: unknown[]) => ({ sql: args }),
 }));
 
-const { requireAuth, requireRole, requireIntrospection } =
-  await import("./middleware.js");
+const { requireAuth, requireRole } = await import("./middleware.js");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -378,65 +369,6 @@ describe("requireRole", () => {
 
     const app = makeAuthApp("admin");
     const res = await get(app, "jwt");
-    expect(res.status).toBe(200);
-  });
-});
-
-// ── requireIntrospection ──────────────────────────────────────────────────────
-
-describe("requireIntrospection", () => {
-  function makeIntrospectApp() {
-    const app = new Hono();
-    app.get("/test", requireAuth(), requireIntrospection(), (c) =>
-      c.json({ ok: true }),
-    );
-    return app;
-  }
-
-  it("returns 401 when introspection reports token inactive", async () => {
-    mockVerifyJwt.mockResolvedValueOnce({});
-    mockExtractAuthContext.mockReturnValueOnce(VALID_AUTH);
-    mockIntrospectToken.mockResolvedValueOnce({ active: false });
-
-    const app = makeIntrospectApp();
-    const res = await get(app, "some.jwt");
-    expect(res.status).toBe(401);
-  });
-
-  it("allows request when introspection reports token active", async () => {
-    mockVerifyJwt.mockResolvedValueOnce({});
-    mockExtractAuthContext.mockReturnValueOnce(VALID_AUTH);
-    mockIntrospectToken.mockResolvedValueOnce({ active: true });
-
-    const app = makeIntrospectApp();
-    const res = await get(app, "some.jwt");
-    expect(res.status).toBe(200);
-  });
-
-  it("skips introspection for API keys (sk_ prefix)", async () => {
-    const fakeRow = {
-      id: "key-id-1",
-      tenant_id: "tenant-abc",
-      scopes: ["read"],
-    };
-    const mockDb = {
-      execute: vi.fn().mockResolvedValue([fakeRow]),
-    };
-
-    const app = new Hono();
-    app.get(
-      "/test",
-      requireAuth(mockDb as unknown as Parameters<typeof requireAuth>[0]),
-      requireIntrospection(),
-      (c) => c.json({ ok: true }),
-    );
-
-    const res = await app.request("/test", {
-      headers: { Authorization: "Bearer sk_validkey" },
-    });
-
-    // introspectToken should NOT have been called
-    expect(mockIntrospectToken).not.toHaveBeenCalled();
     expect(res.status).toBe(200);
   });
 });

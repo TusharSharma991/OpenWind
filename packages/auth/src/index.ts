@@ -1,18 +1,8 @@
-export {
-  requireAuth,
-  requireRole,
-  requireIntrospection,
-  hashApiKey,
-} from "./middleware.js";
+export { requireAuth, requireRole, hashApiKey } from "./middleware.js";
 export {
   invalidateTenantStatusCache,
   startTenantStatusInvalidationSubscriber,
   stopTenantStatusInvalidationSubscriber,
 } from "./tenant-status-cache.js";
-export type {
-  AuthContext,
-  ZitadelClaims,
-  IntrospectionResult,
-} from "./types.js";
+export type { AuthContext, AuthNexusClaims } from "./types.js";
 export { verifyJwt, extractAuthContext } from "./jwks.js";
-export { introspectToken } from "./introspection.js";

@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { fetchWithAuth, API_URL } from "../../lib/api.js";
 import { useEntityTypes } from "../../entity-type-context.js";
-import { userManager } from "../../authProvider.js";
+import { userManager, getRolesFromProfile } from "../../authProvider.js";
 import { useFileUpload } from "../../hooks/use-file-upload.js";
 import {
   type AttachmentFile,
@@ -1134,10 +1134,9 @@ export function CustomerRecordDetail(): React.ReactElement {
       .getUser()
       .then((u) => {
         if (!u) return;
-        const roleClaim = u.profile["urn:zitadel:iam:org:project:roles"] as
-          | Record<string, unknown>
-          | undefined;
-        setCurrentUserRoles(roleClaim ? Object.keys(roleClaim) : []);
+        setCurrentUserRoles(
+          getRolesFromProfile(u.profile as Record<string, unknown>),
+        );
         // Inject the current user into the users list so their name always resolves,
         // even when the /users API treats them as a ghost entry (no email/displayName in DB).
         const sub = u.profile.sub as string | undefined;

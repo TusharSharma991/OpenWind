@@ -85,7 +85,7 @@ function useHistoryBlocker(when: boolean): {
 }
 import { fetchWithAuth, API_URL } from "../../lib/api.js";
 import { useEntityTypes } from "../../entity-type-context.js";
-import { userManager } from "../../authProvider.js";
+import { userManager, getRolesFromProfile } from "../../authProvider.js";
 import { MultiUserPicker } from "../../components/user-picker.js";
 import type { UserOption } from "../../components/user-picker.js";
 
@@ -1183,10 +1183,9 @@ export function WorkflowDetail(): React.ReactElement {
       .then((u) => {
         if (!u) return;
         setCurrentUserId(u.profile.sub);
-        const roleClaim = u.profile["urn:zitadel:iam:org:project:roles"] as
-          | Record<string, unknown>
-          | undefined;
-        setCurrentUserRoles(roleClaim ? Object.keys(roleClaim) : []);
+        setCurrentUserRoles(
+          getRolesFromProfile(u.profile as Record<string, unknown>),
+        );
       })
       .catch(() => {
         /* leave defaults */

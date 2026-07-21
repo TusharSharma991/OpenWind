@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useLogout, useGetIdentity } from "@refinedev/core";
 import { Link, useLocation } from "react-router-dom";
-import { userManager } from "../authProvider.js";
+import { userManager, getRolesFromProfile } from "../authProvider.js";
 
 // ── Admin nav items ──────────────────────────────────────────────────────────
 
@@ -152,15 +152,6 @@ const SETTINGS_NAV = {
 };
 
 // â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-function getRolesFromProfile(
-  profile: Record<string, unknown> | undefined,
-): string[] {
-  if (!profile) return [];
-  const rolesMap = (profile["urn:zitadel:iam:org:project:roles"] ??
-    {}) as Record<string, unknown>;
-  return Object.keys(rolesMap);
-}
 
 // â”€â”€ Layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 

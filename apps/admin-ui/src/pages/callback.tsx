@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { userManager } from "../authProvider.js";
+import { userManager, getRolesFromProfile } from "../authProvider.js";
 
 export function AuthCallback(): React.ReactElement {
   const navigate = useNavigate();
@@ -15,9 +15,7 @@ export function AuthCallback(): React.ReactElement {
       .then(async () => {
         const user = await userManager.getUser();
         const profile = (user?.profile ?? {}) as Record<string, unknown>;
-        const rolesMap = (profile["urn:zitadel:iam:org:project:roles"] ??
-          {}) as Record<string, unknown>;
-        const roles = Object.keys(rolesMap);
+        const roles = getRolesFromProfile(profile);
         const isCustomer =
           (roles.includes("user") || roles.includes("customer")) &&
           !roles.includes("admin") &&

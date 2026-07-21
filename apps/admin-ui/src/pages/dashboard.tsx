@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useGetIdentity } from "@refinedev/core";
 import { useNavigate } from "react-router-dom";
 import { fetchWithAuth, API_URL } from "../lib/api.js";
-import { userManager } from "../authProvider.js";
+import { userManager, getRolesFromProfile } from "../authProvider.js";
 
 type WorkflowState = {
   name: string;
@@ -523,9 +523,7 @@ export function Dashboard(): React.ReactElement {
   useEffect(() => {
     void userManager.getUser().then((u) => {
       const profile = u?.profile as Record<string, unknown> | undefined;
-      const rolesMap = (profile?.["urn:zitadel:iam:org:project:roles"] ??
-        {}) as Record<string, unknown>;
-      const r = Object.keys(rolesMap);
+      const r = getRolesFromProfile(profile);
       setRoles(r);
       const isCustomer =
         (r.includes("user") || r.includes("customer")) &&

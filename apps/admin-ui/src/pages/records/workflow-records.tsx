@@ -7,7 +7,7 @@ import {
 } from "react-router-dom";
 import { fetchWithAuth, API_URL } from "../../lib/api.js";
 import { useEntityTypes, toTypeSlug } from "../../entity-type-context.js";
-import { userManager } from "../../authProvider.js";
+import { userManager, getRolesFromProfile } from "../../authProvider.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -678,10 +678,7 @@ export function WorkflowRecords(): React.ReactElement {
     void userManager.getUser().then((u) => {
       if (!u) return;
       setCurrentUserId(u.profile.sub);
-      const roleClaim = u.profile["urn:zitadel:iam:org:project:roles"] as
-        | Record<string, unknown>
-        | undefined;
-      const roles = roleClaim ? Object.keys(roleClaim) : [];
+      const roles = getRolesFromProfile(u.profile as Record<string, unknown>);
       setCurrentUserRoles(roles);
       setIsUserRole(!roles.includes("admin") && !roles.includes("agent"));
     });

@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from "vitest";
 vi.mock("@platform/config", () => ({
   env: {
     AUTHNEXUS_ISSUER: "https://auth.rokkalabs.com",
+    AUTHNEXUS_PROJECT_ID: "project-xyz",
   },
 }));
 
@@ -11,7 +12,8 @@ vi.mock("@platform/logger", () => ({
   logger: { info: vi.fn(), warn: mockLoggerWarn, error: vi.fn() },
 }));
 
-const { listOrgUsers } = await import("./authnexus-management.js");
+const { listOrgUsers, listProjectRoles } =
+  await import("./authnexus-management.js");
 
 describe("listOrgUsers", () => {
   it("fails closed and returns [] when orgId is undefined — never falls through to an unfiltered instance-wide query", async () => {
@@ -27,6 +29,14 @@ describe("listOrgUsers", () => {
 
   it("fails closed and returns [] when orgId is an empty string", async () => {
     const result = await listOrgUsers("", "token");
+
+    expect(result).toEqual([]);
+  });
+});
+
+describe("listProjectRoles", () => {
+  it("returns [] when orgId is an empty string", async () => {
+    const result = await listProjectRoles("", "token");
 
     expect(result).toEqual([]);
   });

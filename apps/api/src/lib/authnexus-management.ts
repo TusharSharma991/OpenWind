@@ -10,11 +10,16 @@ export interface OrgUser {
   loginName: string;
 }
 
-interface AuthNexusListUser {
-  id: string;
-  username: string;
+interface AuthNexusAssignment {
+  userId: string;
+  userName: string;
+  firstName?: string;
+  lastName?: string;
   email: string;
-  name?: string;
+  displayName?: string;
+  preferredLoginName?: string;
+  roleKeys: string[];
+  state: string;
 }
 
 interface AuthNexusUserDetail {
@@ -26,31 +31,101 @@ interface AuthNexusUserDetail {
   state?: string;
 }
 
-// ── Role / user cache ─────────────────────────────────────────────────────────
+// ── Assignment cache ──────────────────────────────────────────────────────────
 // No service-account token to cache here — every call forwards the requesting
 // user's own bearer token (AuthNexus's /api/admin/* endpoints require an admin
 // session, so this is naturally scoped to admin-role callers by AuthNexus itself).
+// listOrgUsers and listProjectRoles both derive from the same per-org
+// project-assignments fetch, so they share one cache keyed by orgId.
 
-interface UserCacheEntry {
-  users: OrgUser[];
+interface AssignmentCacheEntry {
+  assignments: AuthNexusAssignment[];
   expiresAt: number;
 }
 // Values may be a settled entry or an in-flight Promise (single-flight guard).
-const _usersCache = new Map<string, UserCacheEntry | Promise<OrgUser[]>>();
+const _assignmentsCache = new Map<
+  string,
+  AssignmentCacheEntry | Promise<AuthNexusAssignment[]>
+>();
 const CACHE_TTL_MS = 5 * 60 * 1000;
-const PAGE_LIMIT = 500;
 
 function adminApiUrl(path: string): string {
   return `${env.AUTHNEXUS_ISSUER}${path}`;
 }
 
-// ── List project roles ────────────────────────────────────────────────────────
-// AuthNexus has no dedicated "list project roles" endpoint (roles only appear
-// embedded per-user under nexus_projects[].roles) — callers fall back to their
-// own hardcoded default role list when this returns [].
+async function getActiveAssignments(
+  orgId: string,
+  bearerToken: string,
+): Promise<AuthNexusAssignment[]> {
+  const now = Date.now();
+  const cached = _assignmentsCache.get(orgId);
+  if (cached && !(cached instanceof Promise) && now < cached.expiresAt)
+    return cached.assignments;
+  if (cached instanceof Promise) return cached;
 
-export function listProjectRoles(): Promise<string[]> {
-  return Promise.resolve([]);
+  const pending = _fetchAssignments(orgId, bearerToken, now);
+  _assignmentsCache.set(orgId, pending);
+  return pending;
+}
+
+async function _fetchAssignments(
+  orgId: string,
+  bearerToken: string,
+  now: number,
+): Promise<AuthNexusAssignment[]> {
+  try {
+    const url = adminApiUrl(
+      `/api/admin/projects/${encodeURIComponent(env.AUTHNEXUS_PROJECT_ID)}/assignments?org_id=${encodeURIComponent(orgId)}`,
+    );
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${bearerToken}` },
+    });
+
+    if (!res.ok) {
+      logger.warn({ status: res.status }, "AuthNexus list assignments failed");
+      _assignmentsCache.delete(orgId);
+      return [];
+    }
+
+    const data = (await res.json()) as AuthNexusAssignment[];
+    const active = data.filter((a) => a.state === "USER_GRANT_STATE_ACTIVE");
+    _assignmentsCache.set(orgId, {
+      assignments: active,
+      expiresAt: now + CACHE_TTL_MS,
+    });
+    return active;
+  } catch (err) {
+    logger.error({ err }, "Failed to list AuthNexus project assignments");
+    _assignmentsCache.delete(orgId);
+    return [];
+  }
+}
+
+function assignmentToOrgUser(a: AuthNexusAssignment): OrgUser {
+  const nameParts = [a.firstName, a.lastName].filter(
+    (s): s is string => typeof s === "string" && s.length > 0,
+  );
+  const fullName = nameParts.length > 0 ? nameParts.join(" ") : undefined;
+  return {
+    userId: a.userId,
+    email: a.email,
+    displayName: a.displayName ?? fullName ?? a.userName,
+    loginName: a.preferredLoginName ?? a.userName,
+  };
+}
+
+// ── List project roles ────────────────────────────────────────────────────────
+// Derived from the same project-assignments endpoint as listOrgUsers — the
+// union of every active grant's roleKeys for this org, rather than a static
+// list. Callers fall back to their own hardcoded defaults when this returns [].
+
+export async function listProjectRoles(
+  orgId: string,
+  bearerToken: string,
+): Promise<string[]> {
+  if (!orgId) return [];
+  const assignments = await getActiveAssignments(orgId, bearerToken);
+  return [...new Set(assignments.flatMap((a) => a.roleKeys))];
 }
 
 // ── List org users ────────────────────────────────────────────────────────────
@@ -71,69 +146,10 @@ export async function listOrgUsers(
     return [];
   }
 
-  const cacheKey = orgId;
-  const now = Date.now();
-  const cached = _usersCache.get(cacheKey);
-  // Return settled cache entry if still fresh
-  if (cached && !(cached instanceof Promise) && now < cached.expiresAt)
-    return cached.users;
-  // Return in-flight promise if another caller already started the fetch
-  if (cached instanceof Promise) return cached;
-
-  const pending = _fetchOrgUsers(orgId, bearerToken, now, cacheKey);
-  _usersCache.set(cacheKey, pending);
-  return pending;
-}
-
-async function _fetchOrgUsers(
-  orgId: string,
-  bearerToken: string,
-  now: number,
-  cacheKey: string,
-): Promise<OrgUser[]> {
-  try {
-    const url = adminApiUrl(
-      `/api/admin/users?org_id=${encodeURIComponent(orgId)}&status=ACTIVE&limit=${PAGE_LIMIT}`,
-    );
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${bearerToken}` },
-    });
-
-    if (!res.ok) {
-      logger.warn({ status: res.status }, "AuthNexus list users failed");
-      _usersCache.delete(cacheKey);
-      return [];
-    }
-
-    const data = (await res.json()) as {
-      users?: AuthNexusListUser[];
-      total?: number;
-    };
-
-    if ((data.total ?? 0) > PAGE_LIMIT) {
-      logger.warn(
-        { orgId, total: data.total, fetched: PAGE_LIMIT },
-        "listOrgUsers: result truncated — total exceeds page limit",
-      );
-    }
-
-    const users: OrgUser[] = (data.users ?? [])
-      .map((u) => ({
-        userId: u.id,
-        email: u.email,
-        displayName: u.name ?? u.username,
-        loginName: u.username,
-      }))
-      .sort((a, b) => a.displayName.localeCompare(b.displayName));
-
-    _usersCache.set(orgId, { users, expiresAt: now + CACHE_TTL_MS });
-    return users;
-  } catch (err) {
-    logger.error({ err }, "Failed to list AuthNexus org users");
-    // Evict so the next caller retries rather than getting a rejected/hung promise.
-    _usersCache.delete(cacheKey);
-    return [];
-  }
+  const assignments = await getActiveAssignments(orgId, bearerToken);
+  return assignments
+    .map(assignmentToOrgUser)
+    .sort((a, b) => a.displayName.localeCompare(b.displayName));
 }
 
 // ── Get single user by ID ─────────────────────────────────────────────────────
@@ -187,6 +203,6 @@ export async function getUserById(
 // ── Cache invalidation ────────────────────────────────────────────────────────
 
 export function invalidateUserCache(): void {
-  _usersCache.clear();
+  _assignmentsCache.clear();
   _userByIdCache.clear();
 }

@@ -23,6 +23,22 @@ const clientId = cfg.AUTHNEXUS_CLIENT_ID ?? viteEnv["VITE_CLIENT_ID"] ?? "";
 const orgId = cfg.AUTHNEXUS_ORG_ID ?? viteEnv["VITE_ORG_ID"] ?? "";
 const projectId = cfg.AUTHNEXUS_PROJECT_ID ?? viteEnv["VITE_PROJECT_ID"] ?? "";
 
+// AuthNexus's actual claim shape (confirmed against a real token) is
+// flat/custom, not Zitadel's "urn:zitadel:iam:*" namespace — roles live
+// per-project under nexus_projects[].roles. Single source of truth for role
+// extraction — used by getPermissions() below and by Layout's RBAC checks.
+export function getRolesFromProfile(
+  profile: Record<string, unknown> | undefined,
+): string[] {
+  if (!profile) return [];
+  const nexusProjects = (profile["nexus_projects"] ?? []) as Array<{
+    id: string;
+    roles: string[];
+  }>;
+  const projectGrant = nexusProjects.find((p) => p.id === projectId);
+  return projectGrant?.roles ?? [];
+}
+
 // AuthNexus has no OIDC discovery document — every endpoint is hardcoded here
 // rather than derived from `authority` (which would otherwise trigger a
 // GET {authority}/.well-known/openid-configuration lookup that AuthNexus doesn't serve).
@@ -146,12 +162,9 @@ export const authProvider: AuthProvider = {
   },
   getPermissions: async () => {
     const user = await userManager.getUser();
-    if (user?.profile) {
-      const rolesMap = (user.profile["urn:zitadel:iam:org:project:roles"] ??
-        {}) as Record<string, Record<string, Record<string, string>>>;
-      return Object.keys(rolesMap);
-    }
-    return [];
+    return getRolesFromProfile(
+      user?.profile as Record<string, unknown> | undefined,
+    );
   },
   getIdentity: async () => {
     const user = await userManager.getUser();

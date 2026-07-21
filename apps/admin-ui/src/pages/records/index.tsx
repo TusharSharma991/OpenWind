@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { fetchWithAuth, API_URL } from "../../lib/api.js";
 import { useEntityTypes } from "../../entity-type-context.js";
 import type { EntityType } from "../../entity-type-context.js";
-import { userManager } from "../../authProvider.js";
+import { userManager, getRolesFromProfile } from "../../authProvider.js";
 
 function toWorkflowSlug(name: string): string {
   return name
@@ -116,10 +116,7 @@ export function AdminRecords(): React.ReactElement {
         setUserLoaded(true);
         return;
       }
-      const roleClaim = u.profile["urn:zitadel:iam:org:project:roles"] as
-        | Record<string, unknown>
-        | undefined;
-      const roles = roleClaim ? Object.keys(roleClaim) : [];
+      const roles = getRolesFromProfile(u.profile as Record<string, unknown>);
       setCurrentUserRoles(roles);
       setUserLoaded(true);
     });

@@ -11,7 +11,9 @@ const FALLBACK_ROLES = ["admin", "agent", "user"];
 export const rolesRouter = new Hono<AppVars>();
 
 rolesRouter.get("/", requireAuth(db), requireRole("admin"), async (c) => {
-  const roles = await listProjectRoles();
-  // AuthNexus has no project-roles listing endpoint — always falls back to defaults.
+  const { orgId } = c.get("auth");
+  const bearerToken = c.req.header("Authorization")?.slice(7) ?? "";
+  const roles = orgId ? await listProjectRoles(orgId, bearerToken) : [];
+  // Fall back to defaults if AuthNexus is unreachable or returns no grants yet.
   return c.json({ data: roles.length > 0 ? roles : FALLBACK_ROLES });
 });

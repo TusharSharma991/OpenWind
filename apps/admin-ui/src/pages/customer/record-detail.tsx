@@ -1772,13 +1772,16 @@ export function CustomerRecordDetail(): React.ReactElement {
       });
       return;
     }
-    // All mentioned users already have access — post directly
+    // All mentioned users already have access — post directly.
+    // The mention-grant field only accepts read_only/read_comment (the backend
+    // skips granting for anyone who already has standing read_write access, so
+    // this value is never used to downgrade an assignee/creator) — clamp here
+    // so an existing read_write entry doesn't fail schema validation.
     const mentionEntries = mentionIds.map((uid) => {
       const existing = accessList.find((e) => e.userId === uid);
-      return {
-        userId: uid,
-        level: (existing?.level ?? "read_comment") as AccessLevel,
-      };
+      const level: "read_only" | "read_comment" =
+        existing?.level === "read_only" ? "read_only" : "read_comment";
+      return { userId: uid, level };
     });
     await doSubmitComment(text, mentionEntries, replyTo, fileIds);
   }
@@ -4194,13 +4197,25 @@ export function CustomerRecordDetail(): React.ReactElement {
                     pendingMentionGrant;
                   setPendingMentionGrant(null);
                   const existingIds = new Set(accessList.map((e) => e.userId));
-                  const mentionEntries = mentions.map((uid) => ({
-                    userId: uid,
-                    level: existingIds.has(uid)
-                      ? ((accessList.find((e) => e.userId === uid)?.level ??
-                          "read_comment") as AccessLevel)
-                      : selectedLevel,
-                  }));
+                  // Mention-grant field only accepts read_only/read_comment (the
+                  // backend skips granting for anyone who already has standing
+                  // read_write access) — clamp so an existing read_write entry
+                  // doesn't fail schema validation.
+                  const mentionEntries = mentions.map((uid) => {
+                    if (!existingIds.has(uid)) {
+                      return { userId: uid, level: selectedLevel };
+                    }
+                    const existingLevel = accessList.find(
+                      (e) => e.userId === uid,
+                    )?.level;
+                    return {
+                      userId: uid,
+                      level:
+                        existingLevel === "read_only"
+                          ? ("read_only" as const)
+                          : ("read_comment" as const),
+                    };
+                  });
                   void doSubmitComment(
                     text,
                     mentionEntries,

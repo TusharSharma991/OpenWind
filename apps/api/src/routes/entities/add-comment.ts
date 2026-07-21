@@ -59,12 +59,11 @@ export const addCommentHandler = factory.createHandlers(
       return c.json({ error: "NOT_FOUND", message: "Record not found" }, 404);
     }
 
+    const accessUsers = ((instance.fields as Record<string, unknown>)
+      .__accessUsers ?? {}) as Record<string, { level: string }>;
+
     if (!isPrivileged) {
-      const accessUsers =
-        (instance.fields as Record<string, unknown>).__accessUsers ?? {};
-      const userAccess = (accessUsers as Record<string, { level: string }>)[
-        userId
-      ];
+      const userAccess = accessUsers[userId];
       const canComment =
         instance.createdBy === userId ||
         instance.assignedTo === userId ||
@@ -186,9 +185,19 @@ export const addCommentHandler = factory.createHandlers(
       // otherwise any commenter with mere read_comment access could mention an
       // arbitrary user ID and hand them access, bypassing grant-access.ts's
       // requireRole("admin", "agent") gate on the equivalent mutation.
+      // Mentions can only ever grant read_only/read_comment (schema-enforced) —
+      // skip anyone who already has equal-or-higher standing access (assignee,
+      // creator, or an existing read_write grant) so a mention never downgrades it.
       if (isPrivileged) {
         for (const mention of mentions) {
-          if (!usersToGrant.some((u) => u.userId === mention.userId)) {
+          const alreadyHasHigherAccess =
+            mention.userId === instance.assignedTo ||
+            mention.userId === instance.createdBy ||
+            accessUsers[mention.userId]?.level === "read_write";
+          if (
+            !alreadyHasHigherAccess &&
+            !usersToGrant.some((u) => u.userId === mention.userId)
+          ) {
             usersToGrant.push({ userId: mention.userId, level: mention.level });
           }
         }

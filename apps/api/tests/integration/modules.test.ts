@@ -38,11 +38,6 @@ vi.mock("@platform/auth", () => ({
     async (c: Context, next: Next): Promise<void> => {
       await next();
     },
-  requireIntrospection:
-    () =>
-    async (c: Context, next: Next): Promise<void> => {
-      await next();
-    },
 }));
 
 describe("Module System Integration Tests", () => {

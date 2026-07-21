@@ -9,10 +9,9 @@
  * row, api_keys INSERT failed with an RLS violation, api_keys SELECT/DELETE
  * silently no-op'd, and view_configs reads/writes had the same problem.
  *
- * Uses a real Postgres database (no mocks). requireIntrospection() is part of
- * the api-keys handler chains -- sending a Bearer token with the sk_ prefix
- * short-circuits it (API keys are documented as exempt from introspection),
- * avoiding the need for a live Zitadel connection in this test.
+ * Uses a real Postgres database (no mocks). Sending a Bearer token with the
+ * sk_ prefix (API key auth) avoids the need for a live AuthNexus connection
+ * in this test, since requireAuth's JWT path is never exercised.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";

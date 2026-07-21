@@ -143,11 +143,20 @@ export function UsersPage(): React.ReactElement {
       )}
 
       {!loading && !error && filtered.length > 0 && (
-        <div className="data-panel" style={{ overflow: "hidden" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <div
+          className="data-panel"
+          style={{ overflowX: "auto", overflowY: "hidden" }}
+        >
+          <table
+            style={{
+              width: "100%",
+              borderCollapse: "collapse",
+              whiteSpace: "nowrap",
+            }}
+          >
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                {["Name", "Email", "Login", "User ID"].map((h) => (
+                {["Name", "Login", "Email", "User ID"].map((h) => (
                   <th
                     key={h}
                     style={{
@@ -159,6 +168,7 @@ export function UsersPage(): React.ReactElement {
                       textTransform: "uppercase",
                       letterSpacing: "0.05em",
                       background: "var(--surface-secondary, var(--bg-subtle))",
+                      whiteSpace: "nowrap",
                     }}
                   >
                     {h}
@@ -232,7 +242,7 @@ export function UsersPage(): React.ReactElement {
                         color: "var(--text-secondary)",
                       }}
                     >
-                      {u.email}
+                      {u.loginName}
                     </td>
                     <td
                       style={{
@@ -241,7 +251,7 @@ export function UsersPage(): React.ReactElement {
                         color: "var(--text-secondary)",
                       }}
                     >
-                      {u.loginName}
+                      {u.email}
                     </td>
                     <td
                       style={{

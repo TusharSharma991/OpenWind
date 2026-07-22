@@ -1,4 +1,9 @@
-export { requireAuth, requireRole, hashApiKey } from "./middleware.js";
+export {
+  requireAuth,
+  requireRole,
+  hashApiKey,
+  lookupTenantIdByOrgId,
+} from "./middleware.js";
 export {
   invalidateTenantStatusCache,
   startTenantStatusInvalidationSubscriber,

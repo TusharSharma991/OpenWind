@@ -1,4 +1,4 @@
-import { zValidator } from "@hono/zod-validator";
+import { zValidator } from "../../lib/validator.js";
 import { z } from "zod";
 import { requireAuth, requireRole } from "@platform/auth";
 import { withTenantContext } from "@platform/db";
@@ -14,6 +14,11 @@ const CreateEntityTypeSchema = z.object({
   allowCustomFields: z.boolean().default(true),
 });
 
+// Intentionally open to every authenticated role, unlike update.ts/delete.ts
+// (admin-only): this is step 1 of the self-service "any user can create their
+// own workflow" flow (docs/specs/workflow-ownership-admin.md, R4/R1) — the
+// admin-ui calls this before POST /workflows for every role. Do not tighten
+// to admin-only; that breaks workflow creation for non-admin users.
 export const createEntityTypeHandler = factory.createHandlers(
   requireAuth(),
   requireRole("admin", "agent", "user"),

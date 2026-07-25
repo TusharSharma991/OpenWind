@@ -162,8 +162,6 @@ const FIELD_TYPES = [
   { value: "date", label: "Date" },
   { value: "boolean", label: "Boolean" },
   { value: "enum", label: "Enum (select)" },
-  { value: "email", label: "Email" },
-  { value: "url", label: "URL" },
 ];
 
 type AddStateForm = {
@@ -498,7 +496,7 @@ function StateEditPopover({
       </div>
 
       <div className="form-group" style={{ marginBottom: "10px" }}>
-        <label className="form-label">SLA hours</label>
+        <label className="form-label">Deadline reminder (hours)</label>
         <input
           type="number"
           className="form-input"
@@ -526,7 +524,13 @@ function StateEditPopover({
             setForm((f) => ({ ...f, isTerminal: e.target.checked }))
           }
         />
-        Terminal state
+        <span>
+          This is a final step
+          <br />
+          <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>
+            Tickets won&apos;t move further once they reach this step
+          </span>
+        </span>
       </label>
 
       {error && (
@@ -627,7 +631,7 @@ function SortableStateNode({
             e.stopPropagation();
             onEdit();
           }}
-          title="Click to edit state"
+          title="Click to edit step"
           onMouseEnter={(e) => {
             (e.currentTarget as HTMLDivElement).style.boxShadow =
               `0 0 0 3px ${accent}44`;
@@ -700,7 +704,7 @@ function SortableStateNode({
                 marginTop: "2px",
               }}
             >
-              SLA {state.slaHours}h
+              Deadline: {state.slaHours}h
             </div>
           )}
         </div>
@@ -1369,7 +1373,9 @@ export function WorkflowDetail(): React.ReactElement {
       setFieldForm(EMPTY_FIELD);
       fetchFields(workflow.entityTypeId);
     } catch (err) {
-      setFieldError(err instanceof Error ? err.message : "Failed to add field");
+      setFieldError(
+        err instanceof Error ? err.message : "Failed to add detail",
+      );
     } finally {
       setSavingField(false);
     }
@@ -1408,7 +1414,7 @@ export function WorkflowDetail(): React.ReactElement {
     } catch (err) {
       setFields(snapshot);
       setInlineError(
-        err instanceof Error ? err.message : "Failed to reorder fields",
+        err instanceof Error ? err.message : "Failed to reorder details",
       );
     }
   }
@@ -1424,7 +1430,7 @@ export function WorkflowDetail(): React.ReactElement {
       fetchFields(workflow.entityTypeId);
     } catch (err) {
       setInlineError(
-        err instanceof Error ? err.message : "Failed to delete field",
+        err instanceof Error ? err.message : "Failed to delete detail",
       );
     } finally {
       setDeletingFieldId(null);
@@ -1452,7 +1458,7 @@ export function WorkflowDetail(): React.ReactElement {
       fetchFields(workflow.entityTypeId);
     } catch (err) {
       setFieldError(
-        err instanceof Error ? err.message : "Failed to edit field",
+        err instanceof Error ? err.message : "Failed to edit detail",
       );
     } finally {
       setSavingField(false);
@@ -1480,7 +1486,7 @@ export function WorkflowDetail(): React.ReactElement {
       setStateForm(EMPTY_STATE);
       void refetch();
     } catch (err) {
-      setStateError(err instanceof Error ? err.message : "Failed to add state");
+      setStateError(err instanceof Error ? err.message : "Failed to add step");
     } finally {
       setSavingState(false);
     }
@@ -1496,7 +1502,7 @@ export function WorkflowDetail(): React.ReactElement {
       void refetch();
     } catch (err) {
       setInlineError(
-        err instanceof Error ? err.message : "Failed to delete state",
+        err instanceof Error ? err.message : "Failed to delete step",
       );
     } finally {
       setDeletingStateId(null);
@@ -1514,6 +1520,7 @@ export function WorkflowDetail(): React.ReactElement {
         {
           method: "PATCH",
           body: JSON.stringify({
+            name: stateForm.name.trim(),
             label: stateForm.label.trim(),
             color: stateForm.color || undefined,
             isTerminal: stateForm.isTerminal,
@@ -1526,9 +1533,7 @@ export function WorkflowDetail(): React.ReactElement {
       setStateForm(EMPTY_STATE);
       void refetch();
     } catch (err) {
-      setStateError(
-        err instanceof Error ? err.message : "Failed to edit state",
-      );
+      setStateError(err instanceof Error ? err.message : "Failed to edit step");
     } finally {
       setSavingState(false);
     }
@@ -1558,7 +1563,7 @@ export function WorkflowDetail(): React.ReactElement {
       void refetch();
     } catch (err) {
       setTransError(
-        err instanceof Error ? err.message : "Failed to add transition",
+        err instanceof Error ? err.message : "Failed to add action",
       );
     } finally {
       setSavingTrans(false);
@@ -1575,7 +1580,7 @@ export function WorkflowDetail(): React.ReactElement {
       void refetch();
     } catch (err) {
       setInlineError(
-        err instanceof Error ? err.message : "Failed to delete transition",
+        err instanceof Error ? err.message : "Failed to delete action",
       );
     } finally {
       setDeletingTransId(null);
@@ -1604,7 +1609,7 @@ export function WorkflowDetail(): React.ReactElement {
       void refetch();
     } catch (err) {
       setTransError(
-        err instanceof Error ? err.message : "Failed to edit transition",
+        err instanceof Error ? err.message : "Failed to edit action",
       );
     } finally {
       setSavingTrans(false);
@@ -1760,15 +1765,15 @@ export function WorkflowDetail(): React.ReactElement {
   const TABS = [
     { id: "settings" as const, label: "Settings" },
     { id: "canvas" as const, label: "Canvas" },
-    { id: "states" as const, label: "States", count: workflow.states.length },
+    { id: "states" as const, label: "Steps", count: workflow.states.length },
     {
       id: "transitions" as const,
-      label: "Transitions",
+      label: "Actions",
       count: workflow.transitions.length,
     },
     {
       id: "fields" as const,
-      label: "Fields",
+      label: "Details to Collect",
       count: fieldsLoading ? undefined : fields.length,
     },
   ] as const;
@@ -1930,7 +1935,7 @@ export function WorkflowDetail(): React.ReactElement {
                 <span
                   style={{ fontSize: "12px", color: "var(--text-secondary)" }}
                 >
-                  Initial state:{" "}
+                  Starting step:{" "}
                   <strong style={{ color: "var(--text-primary)" }}>
                     {workflow.initialState}
                   </strong>
@@ -1987,22 +1992,22 @@ export function WorkflowDetail(): React.ReactElement {
           }}
         >
           <KpiChip
-            label="States"
+            label="Steps"
             value={workflow.states.length}
             accent="var(--accent-primary)"
           />
           <KpiChip
-            label="Transitions"
+            label="Actions"
             value={workflow.transitions.length}
             accent="hsl(185,80%,40%)"
           />
           <KpiChip
-            label="Fields"
+            label="Details to Collect"
             value={fieldsLoading ? "…" : fields.length}
             accent="hsl(265,84%,60%)"
           />
           <KpiChip
-            label="SLA States"
+            label="Steps with Deadlines"
             value={slaStates}
             accent="hsl(35,90%,50%)"
           />
@@ -2030,6 +2035,8 @@ export function WorkflowDetail(): React.ReactElement {
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             style={{
+              appearance: "none",
+              WebkitAppearance: "none",
               padding: "12px 20px",
               fontSize: "13px",
               fontWeight: activeTab === tab.id ? 700 : 500,
@@ -2131,10 +2138,10 @@ export function WorkflowDetail(): React.ReactElement {
                   fontWeight: 500,
                 }}
               >
-                Canvas view is disabled for workflows with more than 20 states
-                or 40 transitions. Using pipeline view.
+                Canvas view is disabled for workflows with more than 20 steps or
+                40 actions. Using pipeline view.
               </div>
-              <SectionHeader label="State Pipeline" />
+              <SectionHeader label="Step Pipeline" />
               <StateFlowDiagram
                 states={workflow.states}
                 transitions={workflow.transitions}
@@ -2164,7 +2171,7 @@ export function WorkflowDetail(): React.ReactElement {
                 >
                   {canvasView === "canvas"
                     ? "Workflow Canvas"
-                    : "State Pipeline"}
+                    : "Step Pipeline"}
                 </span>
                 <div
                   style={{
@@ -2237,14 +2244,14 @@ export function WorkflowDetail(): React.ReactElement {
           }}
         >
           <SectionHeader
-            label="States"
+            label="Steps"
             count={workflow.states.length}
             action={
               <button
                 className="btn-primary btn-sm"
                 onClick={() => setShowAddState(true)}
               >
-                + Add State
+                + Add Step
               </button>
             }
           />
@@ -2252,9 +2259,9 @@ export function WorkflowDetail(): React.ReactElement {
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>State</th>
+                  <th>Step</th>
                   <th>Type</th>
-                  <th className="wfd-table-hide-xs">SLA</th>
+                  <th className="wfd-table-hide-xs">Deadline</th>
                   <th className="wfd-table-hide-xs">Order</th>
                   <th style={{ width: "80px" }}></th>
                 </tr>
@@ -2286,9 +2293,11 @@ export function WorkflowDetail(): React.ReactElement {
                     </td>
                     <td>
                       {state.isTerminal ? (
-                        <span className="badge badge-muted">Terminal</span>
+                        <span className="badge badge-muted">Final</span>
                       ) : state.name === workflow.initialState ? (
-                        <span className="badge badge-primary">Initial</span>
+                        <span className="badge badge-primary">
+                          Starting Step
+                        </span>
                       ) : (
                         <span className="badge badge-success">Active</span>
                       )}
@@ -2338,7 +2347,7 @@ export function WorkflowDetail(): React.ReactElement {
                             });
                             setStateError(null);
                           }}
-                          title="Edit state"
+                          title="Edit step"
                         >
                           <svg
                             width="13"
@@ -2360,14 +2369,14 @@ export function WorkflowDetail(): React.ReactElement {
                             disabled={deletingStateId === state.id}
                             onClick={() =>
                               setConfirmDelete({
-                                message: `Delete state "${state.label}"?`,
+                                message: `Delete step "${state.label}"?`,
                                 onConfirm: () => {
                                   setConfirmDelete(null);
                                   void handleDeleteState(state.id);
                                 },
                               })
                             }
-                            title="Delete state"
+                            title="Delete step"
                           >
                             {deletingStateId === state.id ? (
                               <span style={{ fontSize: "11px" }}>…</span>
@@ -2415,14 +2424,14 @@ export function WorkflowDetail(): React.ReactElement {
           }}
         >
           <SectionHeader
-            label="Transitions"
+            label="Actions"
             count={workflow.transitions.length}
             action={
               <button
                 className="btn-primary btn-sm"
                 onClick={() => setShowAddTransition(true)}
               >
-                + Add Transition
+                + Add Action
               </button>
             }
           />
@@ -2431,8 +2440,8 @@ export function WorkflowDetail(): React.ReactElement {
               className="empty-state-inline"
               style={{ padding: "28px", fontSize: "13px" }}
             >
-              No transitions yet. Add transitions to define how records move
-              between states.
+              No actions yet. Add actions to define how tickets move between
+              steps.
             </div>
           ) : (
             <div className="table-scroll">
@@ -2441,7 +2450,7 @@ export function WorkflowDetail(): React.ReactElement {
                   <tr>
                     <th>Route</th>
                     <th className="wfd-table-hide-xs">Label</th>
-                    <th className="wfd-table-hide-xs">Allowed Roles</th>
+                    <th className="wfd-table-hide-xs">Who Can Do This</th>
                     <th className="wfd-table-hide-xs">Requirements</th>
                     <th style={{ width: "80px" }}></th>
                   </tr>
@@ -2524,7 +2533,7 @@ export function WorkflowDetail(): React.ReactElement {
                             )}
                             {t.requiresFields.length > 0 && (
                               <span className="badge badge-warning">
-                                {t.requiresFields.length} field
+                                {t.requiresFields.length} detail
                                 {t.requiresFields.length > 1 ? "s" : ""}
                               </span>
                             )}
@@ -2552,7 +2561,7 @@ export function WorkflowDetail(): React.ReactElement {
                               });
                               setTransError(null);
                             }}
-                            title="Edit transition"
+                            title="Edit action"
                           >
                             <svg
                               width="13"
@@ -2573,14 +2582,14 @@ export function WorkflowDetail(): React.ReactElement {
                             disabled={deletingTransId === t.id}
                             onClick={() =>
                               setConfirmDelete({
-                                message: `Delete transition "${t.label || `${t.fromState} → ${t.toState}`}"?`,
+                                message: `Delete action "${t.label || `${t.fromState} → ${t.toState}`}"?`,
                                 onConfirm: () => {
                                   setConfirmDelete(null);
                                   void handleDeleteTransition(t.id);
                                 },
                               })
                             }
-                            title="Delete transition"
+                            title="Delete action"
                           >
                             {deletingTransId === t.id ? (
                               <span style={{ fontSize: "11px" }}>…</span>
@@ -2624,14 +2633,14 @@ export function WorkflowDetail(): React.ReactElement {
           }}
         >
           <SectionHeader
-            label="Fields"
+            label="Details to Collect"
             count={fields.length}
             action={
               <button
                 className="btn-primary btn-sm"
                 onClick={() => setShowAddField(true)}
               >
-                + Add Field
+                + Add Detail
               </button>
             }
           />
@@ -2644,25 +2653,25 @@ export function WorkflowDetail(): React.ReactElement {
               className="empty-state-inline"
               style={{ padding: "28px", fontSize: "13px" }}
             >
-              No fields yet. Add fields to capture data on records.
+              No details yet. Add details to capture information on tickets.
             </div>
           ) : (
             <div className="table-scroll">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th style={{ width: "28px" }}></th>
-                    <th>Field</th>
-                    <th className="wfd-table-hide-xs">Type</th>
-                    <th className="wfd-table-hide-xs">Required</th>
-                    <th style={{ width: "80px" }}></th>
-                  </tr>
-                </thead>
-                <DndContext
-                  sensors={fieldSensors}
-                  collisionDetection={closestCenter}
-                  onDragEnd={(e) => void handleFieldDragEnd(e)}
-                >
+              <DndContext
+                sensors={fieldSensors}
+                collisionDetection={closestCenter}
+                onDragEnd={(e) => void handleFieldDragEnd(e)}
+              >
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: "28px" }}></th>
+                      <th>Detail</th>
+                      <th className="wfd-table-hide-xs">Type</th>
+                      <th className="wfd-table-hide-xs">Required</th>
+                      <th style={{ width: "80px" }}></th>
+                    </tr>
+                  </thead>
                   <SortableContext
                     items={[...fields]
                       .sort((a, b) => a.sortOrder - b.sortOrder)
@@ -2730,7 +2739,7 @@ export function WorkflowDetail(): React.ReactElement {
                                     });
                                     setFieldError(null);
                                   }}
-                                  title="Edit field"
+                                  title="Edit detail"
                                 >
                                   <svg
                                     width="13"
@@ -2751,14 +2760,14 @@ export function WorkflowDetail(): React.ReactElement {
                                   disabled={deletingFieldId === f.id}
                                   onClick={() =>
                                     setConfirmDelete({
-                                      message: `Delete field "${f.label}"?`,
+                                      message: `Delete detail "${f.label}"?`,
                                       onConfirm: () => {
                                         setConfirmDelete(null);
                                         void handleDeleteField(f.id);
                                       },
                                     })
                                   }
-                                  title="Delete field"
+                                  title="Delete detail"
                                 >
                                   {deletingFieldId === f.id ? (
                                     <span style={{ fontSize: "11px" }}>…</span>
@@ -2785,8 +2794,8 @@ export function WorkflowDetail(): React.ReactElement {
                         ))}
                     </tbody>
                   </SortableContext>
-                </DndContext>
-              </table>
+                </table>
+              </DndContext>
             </div>
           )}
         </div>
@@ -2822,7 +2831,7 @@ export function WorkflowDetail(): React.ReactElement {
               }}
             >
               Admins have full access over this workflow — they can manage
-              states, transitions, and fields.
+              steps, actions, and details to collect.
               {!isAdminListEditor &&
                 " Only the creator or a global admin can add or remove admins."}
             </p>
@@ -2839,7 +2848,10 @@ export function WorkflowDetail(): React.ReactElement {
               >
                 {assignedTo.map((userId) => {
                   const u = orgUsers.find((o) => o.userId === userId);
-                  const displayName = u?.displayName ?? userId;
+                  // `displayName`/`userId` are expected to be strings, but
+                  // user data can be malformed upstream (missing profile
+                  // fields) — coerce so a bad row can't blank the whole page.
+                  const displayName = String(u?.displayName ?? userId);
                   const initials = displayName
                     .split(" ")
                     .slice(0, 2)
@@ -3028,9 +3040,9 @@ export function WorkflowDetail(): React.ReactElement {
                 >
                   {[
                     { label: "Workflow ID", value: id ?? "" },
-                    { label: "Initial State", value: workflow.initialState },
+                    { label: "Starting Step", value: workflow.initialState },
                     {
-                      label: "Terminal States",
+                      label: "Final Steps",
                       value:
                         workflow.states
                           .filter((s) => s.isTerminal)
@@ -3038,11 +3050,11 @@ export function WorkflowDetail(): React.ReactElement {
                           .join(", ") || "None",
                     },
                     {
-                      label: "SLA Coverage",
+                      label: "Steps with Deadlines",
                       value:
                         slaStates > 0
-                          ? `${slaStates} of ${workflow.states.length} states`
-                          : "No SLAs set",
+                          ? `${slaStates} of ${workflow.states.length} steps`
+                          : "No deadlines set",
                     },
                     {
                       label: "Status",
@@ -3091,7 +3103,7 @@ export function WorkflowDetail(): React.ReactElement {
               {/* State color legend */}
               {workflow.states.length > 0 && (
                 <div className="data-panel wfd-settings-panel">
-                  <SectionHeader label="State Colors" />
+                  <SectionHeader label="Step Colors" />
                   <div
                     style={{
                       display: "flex",
@@ -3348,7 +3360,7 @@ export function WorkflowDetail(): React.ReactElement {
         <div className="modal-overlay" onClick={() => setShowAddField(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3 className="modal-title">Add Field</h3>
+              <h3 className="modal-title">Add Detail</h3>
               <button
                 className="modal-close"
                 onClick={() => setShowAddField(false)}
@@ -3386,7 +3398,7 @@ export function WorkflowDetail(): React.ReactElement {
                     />
                   </div>
                   <div className="form-group">
-                    <label className="form-label">Field Name *</label>
+                    <label className="form-label">Detail ID *</label>
                     <input
                       className="form-input"
                       placeholder="e.g. customer_name"
@@ -3401,7 +3413,7 @@ export function WorkflowDetail(): React.ReactElement {
                   </div>
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Field Type *</label>
+                  <label className="form-label">Detail Type *</label>
                   <select
                     className="form-input"
                     value={fieldForm.fieldType}
@@ -3446,7 +3458,7 @@ export function WorkflowDetail(): React.ReactElement {
                   className="btn-primary"
                   disabled={savingField}
                 >
-                  {savingField ? "Adding…" : "Add Field"}
+                  {savingField ? "Adding…" : "Add Detail"}
                 </button>
               </div>
             </form>
@@ -3459,7 +3471,7 @@ export function WorkflowDetail(): React.ReactElement {
         <div className="modal-overlay" onClick={() => setShowAddState(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3 className="modal-title">Add State</h3>
+              <h3 className="modal-title">Add Step</h3>
               <button
                 className="modal-close"
                 onClick={() => setShowAddState(false)}
@@ -3497,7 +3509,7 @@ export function WorkflowDetail(): React.ReactElement {
                     />
                   </div>
                   <div className="form-group">
-                    <label className="form-label">State Name *</label>
+                    <label className="form-label">Step ID *</label>
                     <input
                       className="form-input"
                       placeholder="e.g. in_progress"
@@ -3553,7 +3565,7 @@ export function WorkflowDetail(): React.ReactElement {
                     </div>
                   </div>
                   <div className="form-group">
-                    <label className="form-label">Sort Order</label>
+                    <label className="form-label">Order</label>
                     <input
                       className="form-input"
                       type="number"
@@ -3569,7 +3581,9 @@ export function WorkflowDetail(): React.ReactElement {
                   </div>
                 </div>
                 <div className="form-group">
-                  <label className="form-label">SLA Hours (optional)</label>
+                  <label className="form-label">
+                    Deadline (hours, optional)
+                  </label>
                   <input
                     className="form-input"
                     type="number"
@@ -3595,7 +3609,15 @@ export function WorkflowDetail(): React.ReactElement {
                       }))
                     }
                   />
-                  <span>Terminal state (no outgoing transitions expected)</span>
+                  <span>
+                    This is a final step
+                    <br />
+                    <span
+                      style={{ fontWeight: 400, color: "var(--text-muted)" }}
+                    >
+                      Tickets won&apos;t move further once they reach this step
+                    </span>
+                  </span>
                 </label>
               </div>
               <div className="modal-footer">
@@ -3611,7 +3633,7 @@ export function WorkflowDetail(): React.ReactElement {
                   className="btn-primary"
                   disabled={savingState}
                 >
-                  {savingState ? "Adding…" : "Add State"}
+                  {savingState ? "Adding…" : "Add Step"}
                 </button>
               </div>
             </form>
@@ -3627,7 +3649,7 @@ export function WorkflowDetail(): React.ReactElement {
         >
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3 className="modal-title">Add Transition</h3>
+              <h3 className="modal-title">Add Action</h3>
               <button
                 className="modal-close"
                 onClick={() => setShowAddTransition(false)}
@@ -3647,7 +3669,7 @@ export function WorkflowDetail(): React.ReactElement {
                 )}
                 <div className="form-row">
                   <div className="form-group">
-                    <label className="form-label">From State *</label>
+                    <label className="form-label">From Step *</label>
                     <select
                       className="form-input"
                       value={transForm.fromState}
@@ -3668,7 +3690,7 @@ export function WorkflowDetail(): React.ReactElement {
                     </select>
                   </div>
                   <div className="form-group">
-                    <label className="form-label">To State *</label>
+                    <label className="form-label">To Step *</label>
                     <select
                       className="form-input"
                       value={transForm.toState}
@@ -3703,7 +3725,7 @@ export function WorkflowDetail(): React.ReactElement {
                 </div>
                 <div className="form-group">
                   <label className="form-label">
-                    Allowed Roles (blank = any role)
+                    Who Can Do This (blank = anyone)
                   </label>
                   {availableRoles.length === 0 ? (
                     <p style={{ fontSize: "13px", color: "#6b7280" }}>
@@ -3778,7 +3800,7 @@ export function WorkflowDetail(): React.ReactElement {
                   className="btn-primary"
                   disabled={savingTrans}
                 >
-                  {savingTrans ? "Adding…" : "Add Transition"}
+                  {savingTrans ? "Adding…" : "Add Action"}
                 </button>
               </div>
             </form>
@@ -3791,7 +3813,9 @@ export function WorkflowDetail(): React.ReactElement {
         <div className="modal-overlay" onClick={() => setEditingField(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3 className="modal-title">Edit Field — {editingField.label}</h3>
+              <h3 className="modal-title">
+                Edit Detail — {editingField.label}
+              </h3>
               <button
                 className="modal-close"
                 onClick={() => setEditingField(null)}
@@ -3824,7 +3848,9 @@ export function WorkflowDetail(): React.ReactElement {
                     />
                   </div>
                   <div className="form-group">
-                    <label className="form-label">Field Name (Immutable)</label>
+                    <label className="form-label">
+                      Detail ID (cannot be changed)
+                    </label>
                     <input
                       className="form-input"
                       value={fieldForm.name}
@@ -3833,7 +3859,9 @@ export function WorkflowDetail(): React.ReactElement {
                   </div>
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Field Type (Immutable)</label>
+                  <label className="form-label">
+                    Detail Type (cannot be changed)
+                  </label>
                   <input
                     className="form-input"
                     value={
@@ -3883,7 +3911,7 @@ export function WorkflowDetail(): React.ReactElement {
         <div className="modal-overlay" onClick={() => setEditingState(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3 className="modal-title">Edit State — {editingState.label}</h3>
+              <h3 className="modal-title">Edit Step — {editingState.label}</h3>
               <button
                 className="modal-close"
                 onClick={() => setEditingState(null)}
@@ -3908,20 +3936,40 @@ export function WorkflowDetail(): React.ReactElement {
                       className="form-input"
                       placeholder="e.g. In Progress"
                       value={stateForm.label}
-                      onChange={(e) =>
-                        setStateForm((f) => ({ ...f, label: e.target.value }))
-                      }
+                      onChange={(e) => {
+                        const label = e.target.value;
+                        const name = label
+                          .toLowerCase()
+                          .replace(/\s+/g, "_")
+                          .replace(/[^a-z0-9_]/g, "");
+                        setStateForm((f) => ({ ...f, label, name }));
+                      }}
                       required
                       autoFocus
                     />
                   </div>
                   <div className="form-group">
-                    <label className="form-label">State Name (Immutable)</label>
+                    <label className="form-label">Step ID *</label>
                     <input
                       className="form-input"
+                      placeholder="e.g. in_progress"
                       value={stateForm.name}
-                      disabled
+                      onChange={(e) =>
+                        setStateForm((f) => ({ ...f, name: e.target.value }))
+                      }
+                      pattern="^[a-z_][a-z0-9_]*$"
+                      title="snake_case only"
+                      required
                     />
+                    <span
+                      style={{
+                        fontSize: "12px",
+                        color: "var(--text-secondary, #6b7280)",
+                      }}
+                    >
+                      Used to connect Actions to this step — changing it updates
+                      any Actions that already point here.
+                    </span>
                   </div>
                 </div>
                 <div className="form-row">
@@ -3966,7 +4014,7 @@ export function WorkflowDetail(): React.ReactElement {
                     </div>
                   </div>
                   <div className="form-group">
-                    <label className="form-label">Sort Order</label>
+                    <label className="form-label">Order</label>
                     <input
                       className="form-input"
                       type="number"
@@ -3982,7 +4030,9 @@ export function WorkflowDetail(): React.ReactElement {
                   </div>
                 </div>
                 <div className="form-group">
-                  <label className="form-label">SLA Hours (optional)</label>
+                  <label className="form-label">
+                    Deadline (hours, optional)
+                  </label>
                   <input
                     className="form-input"
                     type="number"
@@ -4008,7 +4058,15 @@ export function WorkflowDetail(): React.ReactElement {
                       }))
                     }
                   />
-                  <span>Terminal state (no outgoing transitions expected)</span>
+                  <span>
+                    This is a final step
+                    <br />
+                    <span
+                      style={{ fontWeight: 400, color: "var(--text-muted)" }}
+                    >
+                      Tickets won&apos;t move further once they reach this step
+                    </span>
+                  </span>
                 </label>
               </div>
               <div className="modal-footer">
@@ -4040,7 +4098,7 @@ export function WorkflowDetail(): React.ReactElement {
         >
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3 className="modal-title">Edit Transition</h3>
+              <h3 className="modal-title">Edit Action</h3>
               <button
                 className="modal-close"
                 onClick={() => setEditingTransition(null)}
@@ -4060,7 +4118,9 @@ export function WorkflowDetail(): React.ReactElement {
                 )}
                 <div className="form-row">
                   <div className="form-group">
-                    <label className="form-label">From State (Immutable)</label>
+                    <label className="form-label">
+                      From Step (cannot be changed)
+                    </label>
                     <input
                       className="form-input"
                       value={transForm.fromState}
@@ -4068,7 +4128,9 @@ export function WorkflowDetail(): React.ReactElement {
                     />
                   </div>
                   <div className="form-group">
-                    <label className="form-label">To State (Immutable)</label>
+                    <label className="form-label">
+                      To Step (cannot be changed)
+                    </label>
                     <input
                       className="form-input"
                       value={transForm.toState}
@@ -4090,7 +4152,7 @@ export function WorkflowDetail(): React.ReactElement {
                 </div>
                 <div className="form-group">
                   <label className="form-label">
-                    Allowed Roles (blank = any role)
+                    Who Can Do This (blank = anyone)
                   </label>
                   {availableRoles.length === 0 ? (
                     <p style={{ fontSize: "13px", color: "#6b7280" }}>
@@ -4244,7 +4306,7 @@ export function WorkflowDetail(): React.ReactElement {
             >
               You are about to permanently delete{" "}
               <strong>"{workflow.name}"</strong>. This will also remove all its
-              states and transitions.
+              steps and actions.
             </p>
             <p
               style={{

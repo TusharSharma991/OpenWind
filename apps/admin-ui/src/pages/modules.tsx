@@ -23,6 +23,8 @@ const MODULE_EMOJI: Record<string, string> = {
   invoicing: "🧾",
   procurement: "🛒",
   reimbursements: "💸",
+  "nsi-amendment": "🚆",
+  "sales-pipeline": "📈",
 };
 
 const MODULE_DEFAULT_NAMES: Record<string, string> = {
@@ -33,6 +35,8 @@ const MODULE_DEFAULT_NAMES: Record<string, string> = {
   projects: "Task Lifecycle",
   invoicing: "Invoice Lifecycle",
   procurement: "Purchase Approval",
+  "nsi-amendment": "NSI Amendment Request",
+  "sales-pipeline": "Sales Pipeline Tracker",
 };
 
 const MODULE_FEATURES: Record<string, string[]> = {
@@ -78,6 +82,18 @@ const MODULE_FEATURES: Record<string, string[]> = {
     "Vendor tracking",
     "Delivery confirmation",
   ],
+  "nsi-amendment": [
+    "Internal review sign-off",
+    "Document collection",
+    "Railway submission tracking",
+    "Follow-up reminders",
+  ],
+  "sales-pipeline": [
+    "Enquiry-to-order tracking",
+    "Costing & approvals",
+    "Follow-up reminders",
+    "Pipeline KPI dashboard",
+  ],
 };
 
 function SectionLabel({
@@ -109,6 +125,8 @@ const MODULE_COLOR: Record<string, string> = {
   projects: "hsl(185,80%,40%)",
   invoicing: "hsl(340,80%,58%)",
   procurement: "hsl(45,90%,48%)",
+  "nsi-amendment": "hsl(200,85%,45%)",
+  "sales-pipeline": "hsl(280,70%,55%)",
 };
 
 const MODULE_STATES: Record<
@@ -1096,14 +1114,14 @@ function ModuleCard({
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
-        background: "var(--bg-card)",
+        background: `color-mix(in srgb, ${accent} 8%, var(--bg-card))`,
         border: `1px solid ${hovered ? accent + "55" : "var(--border-color)"}`,
         borderRadius: "var(--radius-md)",
         overflow: "hidden",
         display: "flex",
         flexDirection: "column",
         transition: "border-color .15s, box-shadow .15s",
-        boxShadow: hovered ? `0 4px 20px ${accent}22` : "none",
+        boxShadow: hovered ? `0 4px 20px ${accent}22` : "var(--shadow-sm)",
         position: "relative",
       }}
     >

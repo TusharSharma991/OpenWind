@@ -69,9 +69,11 @@ is a repo-wide no-op (discovered during the #126 review round) — needs its own
 real lint scripts to every `package.json`.
 
 **Delivery has guardrails (Claude Code only; plain git + CI unaffected).** Every change runs
-Plan → Code → Review → Ship: freeze + **you approve** an acceptance-criteria plan-lock
+Plan → Code → Review → Docs → Ship: freeze + **you approve** an acceptance-criteria plan-lock
 (`/spec-tasks` or the `openwind-loop` pick step) before editing source; all edits then one `/review`;
-the commit procedure runs `typecheck+lint+test+test:isolation`, writes the commit marker, and opens a
+then docs are updated alongside the change (`write-docs-marker.sh --touched`) or the commit
+explicitly records why this diff needs none (`--skip "<reason>"`) — no silent third option; the
+commit procedure runs `typecheck+lint+test+test:isolation`, writes the commit marker, and opens a
 structured PR. The hooks are **guardrails, not barricades** — best-effort speed bumps that catch
 honest mistakes; they are not a security boundary (a determined agent can bypass them). The real
 enforcement is CI + required human PR review + branch protection. See
@@ -91,8 +93,10 @@ enforcement is CI + required human PR review + branch protection. See
 apps/
   api/          Hono API server
   worker/       BullMQ background workers
-  admin-ui/     Refine + shadcn/ui (agent/admin views)
-  portal/       Customer-facing React portal
+  admin-ui/     Refine + shadcn/ui — single app serving both agent/admin and customer
+                users (port 3001), RBAC-controlled internally. There is no separate
+                portal app — `apps/portal` on disk is stale/unused, kept only pending
+                cleanup (see docker-compose.yml's comment on the admin-ui service).
 packages/
   db/           Drizzle schema, migrations, client
   entity-engine/

@@ -56,6 +56,13 @@ const EnvSchema = z
     // AuthNexus project id — used to select which nexus_projects[] grant's
     // roles apply to this app (a user may belong to multiple projects).
     AUTHNEXUS_PROJECT_ID: z.string().min(1),
+    // M2M service-account key (JWT-bearer grant, AuthNexus wraps Zitadel so
+    // this is the identical grant/key shape Zitadel itself uses) — for
+    // background contexts with no user session to forward (e.g. apps/worker's
+    // notification-outbound-worker resolving a recipient's email via
+    // packages/auth/src/authnexus-management.ts's getUserById). Optional:
+    // callers without this configured just get null instead of a crash.
+    AUTHNEXUS_SERVICE_ACCOUNT_KEY: z.string().optional(),
     // Dev fallback: used as tenantId when the org claim is absent (instance admin login).
     // Must never be set in production — it bypasses tenant isolation for instance-admin logins.
     DEV_TENANT_ID: z.string().optional(),
@@ -63,6 +70,33 @@ const EnvSchema = z
     // In development/test the API accepts all http://localhost:* origins.
     CORS_ORIGIN: z.string().url().optional(),
     NOVU_API_KEY: z.string(),
+    // In-app notification hub (docs/specs/in-app-notification-hub.md).
+    // Single hardcoded admin recipient for system.error notifications — role
+    // membership isn't queryable from our DB today (roles are JWT-only
+    // claims from Zitadel), so this is a deliberate placeholder until proper
+    // admin-role resolution is built. Editable at any time; optional so a
+    // tenant without one configured just gets no system.error recipients.
+    SYSTEM_ADMIN_USER_ID: z.string().optional(),
+    // Outbound handoff seam to the externally-owned email/SMS/WhatsApp
+    // service. Contract is unresolved as of this feature — when unset, the
+    // outbound worker logs and marks the notification 'sent' as a no-op
+    // rather than retrying forever against a service that doesn't exist yet.
+    NOTIFICATION_SERVICE_URL: z.string().url().optional(),
+    // S2S auth for the outbound handoff (docs/notification-outbound-contract.md's
+    // auth section) — a DEDICATED AuthNexus machine user/key, deliberately
+    // separate from AUTHNEXUS_SERVICE_ACCOUNT_KEY (which authenticates as
+    // openwind-api-bot for the admin/management API). Never share this key
+    // with the outbound service — it only ever mints tokens on our side; the
+    // outbound service verifies them via AuthNexus's public JWKS, it never
+    // needs the private key itself.
+    NOTIFICATION_AUTHNEXUS_KEY_JSON: z.string().optional(),
+    // The dedicated AuthNexus project ID the M2M token's `aud` claim must
+    // contain (requested via scope urn:zitadel:iam:org:project:id:<id>:aud —
+    // AuthNexus mirrors Zitadel's scope naming). A project separate from the
+    // main app project, deliberately, so a human end-user's own access token
+    // can never satisfy the outbound service's audience check (see
+    // docs/notification-outbound-contract.md).
+    NOTIFICATION_AUTHNEXUS_AUDIENCE: z.string().optional(),
     S3_ENDPOINT: z.string().url(),
     // Public URL browsers use to reach MinIO. In Docker the internal endpoint is
     // http://minio:9000 but presigned URLs must resolve from the browser, so set

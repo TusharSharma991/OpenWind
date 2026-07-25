@@ -8,6 +8,8 @@ import {
 import { fetchWithAuth, API_URL } from "../../lib/api.js";
 import { useEntityTypes, toTypeSlug } from "../../entity-type-context.js";
 import { userManager, getRolesFromProfile } from "../../authProvider.js";
+import { isRenderableIcon } from "../../lib/icon.js";
+import { humanizeWorkflowName } from "../../lib/format.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -511,6 +513,13 @@ function KanbanColumn({
   return (
     <div
       className={`kb-col kb-col--${dropState}`}
+      style={
+        state?.color
+          ? {
+              background: `color-mix(in srgb, ${state.color} 8%, var(--bg-secondary))`,
+            }
+          : undefined
+      }
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
@@ -1074,8 +1083,10 @@ export function WorkflowRecords(): React.ReactElement {
     ? states.find((s) => s.name === pendingDrop.toStateName)
     : null;
 
-  const displayName = entityType?.plural ?? workflowName;
-  const displayIcon = entityType?.icon ?? null;
+  const displayName = entityType?.plural ?? humanizeWorkflowName(workflowName);
+  const displayIcon = isRenderableIcon(entityType?.icon)
+    ? entityType?.icon
+    : null;
 
   return (
     <div className="kb-page">
@@ -1629,6 +1640,7 @@ export function WorkflowRecords(): React.ReactElement {
           border: 1px solid var(--border-color);
           border-radius: var(--radius-md);
           transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+          min-height: 50vh;
           max-height: calc(100vh - 185px);
         }
         .kb-col--valid {
@@ -1766,12 +1778,13 @@ export function WorkflowRecords(): React.ReactElement {
 
         .kb-card {
           background: var(--bg-card);
-          border: 1px solid var(--border-color);
+          border: 1px solid var(--border-subtle);
           border-radius: var(--radius-sm);
           padding: 11px 12px;
           cursor: grab;
           user-select: none;
           -webkit-user-drag: element;
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
           transition:
             box-shadow var(--transition-fast),
             transform var(--transition-fast),

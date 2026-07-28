@@ -326,8 +326,8 @@ services:
       AUTHNEXUS_JWKS_URL: ${AUTHNEXUS_JWKS_URL:-https://auth.rokkalabs.com/api/v1/auth/jwks}
       # aud claim is the OIDC client id (confirmed against a real token), not a
       # Zitadel-style project urn — despite the project-scoped scope name at login.
-      AUTHNEXUS_AUDIENCE: ${AUTHNEXUS_AUDIENCE:-382580183942627331}
-      AUTHNEXUS_PROJECT_ID: ${AUTHNEXUS_PROJECT_ID:-382580151663198211}
+      AUTHNEXUS_AUDIENCE: ${AUTHNEXUS_AUDIENCE:-383330131369852931}
+      AUTHNEXUS_PROJECT_ID: ${AUTHNEXUS_PROJECT_ID:-383330037585149955}
       # OPENBAO_ADDR: http://openbao:8200  # uncomment when openbao service is enabled
       # Local-disk file storage (see docs/specs/local-disk-file-storage.md) —
       # in-container path only; the host-side bind-mount source is
@@ -375,8 +375,8 @@ services:
       REDIS_URL: redis://redis:6379
       AUTHNEXUS_ISSUER: ${AUTHNEXUS_ISSUER:-https://auth.rokkalabs.com}
       AUTHNEXUS_JWKS_URL: ${AUTHNEXUS_JWKS_URL:-https://auth.rokkalabs.com/api/v1/auth/jwks}
-      AUTHNEXUS_AUDIENCE: ${AUTHNEXUS_AUDIENCE:-382580183942627331}
-      AUTHNEXUS_PROJECT_ID: ${AUTHNEXUS_PROJECT_ID:-382580151663198211}
+      AUTHNEXUS_AUDIENCE: ${AUTHNEXUS_AUDIENCE:-383330131369852931}
+      AUTHNEXUS_PROJECT_ID: ${AUTHNEXUS_PROJECT_ID:-383330037585149955}
       # Local-disk file storage (see docs/specs/local-disk-file-storage.md) —
       # must be the same in-container path as ow-backend so the AV scan
       # worker reads bytes from the same place the API wrote them.

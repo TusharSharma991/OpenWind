@@ -14,6 +14,8 @@ export { verifyJwt, extractAuthContext } from "./jwks.js";
 export {
   listProjectRoles,
   listOrgUsers,
+  listUserIdsWithRole,
+  listUserRolesByUserId,
   getUserById,
   invalidateUserCache,
 } from "./authnexus-management.js";

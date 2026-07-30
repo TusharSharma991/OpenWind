@@ -12,6 +12,8 @@ function envJsPlugin(vars: Record<string, string | undefined>): Plugin {
     AUTHNEXUS_ORG_ID: vars["AUTHNEXUS_ORG_ID"] ?? vars["VITE_ORG_ID"] ?? "",
     AUTHNEXUS_PROJECT_ID:
       vars["AUTHNEXUS_PROJECT_ID"] ?? vars["VITE_PROJECT_ID"] ?? "",
+    IDLE_LOGOUT_ENABLED: vars["VITE_IDLE_LOGOUT_ENABLED"] ?? "",
+    IDLE_LOGOUT_TIMEOUT_MINUTES: vars["VITE_IDLE_LOGOUT_TIMEOUT_MINUTES"] ?? "",
   })};`;
   return {
     name: "serve-env-js",

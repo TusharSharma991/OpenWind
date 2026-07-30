@@ -6,6 +6,7 @@ interface User {
   displayName: string;
   email: string;
   loginName: string;
+  roles?: string[];
 }
 
 function initials(name: string): string {
@@ -156,7 +157,7 @@ export function UsersPage(): React.ReactElement {
           >
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                {["Name", "Login", "Email", "User ID"].map((h) => (
+                {["Name", "Login", "Email", "Roles", "User ID"].map((h) => (
                   <th
                     key={h}
                     style={{
@@ -252,6 +253,43 @@ export function UsersPage(): React.ReactElement {
                       }}
                     >
                       {u.email}
+                    </td>
+                    <td style={{ padding: "12px 16px" }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "6px",
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        {(u.roles ?? []).length === 0 ? (
+                          <span
+                            style={{
+                              fontSize: "12px",
+                              color: "var(--text-muted)",
+                            }}
+                          >
+                            —
+                          </span>
+                        ) : (
+                          (u.roles ?? []).map((role) => (
+                            <span
+                              key={role}
+                              style={{
+                                fontSize: "11px",
+                                fontWeight: 600,
+                                padding: "2px 8px",
+                                borderRadius: "999px",
+                                background: "var(--bg-subtle)",
+                                color: "var(--text-secondary)",
+                                textTransform: "capitalize",
+                              }}
+                            >
+                              {role}
+                            </span>
+                          ))
+                        )}
+                      </div>
                     </td>
                     <td
                       style={{

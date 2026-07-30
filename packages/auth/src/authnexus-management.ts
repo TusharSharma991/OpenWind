@@ -262,6 +262,42 @@ export async function listOrgUsers(
     .sort((a, b) => a.displayName.localeCompare(b.displayName));
 }
 
+// ── List user roles by user id ────────────────────────────────────────────────
+// Derived from the same project-assignments endpoint as listOrgUsers/
+// listProjectRoles — a map of every active grant's roleKeys, keyed by userId.
+// Feeds (a) the users page's Roles column and role-based filtering, and (b)
+// listUserIdsWithRole below.
+
+export async function listUserRolesByUserId(
+  orgId: string,
+  bearerToken: string,
+): Promise<Map<string, string[]>> {
+  if (!orgId) return new Map();
+  const assignments = await getActiveAssignments(orgId, bearerToken);
+  const rolesByUserId = new Map<string, string[]>();
+  for (const a of assignments) {
+    const existing = rolesByUserId.get(a.userId) ?? [];
+    rolesByUserId.set(
+      a.userId,
+      Array.from(new Set([...existing, ...a.roleKeys])),
+    );
+  }
+  return rolesByUserId;
+}
+
+export async function listUserIdsWithRole(
+  orgId: string,
+  roleKey: string,
+  bearerToken: string,
+): Promise<Set<string>> {
+  const rolesByUserId = await listUserRolesByUserId(orgId, bearerToken);
+  const userIds = new Set<string>();
+  for (const [userId, roles] of rolesByUserId) {
+    if (roles.includes(roleKey)) userIds.add(userId);
+  }
+  return userIds;
+}
+
 // ── Get single user by ID ─────────────────────────────────────────────────────
 
 const _userByIdCache = new Map<

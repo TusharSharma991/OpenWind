@@ -32,6 +32,25 @@ interface OutboundPayload {
 }
 
 /**
+ * notifications.link is stored as an app-relative path (e.g.
+ * "/records/ticket-1/abc"), matching what the admin-ui router expects. The
+ * outbound service has no notion of our routing base, so it needs the full,
+ * clickable URL — resolved against APP_URL (config-driven; same var already
+ * used for CORS_ORIGIN) rather than hardcoding a host here.
+ */
+function toAbsoluteLink(link: string | null): string | null {
+  if (!link) return null;
+  if (!env.APP_URL) {
+    logger.warn(
+      {},
+      "Notification outbound: APP_URL not configured — sending link as a relative path",
+    );
+    return link;
+  }
+  return new URL(link, env.APP_URL).toString();
+}
+
+/**
  * The single, isolated seam to the externally-owned notification service
  * (contract unresolved as of this feature). Everything upstream — triggers,
  * the in-app notifier, the DB tables — is stable regardless of what this
@@ -69,6 +88,9 @@ async function dispatchOutbound(payload: OutboundPayload): Promise<void> {
     method: "POST",
     headers,
     body: JSON.stringify(payload),
+    // Without a timeout, a hung external notification service hangs this
+    // BullMQ job indefinitely instead of failing and retrying/DLQ-ing.
+    signal: AbortSignal.timeout(10_000),
   });
 
   if (!res.ok) {
@@ -143,7 +165,7 @@ export const notificationOutboundWorker = new Worker<OutboundJobData>(
       tenantId,
       title: notification.title,
       body: notification.body,
-      link: notification.link,
+      link: toAbsoluteLink(notification.link),
       recipients,
       channels: { email: true, sms: false, whatsapp: false },
     });
@@ -152,7 +174,12 @@ export const notificationOutboundWorker = new Worker<OutboundJobData>(
       tx
         .update(notifications)
         .set({ outboundStatus: "sent" })
-        .where(eq(notifications.id, notificationId)),
+        .where(
+          and(
+            eq(notifications.id, notificationId),
+            eq(notifications.tenantId, tenantId),
+          ),
+        ),
     );
   },
   { connection },
@@ -173,7 +200,12 @@ async function handleFailedJob(
       tx
         .update(notifications)
         .set({ outboundStatus: "failed" })
-        .where(eq(notifications.id, notificationId))
+        .where(
+          and(
+            eq(notifications.id, notificationId),
+            eq(notifications.tenantId, tenantId),
+          ),
+        )
         .returning({ type: notifications.type }),
     );
 

@@ -63,6 +63,20 @@ const EnvSchema = z
     // packages/auth/src/authnexus-management.ts's getUserById). Optional:
     // callers without this configured just get null instead of a crash.
     AUTHNEXUS_SERVICE_ACCOUNT_KEY: z.string().optional(),
+    // Org id required alongside any M2M grant request (AuthNexus/Zitadel's
+    // /api/v1/auth/m2m endpoint rejects the request without it) — previously
+    // only wired as a frontend/Vite var, never validated here.
+    AUTHNEXUS_ORG_ID: z.string().optional(),
+    // The underlying Zitadel instance's own address — the `aud` an M2M
+    // assertion must be signed for so the server that actually verifies the
+    // signature (Zitadel, not the AuthNexus API wrapper) accepts it. Distinct
+    // from AUTHNEXUS_ISSUER (the public AuthNexus API origin our app talks
+    // to for everything else) — confirmed via a real M2M token exchange
+    // returning 401 "Invalid or unsigned service assertion" when the
+    // assertion's aud was set to AUTHNEXUS_ISSUER instead of this value.
+    // Optional: M2M callers without this configured just fail to mint a
+    // token (existing null/no-op fallback), not a crash.
+    AUTHNEXUS_ZITADEL_AUD: z.string().optional(),
     // Dev fallback: used as tenantId when the org claim is absent (instance admin login).
     // Must never be set in production — it bypasses tenant isolation for instance-admin logins.
     DEV_TENANT_ID: z.string().optional(),

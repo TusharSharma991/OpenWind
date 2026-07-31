@@ -100,11 +100,12 @@ describe("getNotificationOutboundToken", () => {
     expect(token).toBe("tok-abc");
     expect(mockFetch).toHaveBeenCalledTimes(1);
     const [url, init] = mockFetch.mock.calls[0] as [string, { body?: string }];
-    expect(url).toBe("https://issuer.example.com/oauth/v2/token");
+    expect(url).toBe("https://issuer.example.com/api/v1/auth/m2m");
     const body = (init.body as string) ?? "";
     expect(body).toContain(
       "scope=openid+urn%3Azitadel%3Aiam%3Aorg%3Aproject%3Aid%3A383173843264471042%3Aaud",
     );
+    expect(body).toContain("org_id=");
   });
 
   it("caches the token across calls instead of re-requesting", async () => {

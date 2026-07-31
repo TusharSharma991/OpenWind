@@ -104,16 +104,20 @@ async function getServiceAccountToken(): Promise<string | null> {
         : (exportedKey as Buffer).toString("utf8");
 
     const privateKey = await importPKCS8(keyPem, "RS256");
+    // Assertion aud must target Zitadel itself (the server that actually
+    // verifies this signature), not AUTHNEXUS_ISSUER (the AuthNexus API
+    // wrapper's own public origin) — see AUTHNEXUS_ZITADEL_AUD's doc comment
+    // in packages/config/src/env.ts for how this was confirmed.
     const assertion = await new SignJWT({})
       .setProtectedHeader({ alg: "RS256", kid: keyConfig.keyId })
       .setIssuedAt()
       .setIssuer(keyConfig.userId)
       .setSubject(keyConfig.userId)
-      .setAudience(env.AUTHNEXUS_ISSUER)
+      .setAudience(env.AUTHNEXUS_ZITADEL_AUD ?? env.AUTHNEXUS_ISSUER)
       .setExpirationTime("1h")
       .sign(privateKey);
 
-    const tokenUrl = `${env.AUTHNEXUS_ISSUER}/oauth/v2/token`;
+    const tokenUrl = `${env.AUTHNEXUS_ISSUER}/api/v1/auth/m2m`;
     const res = await fetch(tokenUrl, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -121,6 +125,7 @@ async function getServiceAccountToken(): Promise<string | null> {
         grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
         scope: `openid urn:zitadel:iam:org:project:id:${env.AUTHNEXUS_PROJECT_ID}:aud`,
         assertion,
+        org_id: env.AUTHNEXUS_ORG_ID ?? "",
       }).toString(),
     });
 

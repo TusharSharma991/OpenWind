@@ -6,7 +6,7 @@ import { tenantUsers, withTenantContext } from "@platform/db";
 import { createEntity } from "@platform/entity-engine";
 import { factory } from "./factory.js";
 import { handleEntityError } from "../../lib/handle-entity-error.js";
-import { listUserIdsWithRole } from "../../lib/zitadel-management.js";
+import { listUserIdsWithRole } from "../../lib/authnexus-management.js";
 
 const CreateEntitySchema = z.object({
   entityTypeId: z.string().uuid(),
@@ -26,13 +26,14 @@ export const createEntityHandler = factory.createHandlers(
     const input = c.req.valid("json");
 
     // assignedTo must resolve to a real tenant member holding the "user" role —
-    // the same pool GET /platform/users exposes. Role membership is Zitadel-side
+    // the same pool GET /platform/users exposes. Role membership is AuthNexus-side
     // (tenant_users has no role column), scoped by orgId, so this also rejects a
     // cross-tenant user id (they simply won't appear in this org's role set).
     // Fail closed (no orgId → reject) rather than silently skipping the check.
     if (input.assignedTo !== undefined) {
+      const bearerToken = c.req.header("Authorization")?.slice(7) ?? "";
       const usersWithRole = orgId
-        ? await listUserIdsWithRole(orgId, "user")
+        ? await listUserIdsWithRole(orgId, "user", bearerToken)
         : new Set<string>();
       if (!usersWithRole.has(input.assignedTo)) {
         return c.json(

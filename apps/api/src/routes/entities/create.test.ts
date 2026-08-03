@@ -27,7 +27,7 @@ vi.mock("@platform/auth", () => ({
   },
 }));
 
-vi.mock("../../lib/zitadel-management.js", () => ({
+vi.mock("../../lib/authnexus-management.js", () => ({
   listUserIdsWithRole: (...args: unknown[]) => mockListUserIdsWithRole(...args),
 }));
 
@@ -188,7 +188,7 @@ describe("POST /entities — assignedTo validation (R3)", () => {
     });
 
     expect(res.status).toBe(201);
-    expect(mockListUserIdsWithRole).toHaveBeenCalledWith("org-ccc", "user");
+    expect(mockListUserIdsWithRole).toHaveBeenCalledWith("org-ccc", "user", "");
     expect(mockCreateEntity).toHaveBeenCalled();
   });
 

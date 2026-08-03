@@ -106,6 +106,7 @@ describe("getNotificationOutboundToken", () => {
       "scope=openid+urn%3Azitadel%3Aiam%3Aorg%3Aproject%3Aid%3A383173843264471042%3Aaud",
     );
     expect(body).toContain("org_id=");
+    expect(body).toContain("client_id=");
   });
 
   it("caches the token across calls instead of re-requesting", async () => {

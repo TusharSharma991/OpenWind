@@ -111,6 +111,13 @@ const EnvSchema = z
     // can never satisfy the outbound service's audience check (see
     // docs/notification-outbound-contract.md).
     NOTIFICATION_AUTHNEXUS_AUDIENCE: z.string().optional(),
+    // The OAuth client this integration authenticates as, asserted into the
+    // M2M token's client_id claim. ownovu's gateway rejects the token with
+    // "client_id not allowed: absent" without it (confirmed 2026-08-03).
+    // AuthNexus relays this as caller-supplied metadata — not independently
+    // verified against Zitadel — so it's authorization bookkeeping on
+    // ownovu's side, not part of the cryptographic trust boundary.
+    NOTIFICATION_AUTHNEXUS_CLIENT_ID: z.string().optional(),
     S3_ENDPOINT: z.string().url(),
     // Public URL browsers use to reach MinIO. In Docker the internal endpoint is
     // http://minio:9000 but presigned URLs must resolve from the browser, so set

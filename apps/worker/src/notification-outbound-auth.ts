@@ -91,6 +91,7 @@ export async function getNotificationOutboundToken(): Promise<string | null> {
         scope: `openid urn:zitadel:iam:org:project:id:${audience}:aud`,
         assertion,
         org_id: env.AUTHNEXUS_ORG_ID ?? "",
+        client_id: env.NOTIFICATION_AUTHNEXUS_CLIENT_ID ?? "",
       }).toString(),
     });
 

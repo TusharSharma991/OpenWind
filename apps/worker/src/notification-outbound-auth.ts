@@ -69,10 +69,14 @@ export async function getNotificationOutboundToken(): Promise<string | null> {
         : (exportedKey as Buffer).toString("utf8");
 
     const privateKey = await importPKCS8(keyPem, "RS256");
-    // Assertion aud must target Zitadel itself (the server that actually
-    // verifies this signature), not AUTHNEXUS_ISSUER (the AuthNexus API
-    // wrapper's own public origin) — see AUTHNEXUS_ZITADEL_AUD's doc comment
-    // in packages/config/src/env.ts for how this was confirmed.
+    // Assertion aud targets Zitadel itself (the server that actually verifies
+    // this signature) — see AUTHNEXUS_ZITADEL_AUD's doc comment in
+    // packages/config/src/env.ts. ownovu's gateway only accepts tokens
+    // Zitadel issues directly (iss: https://jmvzita.rokkalabs.com), not
+    // AuthNexus's /api/v1/auth/m2m wrapper's own tokens (iss:
+    // https://auth.rokkalabs.com) — confirmed with AuthNexus and ownovu's
+    // teams 2026-08-06. So this call goes straight to Zitadel's native
+    // token endpoint instead of the wrapper AuthNexus's other calls use.
     const assertion = await new SignJWT({})
       .setProtectedHeader({ alg: "RS256", kid: keyConfig.keyId })
       .setIssuedAt()
@@ -82,7 +86,12 @@ export async function getNotificationOutboundToken(): Promise<string | null> {
       .setExpirationTime("1h")
       .sign(privateKey);
 
-    const tokenUrl = `${env.AUTHNEXUS_ISSUER}/api/v1/auth/m2m`;
+    // Native Zitadel endpoint — not AUTHNEXUS_ISSUER/api/v1/auth/m2m. Zitadel
+    // resolves org/client context from the assertion's sub itself, so org_id
+    // and client_id (needed by AuthNexus's wrapper) are dropped here; the
+    // resulting token's client_id claim is auto-populated from the service
+    // account's own Zitadel username (confirmed by AuthNexus 2026-08-06).
+    const tokenUrl = `${env.AUTHNEXUS_ZITADEL_AUD ?? env.AUTHNEXUS_ISSUER}/oauth/v2/token`;
     const res = await fetch(tokenUrl, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -90,8 +99,6 @@ export async function getNotificationOutboundToken(): Promise<string | null> {
         grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
         scope: `openid urn:zitadel:iam:org:project:id:${audience}:aud`,
         assertion,
-        org_id: env.AUTHNEXUS_ORG_ID ?? "",
-        client_id: env.NOTIFICATION_AUTHNEXUS_CLIENT_ID ?? "",
       }).toString(),
     });
 

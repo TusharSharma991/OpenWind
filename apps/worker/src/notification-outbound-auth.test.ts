@@ -12,7 +12,11 @@ let envOverrides: {
   NOTIFICATION_AUTHNEXUS_KEY_JSON?: string;
   NOTIFICATION_AUTHNEXUS_AUDIENCE?: string;
   AUTHNEXUS_ISSUER: string;
-} = { AUTHNEXUS_ISSUER: "https://issuer.example.com" };
+  AUTHNEXUS_ZITADEL_AUD?: string;
+} = {
+  AUTHNEXUS_ISSUER: "https://issuer.example.com",
+  AUTHNEXUS_ZITADEL_AUD: "https://zitadel.example.com",
+};
 
 vi.mock("@platform/config", () => ({
   get env() {
@@ -66,7 +70,10 @@ async function freshGetToken() {
 describe("getNotificationOutboundToken", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    envOverrides = { AUTHNEXUS_ISSUER: "https://issuer.example.com" };
+    envOverrides = {
+      AUTHNEXUS_ISSUER: "https://issuer.example.com",
+      AUTHNEXUS_ZITADEL_AUD: "https://zitadel.example.com",
+    };
   });
 
   it("returns null when NOTIFICATION_AUTHNEXUS_KEY_JSON is not configured", async () => {
@@ -100,13 +107,13 @@ describe("getNotificationOutboundToken", () => {
     expect(token).toBe("tok-abc");
     expect(mockFetch).toHaveBeenCalledTimes(1);
     const [url, init] = mockFetch.mock.calls[0] as [string, { body?: string }];
-    expect(url).toBe("https://issuer.example.com/api/v1/auth/m2m");
+    expect(url).toBe("https://zitadel.example.com/oauth/v2/token");
     const body = (init.body as string) ?? "";
     expect(body).toContain(
       "scope=openid+urn%3Azitadel%3Aiam%3Aorg%3Aproject%3Aid%3A383173843264471042%3Aaud",
     );
-    expect(body).toContain("org_id=");
-    expect(body).toContain("client_id=");
+    expect(body).not.toContain("org_id=");
+    expect(body).not.toContain("client_id=");
   });
 
   it("caches the token across calls instead of re-requesting", async () => {

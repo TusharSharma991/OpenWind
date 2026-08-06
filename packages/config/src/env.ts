@@ -67,13 +67,24 @@ const EnvSchema = z
     // /api/v1/auth/m2m endpoint rejects the request without it) — previously
     // only wired as a frontend/Vite var, never validated here.
     AUTHNEXUS_ORG_ID: z.string().optional(),
-    // The underlying Zitadel instance's own address — the `aud` an M2M
-    // assertion must be signed for so the server that actually verifies the
-    // signature (Zitadel, not the AuthNexus API wrapper) accepts it. Distinct
-    // from AUTHNEXUS_ISSUER (the public AuthNexus API origin our app talks
-    // to for everything else) — confirmed via a real M2M token exchange
-    // returning 401 "Invalid or unsigned service assertion" when the
-    // assertion's aud was set to AUTHNEXUS_ISSUER instead of this value.
+    // The underlying Zitadel instance's own address. Used two ways:
+    //   1. As the `aud` every M2M assertion must be signed for, so the
+    //      server that actually verifies the signature (Zitadel, not the
+    //      AuthNexus API wrapper) accepts it — confirmed via a real M2M
+    //      token exchange returning 401 "Invalid or unsigned service
+    //      assertion" when the assertion's aud was AUTHNEXUS_ISSUER instead.
+    //   2. As the token endpoint base for apps/worker's
+    //      notification-outbound-auth.ts specifically (POSTs directly to
+    //      `${this}/oauth/v2/token`, Zitadel's native endpoint) — ownovu's
+    //      gateway only accepts tokens Zitadel issues directly (iss:
+    //      https://jmvzita.rokkalabs.com), not AuthNexus's /api/v1/auth/m2m
+    //      wrapper's tokens (iss: https://auth.rokkalabs.com). Confirmed
+    //      with AuthNexus + ownovu's teams 2026-08-06. Every OTHER
+    //      AuthNexus-dependent call (packages/auth/src/authnexus-management.ts's
+    //      admin/user lookups) still goes through the /api/v1/auth/m2m
+    //      wrapper against AUTHNEXUS_ISSUER, unaffected by this — the
+    //      wrapper's own AuthNexus-flavoured tokens (roles, org_id,
+    //      nexus_projects) are what those callers need, not a bare Zitadel one.
     // Optional: M2M callers without this configured just fail to mint a
     // token (existing null/no-op fallback), not a crash.
     AUTHNEXUS_ZITADEL_AUD: z.string().optional(),
@@ -111,13 +122,6 @@ const EnvSchema = z
     // can never satisfy the outbound service's audience check (see
     // docs/notification-outbound-contract.md).
     NOTIFICATION_AUTHNEXUS_AUDIENCE: z.string().optional(),
-    // The OAuth client this integration authenticates as, asserted into the
-    // M2M token's client_id claim. ownovu's gateway rejects the token with
-    // "client_id not allowed: absent" without it (confirmed 2026-08-03).
-    // AuthNexus relays this as caller-supplied metadata — not independently
-    // verified against Zitadel — so it's authorization bookkeeping on
-    // ownovu's side, not part of the cryptographic trust boundary.
-    NOTIFICATION_AUTHNEXUS_CLIENT_ID: z.string().optional(),
     S3_ENDPOINT: z.string().url(),
     // Public URL browsers use to reach MinIO. In Docker the internal endpoint is
     // http://minio:9000 but presigned URLs must resolve from the browser, so set

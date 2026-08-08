@@ -45,6 +45,11 @@ const EnvSchema = z
     // endpoint is set explicitly rather than derived from one issuer URL.
     AUTHNEXUS_ISSUER: z.string().url(),
     AUTHNEXUS_JWKS_URL: z.string().url(),
+    // Post-auth, tenant-scoped rate limit (#195) — requireAuth() (@platform/auth)
+    // enforces this per verified auth.tenantId, independent of the pre-auth
+    // IP-based flood guard in apps/api's rate-limit middleware. Default matches
+    // security.md's documented "100 req/min per tenant for standard endpoints".
+    RATE_LIMIT_TENANT_PER_MIN: z.coerce.number().int().positive().default(100),
     // Required — used by JWKS middleware to validate the JWT aud claim.
     // AuthNexus puts the OIDC client id in aud (confirmed against a real
     // token), not a Zitadel-style project urn — despite the project-scoped
@@ -91,6 +96,13 @@ const EnvSchema = z
     // Dev fallback: used as tenantId when the org claim is absent (instance admin login).
     // Must never be set in production — it bypasses tenant isolation for instance-admin logins.
     DEV_TENANT_ID: z.string().optional(),
+    // The org UUID (AuthNexus org_id claim) that belongs to platform operators.
+    // When set, admin tenant lifecycle routes (GET/PATCH/DELETE /admin/tenants/:id)
+    // verify that the caller's auth.tenantId matches this value — blocking a
+    // customer user who has been granted 'superadmin' from accessing other
+    // tenants' lifecycle routes. Unset in dev/test (where DEV_TENANT_ID already
+    // unifies tenantIds).
+    PLATFORM_ORG_ID: z.string().uuid().optional(),
     // Required in production — the exact origin the admin-ui is served from.
     // In development/test the API accepts all http://localhost:* origins.
     CORS_ORIGIN: z.string().url().optional(),

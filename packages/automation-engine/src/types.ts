@@ -7,6 +7,7 @@ export type TriggerType =
   | "field.changed"
   | "entity.created"
   | "entity.assigned"
+  | "entity.due_date_overdue"
   | "comment.mentioned"
   | "comment.mention_access_granted"
   | "comment.replied"
@@ -22,9 +23,9 @@ export type ActionType =
   | "transition"
   | "set_field"
   | "create_entity"
+  | "create_child"
   | "webhook"
-  | "connector.action"
-  | "script";
+  | "connector.action";
 
 export interface AutomationRule {
   id: string;
@@ -66,18 +67,45 @@ export type WebhookActionConfig = {
   headers?: Record<string, string>;
   /** If true, include the full trigger event payload in the request body */
   includePayload?: boolean;
+  /** Field allow-list: when includePayload is true, specifies exactly which fields to share */
+  sendFields?: string[];
   timeoutMs?: number;
 };
+
+export interface AssignConfig {
+  instanceId?: string;
+  assigneeId: string;
+}
+
+export interface CreateEntityConfig {
+  entityTypeId: string;
+  fields?: Record<string, unknown>;
+  assignedTo?: string;
+}
+
+export interface CreateChildConfig {
+  /** Defaults to the triggering event's own entityTypeId (same-type child) when omitted. */
+  entityTypeId?: string;
+  assignToUserId?: string | null;
+  /** `{{fieldName}}` placeholders interpolated from the PARENT's current field values. */
+  descriptionTemplate?: string;
+  /** Child field the interpolated description is written to. Defaults to "description". */
+  descriptionField?: string;
+  /** Additional static fields set on the child (merged before descriptionField). */
+  fields?: Record<string, unknown>;
+  /** Field on the PARENT written back with the new child's instance id. Omit to skip. */
+  writeBackField?: string;
+}
 
 export type ActionConfig =
   | { type: "notify"; config: NotifyConfig }
   | { type: "set_field"; config: SetFieldConfig }
   | { type: "transition"; config: TransitionConfig }
   | { type: "webhook"; config: WebhookActionConfig }
-  | { type: "assign"; config: Record<string, unknown> }
-  | { type: "create_entity"; config: Record<string, unknown> }
-  | { type: "connector.action"; config: Record<string, unknown> }
-  | { type: "script"; config: Record<string, unknown> };
+  | { type: "assign"; config: AssignConfig }
+  | { type: "create_entity"; config: CreateEntityConfig }
+  | { type: "create_child"; config: CreateChildConfig }
+  | { type: "connector.action"; config: Record<string, unknown> };
 
 export type CreateAutomationRuleInput = {
   name: string;
@@ -108,7 +136,10 @@ export class AutomationError extends Error {
       | "ACTION_FAILED"
       | "INVALID_EVENT_PAYLOAD"
       | "WEBHOOK_SSRF_BLOCKED"
-      | "DNS_RESOLUTION_TIMEOUT",
+      | "DNS_RESOLUTION_TIMEOUT"
+      | "UNKNOWN_ACTION_TYPE"
+      | "CIRCUIT_BREAKER_UNAVAILABLE"
+      | "NOTIFY_LINK_INVALID",
     public readonly meta?: Record<string, unknown>,
   ) {
     super(code);

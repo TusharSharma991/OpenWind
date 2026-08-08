@@ -69,6 +69,10 @@ usersRouter.get(
           displayName: dbDisplayName ?? u.displayName,
           loginName: u.loginName,
           roles: rolesByUserId.get(u.userId) ?? [],
+          // AuthNexus's listOrgUsers doesn't return per-user metadata (unlike
+          // the Zitadel Management API this replaced) — empty placeholder,
+          // consistent with the DB-only fallback below.
+          metadata: {},
         };
       });
 
@@ -87,6 +91,7 @@ usersRouter.get(
           displayName: realName ?? r.email ?? r.userId,
           loginName: r.email ?? r.userId,
           roles,
+          metadata: {},
         });
       }
     }

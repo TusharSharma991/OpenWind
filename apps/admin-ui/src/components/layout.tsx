@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useLogout, useGetIdentity } from "@refinedev/core";
 import { Link, useLocation } from "react-router-dom";
+import { TOKENS, useHoverStyle } from "@platform/ui";
 import { userManager, getRolesFromProfile } from "../authProvider.js";
 import { NotificationBell } from "./notification-bell.js";
 
@@ -53,7 +54,9 @@ const SUPER_ADMIN_NAV_EXTRA = [USERS_NAV, SYSTEM_LOGS_NAV];
 
 const ADMIN_NAV = [
   {
-    route: "/",
+    // Personal "my view" dashboard — docs/specs/personal-dashboard.md.
+    // Reachable by every role (admin/agent nav here, customer nav below).
+    route: "/dashboard",
     label: "Dashboard",
     icon: (
       <svg
@@ -67,6 +70,29 @@ const ADMIN_NAV = [
           strokeLinecap="round"
           strokeLinejoin="round"
           d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"
+        />
+      </svg>
+    ),
+  },
+  {
+    // Tenant-wide KPI overview — admin/agent only (see the redirect-away
+    // check inside pages/dashboard.tsx, the Analytics component; this nav
+    // entry was formerly labeled "Dashboard" at route "/" before the
+    // personal dashboard above took over that name/landing slot).
+    route: "/analytics",
+    label: "Analytics",
+    icon: (
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        fill="none"
+        viewBox="0 0 24 24"
+        strokeWidth="2"
+        stroke="currentColor"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"
         />
       </svg>
     ),
@@ -196,6 +222,16 @@ export function Layout({
   const [roles, setRoles] = useState<string[]>([]);
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
+  const profileButtonHover = useHoverStyle({
+    base: { background: "transparent" },
+    hover: { background: TOKENS.bgTertiary },
+  });
+  const signOutHover = useHoverStyle({
+    base: { background: "none" },
+    hover: {
+      background: `color-mix(in srgb, ${TOKENS.danger} 10%, transparent)`,
+    },
+  });
 
   useEffect(() => {
     void userManager.getUser().then((u) => {
@@ -251,7 +287,10 @@ export function Layout({
   }
 
   function isActive(route: string): boolean {
-    if (route === "/")
+    // "/" itself always redirects to "/dashboard" (see App.tsx's index
+    // route) — treat them as the same nav item so landing on "/" briefly
+    // during that redirect still highlights Dashboard, not nothing.
+    if (route === "/dashboard")
       return location.pathname === "/" || location.pathname === "/dashboard";
     return (
       location.pathname === route || location.pathname.startsWith(route + "/")
@@ -301,23 +340,17 @@ export function Layout({
               alignItems: "center",
               gap: "7px",
               padding: "3px 10px 3px 3px",
-              background: "transparent",
-              border: "1px solid var(--border-color)",
+              border: `1px solid ${TOKENS.borderColor}`,
               borderRadius: "18px",
               cursor: "pointer",
               transition: "background .15s, border-color .15s",
               maxWidth: "180px",
+              ...profileButtonHover.style,
             }}
             onClick={() => setProfileOpen((o) => !o)}
             aria-label="Open profile"
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.background =
-                "var(--bg-tertiary)";
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.background =
-                "transparent";
-            }}
+            onMouseEnter={profileButtonHover.onMouseEnter}
+            onMouseLeave={profileButtonHover.onMouseLeave}
           >
             <img
               src={
@@ -434,19 +467,13 @@ export function Layout({
                   padding: "12px 16px",
                   fontSize: "13px",
                   fontWeight: 500,
-                  color: "var(--danger)",
-                  background: "none",
+                  color: TOKENS.danger,
                   border: "none",
                   cursor: "pointer",
+                  ...signOutHover.style,
                 }}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.background =
-                    "hsla(350,80%,60%,.1)";
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.background =
-                    "none";
-                }}
+                onMouseEnter={signOutHover.onMouseEnter}
+                onMouseLeave={signOutHover.onMouseLeave}
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -496,6 +523,29 @@ export function Layout({
                 gap: "2px",
               }}
             >
+              {/* Personal dashboard — docs/specs/personal-dashboard.md;
+                  reachable by every role, customers included (R5). */}
+              <Link
+                to="/dashboard"
+                className={`menu-item ${!sidebarOpen && !mobileNavOpen ? "menu-item-icon-only" : ""} ${isActive("/dashboard") ? "active" : ""}`}
+                title={!sidebarOpen ? "Dashboard" : undefined}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  strokeWidth="2"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"
+                  />
+                </svg>
+                {(sidebarOpen || mobileNavOpen) && <span>Dashboard</span>}
+              </Link>
+
               {/* Records — shows cards where user has assigned tickets */}
               <Link
                 to="/records"
@@ -591,11 +641,13 @@ export function Layout({
     );
   }
 
-  // Agent nav = admin nav minus Dashboard, plus no Users
-  // Super admin gets all ADMIN_NAV + SUPER_ADMIN_NAV_EXTRA (Users)
+  // Agent nav = admin nav minus Users. Both admin and agent see Dashboard
+  // (personal, all roles) and Analytics (admin/agent only — gated inside the
+  // Analytics page itself, not here) via the shared ADMIN_NAV array.
+  // Super admin gets all ADMIN_NAV + SUPER_ADMIN_NAV_EXTRA (Users).
   const sidebarNav = isAdmin
     ? [...ADMIN_NAV, ...SUPER_ADMIN_NAV_EXTRA]
-    : ADMIN_NAV; // agents see same nav as admin minus dashboard (dashboard requires admin role — handled by page itself)
+    : ADMIN_NAV;
 
   // ── Admin / Agent layout ────────────────────────────────────────────────
   return (

@@ -1,5 +1,6 @@
 import { defineConfig } from "vitest/config";
 import path from "path";
+import os from "os";
 
 const packages = path.resolve(__dirname, "../../packages");
 
@@ -24,6 +25,7 @@ export default defineConfig({
         "automation-engine/src/index.ts",
       ),
       "@platform/logger": path.join(packages, "logger/src/index.ts"),
+      "@platform/redis": path.join(packages, "redis/src/index.ts"),
       "@platform/auth": path.join(packages, "auth/src/index.ts"),
       "@platform/db": path.join(packages, "db/src/index.ts"),
       "@platform/config": path.join(packages, "config/src/index.ts"),
@@ -37,6 +39,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    fileParallelism: false,
     // Provide all required @platform/config env vars so tests don't need to
     // vi.mock the config module. CI job env vars take precedence over these
     // defaults when set (e.g. the real DATABASE_URL in integration jobs).
@@ -55,13 +58,26 @@ export default defineConfig({
       AUTHNEXUS_AUDIENCE: "platform-api",
       AUTHNEXUS_PROJECT_ID: "project-xyz",
       NOVU_API_KEY: "test",
+      // Still required by @platform/config's schema — apps/worker/src/export-worker.ts
+      // uploads bulk exports to S3 and hasn't moved to local-disk storage (only file
+      // attachments did). Not read by anything under apps/api's own tests, but the
+      // schema validates the whole process env eagerly on import.
       S3_ENDPOINT: "http://localhost:9000",
       S3_BUCKET: "test",
       S3_ACCESS_KEY: "test",
       S3_SECRET_KEY: "test",
+      // Schema default is /data/files (the container bind-mount target) --
+      // unwritable outside ow-backend/ow-worker's containers, which breaks
+      // integration/upload-flow.test.ts and integration/quarantine-flow.test.ts
+      // in CI and any local host-mode `pnpm test` run. os.tmpdir() is always
+      // writable and gitignored by nature (outside the repo).
+      FILES_STORAGE_PATH:
+        process.env["FILES_STORAGE_PATH"] ??
+        path.join(os.tmpdir(), "openwind-test-files"),
       ANTHROPIC_API_KEY: "test",
       OPENBAO_ADDR: "http://localhost:8200",
       OPENBAO_TOKEN: "dev-root-token",
+      APP_URL: "https://platform.example.com",
     },
   },
 });

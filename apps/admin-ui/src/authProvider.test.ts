@@ -3,6 +3,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mockSigninSilent = vi.fn();
 const mockGetUser = vi.fn().mockResolvedValue(null);
 const mockAddUserLoaded = vi.fn();
+const mockSignoutRedirect = vi.fn();
+const mockRemoveUser = vi.fn();
+const mockClearStaleState = vi.fn();
 
 vi.mock("oidc-client-ts", () => ({
   UserManager: vi.fn().mockImplementation(function UserManager() {
@@ -10,6 +13,9 @@ vi.mock("oidc-client-ts", () => ({
       signinSilent: mockSigninSilent,
       getUser: mockGetUser,
       events: { addUserLoaded: mockAddUserLoaded },
+      signoutRedirect: mockSignoutRedirect,
+      removeUser: mockRemoveUser,
+      clearStaleState: mockClearStaleState,
     };
   }),
   WebStorageStateStore: vi.fn(),
@@ -17,7 +23,7 @@ vi.mock("oidc-client-ts", () => ({
 
 vi.mock("@refinedev/core", () => ({}));
 
-const { silentRefresh } = await import("./authProvider.js");
+const { silentRefresh, authProvider } = await import("./authProvider.js");
 
 describe("silentRefresh", () => {
   beforeEach(() => {
@@ -72,5 +78,42 @@ describe("silentRefresh", () => {
     expect(secondResult).toBe("second");
 
     expect(mockSigninSilent).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("authProvider.logout", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetUser.mockResolvedValue(null);
+  });
+
+  it("ends the AuthNexus SSO session via signoutRedirect instead of only clearing the local token", async () => {
+    mockSignoutRedirect.mockResolvedValue(undefined);
+
+    await authProvider.logout({});
+
+    expect(mockSignoutRedirect).toHaveBeenCalledTimes(1);
+    expect(mockRemoveUser).not.toHaveBeenCalled();
+  });
+
+  it("passes id_token_hint when a user is present, so AuthNexus can end that exact session", async () => {
+    mockGetUser.mockResolvedValue({ id_token: "id-tok-123" });
+    mockSignoutRedirect.mockResolvedValue(undefined);
+
+    await authProvider.logout({});
+
+    expect(mockSignoutRedirect).toHaveBeenCalledWith({
+      id_token_hint: "id-tok-123",
+    });
+  });
+
+  it("falls back to local-only cleanup when signoutRedirect fails", async () => {
+    mockSignoutRedirect.mockRejectedValue(new Error("network error"));
+
+    const result = await authProvider.logout({});
+
+    expect(mockRemoveUser).toHaveBeenCalledTimes(1);
+    expect(mockClearStaleState).toHaveBeenCalled();
+    expect(result).toEqual({ success: true, redirectTo: "/login" });
   });
 });

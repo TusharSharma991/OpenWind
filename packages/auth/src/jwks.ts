@@ -9,7 +9,12 @@ type JwksGetter = ReturnType<typeof createRemoteJWKSet>;
 let _jwks: JwksGetter | undefined;
 
 function getJwks(): JwksGetter {
-  _jwks ??= createRemoteJWKSet(new URL(env.AUTHNEXUS_JWKS_URL));
+  // Refresh cached JWKS after 1 hour so a rotated/revoked signing key stops
+  // being accepted within a bounded window. Without this the cache is
+  // infinite and key rotation requires a process restart. (#262)
+  _jwks ??= createRemoteJWKSet(new URL(env.AUTHNEXUS_JWKS_URL), {
+    cacheMaxAge: 60 * 60 * 1000,
+  });
   return _jwks;
 }
 
@@ -26,11 +31,10 @@ export async function verifyJwt(
         // AUTHNEXUS_AUDIENCE is required and non-empty (packages/config/src/env.ts),
         // so audience validation is always enforced here.
         audience: env.AUTHNEXUS_AUDIENCE,
-        // Allow up to 30 s of clock skew between AuthNexus and the API container.
-        // Without this, tokens with nbf = "now" fail if the server clock is a
-        // few seconds behind AuthNexus, causing 401s on the very first request
-        // after login before the client retries with a refreshed token.
-        clockTolerance: 30,
+        // 5 s is sufficient to absorb NTP clock skew between containers.
+        // A wider tolerance extends the replay window for stolen tokens
+        // past their stated expiry for no real benefit. (#255)
+        clockTolerance: 5,
       },
     );
     return payload as JWTPayload & AuthNexusClaims;

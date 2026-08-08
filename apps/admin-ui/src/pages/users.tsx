@@ -1,5 +1,28 @@
 import React, { useEffect, useState } from "react";
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+  TOKENS,
+  useHoverStyle,
+} from "@platform/ui";
 import { fetchWithAuth, API_URL } from "../lib/api.js";
+import { userManager, getRolesFromProfile } from "../authProvider.js";
+
+declare const window: Window & { __CONFIG__?: Record<string, string> };
+// AuthNexus has no per-user deep link equivalent to Zitadel's
+// /ui/console/users/:id (confirmed absent from its API surface — see
+// .claude/skills/authnexus-pull-guard) — this links to the authority root
+// instead of guessing a path that may 404.
+const AUTHNEXUS_AUTHORITY =
+  window.__CONFIG__?.AUTHNEXUS_AUTHORITY ?? "https://auth.rokkalabs.com";
+
+function authNexusUserUrl(_userId: string): string {
+  return AUTHNEXUS_AUTHORITY;
+}
 
 interface User {
   userId: string;
@@ -38,11 +61,187 @@ function avatarColor(userId: string): string {
   return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length] ?? "#6366f1";
 }
 
+interface UserRowProps {
+  user: User;
+  isAdmin: boolean;
+}
+
+function UserRow({ user, isAdmin }: UserRowProps): React.ReactElement {
+  const color = avatarColor(user.userId);
+  const rowHover = useHoverStyle({
+    base: { background: "" },
+    hover: { background: TOKENS.bgTertiary },
+  });
+  const iconHover = useHoverStyle({
+    base: { background: "", color: TOKENS.textMuted },
+    hover: { background: TOKENS.bgTertiary, color: TOKENS.accentPrimary },
+  });
+
+  return (
+    <TableRow
+      style={rowHover.style}
+      onMouseEnter={rowHover.onMouseEnter}
+      onMouseLeave={rowHover.onMouseLeave}
+    >
+      <TableCell style={{ padding: "12px 16px" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "10px",
+          }}
+        >
+          <div
+            style={{
+              width: "32px",
+              height: "32px",
+              borderRadius: "50%",
+              background: color,
+              color: "#fff",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: "12px",
+              fontWeight: 700,
+              flexShrink: 0,
+            }}
+          >
+            {initials(user.displayName)}
+          </div>
+          <span
+            style={{
+              fontSize: "14px",
+              fontWeight: 500,
+              color: TOKENS.textPrimary,
+            }}
+          >
+            {user.displayName}
+          </span>
+        </div>
+      </TableCell>
+      <TableCell
+        style={{
+          padding: "12px 16px",
+          fontSize: "13px",
+          color: TOKENS.textSecondary,
+        }}
+      >
+        {user.loginName}
+      </TableCell>
+      <TableCell
+        style={{
+          padding: "12px 16px",
+          fontSize: "13px",
+          color: TOKENS.textSecondary,
+        }}
+      >
+        {user.email}
+      </TableCell>
+      <TableCell style={{ padding: "12px 16px" }}>
+        <div
+          style={{
+            display: "flex",
+            gap: "6px",
+            flexWrap: "wrap",
+          }}
+        >
+          {(user.roles ?? []).length === 0 ? (
+            <span
+              style={{
+                fontSize: "12px",
+                color: TOKENS.textMuted,
+              }}
+            >
+              —
+            </span>
+          ) : (
+            (user.roles ?? []).map((role) => (
+              <span
+                key={role}
+                style={{
+                  fontSize: "11px",
+                  fontWeight: 600,
+                  padding: "2px 8px",
+                  borderRadius: "999px",
+                  background: TOKENS.bgTertiary,
+                  color: TOKENS.textSecondary,
+                  textTransform: "capitalize",
+                }}
+              >
+                {role}
+              </span>
+            ))
+          )}
+        </div>
+      </TableCell>
+      <TableCell
+        style={{
+          padding: "12px 16px",
+          fontSize: "11px",
+          color: TOKENS.textMuted,
+          fontFamily: "monospace",
+        }}
+      >
+        {user.userId}
+      </TableCell>
+      {isAdmin && (
+        <TableCell style={{ padding: "12px 16px", textAlign: "right" }}>
+          <a
+            href={authNexusUserUrl(user.userId)}
+            target="_blank"
+            rel="noreferrer"
+            title="Open in AuthNexus"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: "28px",
+              height: "28px",
+              borderRadius: "6px",
+              textDecoration: "none",
+              transition: "background 0.15s, color 0.15s",
+              ...iconHover.style,
+            }}
+            onMouseEnter={iconHover.onMouseEnter}
+            onMouseLeave={iconHover.onMouseLeave}
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="14"
+              height="14"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"
+              />
+            </svg>
+          </a>
+        </TableCell>
+      )}
+    </TableRow>
+  );
+}
+
 export function UsersPage(): React.ReactElement {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [roles, setRoles] = useState<string[]>([]);
+  const isAdmin = roles.includes("admin");
+
+  useEffect(() => {
+    void userManager.getUser().then((u) => {
+      setRoles(
+        getRolesFromProfile(u?.profile as Record<string, unknown> | undefined),
+      );
+    });
+  }, []);
 
   useEffect(() => {
     fetchWithAuth(`${API_URL}/users`)
@@ -138,7 +337,7 @@ export function UsersPage(): React.ReactElement {
           <div className="empty-state-subtitle">
             {query
               ? "Try a different search term."
-              : "Users appear here after they log in, or when AuthNexus is connected."}
+              : "Users appear here after they log in, or when Zitadel is connected."}
           </div>
         </div>
       )}
@@ -148,170 +347,41 @@ export function UsersPage(): React.ReactElement {
           className="data-panel"
           style={{ overflowX: "auto", overflowY: "hidden" }}
         >
-          <table
-            style={{
-              width: "100%",
-              borderCollapse: "collapse",
-              whiteSpace: "nowrap",
-            }}
-          >
-            <thead>
-              <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                {["Name", "Login", "Email", "Roles", "User ID"].map((h) => (
-                  <th
+          <Table scroll={false} style={{ whiteSpace: "nowrap" }}>
+            <TableHeader>
+              <TableRow>
+                {[
+                  "Name",
+                  "Login",
+                  "Email",
+                  "Roles",
+                  "User ID",
+                  ...(isAdmin ? [""] : []),
+                ].map((h) => (
+                  <TableHead
                     key={h}
                     style={{
-                      textAlign: "left",
                       padding: "10px 16px",
-                      fontSize: "11px",
-                      fontWeight: 600,
-                      color: "var(--text-muted)",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.05em",
-                      background: "var(--surface-secondary, var(--bg-subtle))",
                       whiteSpace: "nowrap",
                     }}
                   >
                     {h}
-                  </th>
+                  </TableHead>
                 ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((u, i) => {
-                const color = avatarColor(u.userId);
-                return (
-                  <tr
-                    key={u.userId}
-                    style={{
-                      borderBottom:
-                        i < filtered.length - 1
-                          ? "1px solid var(--border)"
-                          : "none",
-                    }}
-                    onMouseEnter={(e) => {
-                      (
-                        e.currentTarget as HTMLTableRowElement
-                      ).style.background = "var(--bg-subtle)";
-                    }}
-                    onMouseLeave={(e) => {
-                      (
-                        e.currentTarget as HTMLTableRowElement
-                      ).style.background = "";
-                    }}
-                  >
-                    <td style={{ padding: "12px 16px" }}>
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "10px",
-                        }}
-                      >
-                        <div
-                          style={{
-                            width: "32px",
-                            height: "32px",
-                            borderRadius: "50%",
-                            background: color,
-                            color: "#fff",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            fontSize: "12px",
-                            fontWeight: 700,
-                            flexShrink: 0,
-                          }}
-                        >
-                          {initials(u.displayName)}
-                        </div>
-                        <span
-                          style={{
-                            fontSize: "14px",
-                            fontWeight: 500,
-                            color: "var(--text-primary)",
-                          }}
-                        >
-                          {u.displayName}
-                        </span>
-                      </div>
-                    </td>
-                    <td
-                      style={{
-                        padding: "12px 16px",
-                        fontSize: "13px",
-                        color: "var(--text-secondary)",
-                      }}
-                    >
-                      {u.loginName}
-                    </td>
-                    <td
-                      style={{
-                        padding: "12px 16px",
-                        fontSize: "13px",
-                        color: "var(--text-secondary)",
-                      }}
-                    >
-                      {u.email}
-                    </td>
-                    <td style={{ padding: "12px 16px" }}>
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: "6px",
-                          flexWrap: "wrap",
-                        }}
-                      >
-                        {(u.roles ?? []).length === 0 ? (
-                          <span
-                            style={{
-                              fontSize: "12px",
-                              color: "var(--text-muted)",
-                            }}
-                          >
-                            —
-                          </span>
-                        ) : (
-                          (u.roles ?? []).map((role) => (
-                            <span
-                              key={role}
-                              style={{
-                                fontSize: "11px",
-                                fontWeight: 600,
-                                padding: "2px 8px",
-                                borderRadius: "999px",
-                                background: "var(--bg-subtle)",
-                                color: "var(--text-secondary)",
-                                textTransform: "capitalize",
-                              }}
-                            >
-                              {role}
-                            </span>
-                          ))
-                        )}
-                      </div>
-                    </td>
-                    <td
-                      style={{
-                        padding: "12px 16px",
-                        fontSize: "11px",
-                        color: "var(--text-muted)",
-                        fontFamily: "monospace",
-                      }}
-                    >
-                      {u.userId}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filtered.map((u) => (
+                <UserRow key={u.userId} user={u} isAdmin={isAdmin} />
+              ))}
+            </TableBody>
+          </Table>
           <div
             style={{
               padding: "10px 16px",
               fontSize: "12px",
-              color: "var(--text-muted)",
-              borderTop: "1px solid var(--border)",
+              color: TOKENS.textMuted,
+              borderTop: `1px solid ${TOKENS.borderColor}`,
             }}
           >
             {filtered.length} user{filtered.length !== 1 ? "s" : ""}

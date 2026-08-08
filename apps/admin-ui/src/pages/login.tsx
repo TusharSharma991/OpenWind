@@ -1,4 +1,5 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
 import { userManager } from "../authProvider.js";
 import { getSavedAccent, hslToHex } from "../lib/theme.js";
 
@@ -47,6 +48,7 @@ function MoonIcon(): React.ReactElement {
 }
 
 export function Login(): React.ReactElement {
+  const { t } = useTranslation();
   const [loading, setLoading] = React.useState(false);
   const [theme, setTheme] = React.useState<"dark" | "light">(() => {
     const stored = localStorage.getItem("ow-theme");
@@ -68,9 +70,14 @@ export function Login(): React.ReactElement {
     setLoading(true);
     await userManager.removeUser();
     const accent = getSavedAccent();
+    // signinRedirect's extraQueryParams REPLACES userManager's settings.extraQueryParams
+    // rather than merging with it (oidc-client-ts default-parameter behavior) - spread the
+    // existing org_id/project_id/project_name/primary_origin so AuthNexus can still resolve
+    // and display the app name, not just override them with the theme/color params.
     await userManager.signinRedirect({
       prompt: "login",
       extraQueryParams: {
+        ...userManager.settings.extraQueryParams,
         primary_origin: window.location.origin,
         primary_color: hslToHex(accent.h, accent.s, accent.l),
         theme,
@@ -87,19 +94,29 @@ export function Login(): React.ReactElement {
         <div className="lp-topbar-inner">
           {/* Brand */}
           <div className="lp-brand">
-            <div className="lp-brand-logo">OW</div>
-            <span className="lp-brand-name">OpenWind</span>
+            <div className="lp-brand-logo">W</div>
+            <span className="lp-brand-name">{t("login.brandName")}</span>
           </div>
 
           {/* Theme toggle */}
           <button
             className="lp-theme-btn"
             onClick={toggleTheme}
-            aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
-            title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+            aria-label={
+              isDark
+                ? t("login.theme.switchToLight")
+                : t("login.theme.switchToDark")
+            }
+            title={
+              isDark
+                ? t("login.theme.switchToLight")
+                : t("login.theme.switchToDark")
+            }
           >
             {isDark ? <SunIcon /> : <MoonIcon />}
-            <span>{isDark ? "Light" : "Dark"}</span>
+            <span>
+              {isDark ? t("login.theme.light") : t("login.theme.dark")}
+            </span>
           </button>
         </div>
 
@@ -115,12 +132,9 @@ export function Login(): React.ReactElement {
         <div className="lp-card">
           {/* Card header */}
           <div className="lp-card-head">
-            <div className="lp-card-logo">OW</div>
-            <h1 className="lp-card-title">Sign in to OpenWind</h1>
-            <p className="lp-card-desc">
-              Your modular workflow platform. Access modules, configure
-              workflows, and manage your workspace.
-            </p>
+            <div className="lp-card-logo">W</div>
+            <h1 className="lp-card-title">{t("login.title")}</h1>
+            <p className="lp-card-desc">{t("login.description")}</p>
           </div>
 
           <div className="lp-card-divider" />
@@ -135,7 +149,7 @@ export function Login(): React.ReactElement {
               {loading ? (
                 <>
                   <span className="lp-spinner" aria-hidden="true" />
-                  Redirecting…
+                  {t("login.redirecting")}
                 </>
               ) : (
                 <>
@@ -154,7 +168,7 @@ export function Login(): React.ReactElement {
                     <polyline points="10 17 15 12 10 7" />
                     <line x1="15" y1="12" x2="3" y2="12" />
                   </svg>
-                  Sign In
+                  {t("login.signInButton")}
                 </>
               )}
             </button>
@@ -174,15 +188,22 @@ export function Login(): React.ReactElement {
               <rect x="3" y="11" width="18" height="11" rx="2" />
               <path d="M7 11V7a5 5 0 0 1 10 0v4" />
             </svg>
-            Access is secured and session-scoped to your organisation
+            {t("login.securityNote")}
           </div>
         </div>
+
+        <p className="lp-help">
+          {t("login.helpPrompt")}{" "}
+          <a href="mailto:support@openwind.io" className="lp-help-link">
+            {t("login.contactAdmin")}
+          </a>
+        </p>
       </main>
 
       {/* ── Footer ── */}
       <footer className="lp-footer">
         <div className="lp-footer-inner">
-          <span>© 2026 OpenWind. Open-source platform.</span>
+          <span>{t("login.footer.copyright")}</span>
           <span className="lp-footer-sep">·</span>
           <a
             href="https://github.com/openwind"
@@ -190,15 +211,15 @@ export function Login(): React.ReactElement {
             target="_blank"
             rel="noopener noreferrer"
           >
-            GitHub
+            {t("login.footer.github")}
           </a>
           <span className="lp-footer-sep">·</span>
           <a href="#" className="lp-footer-link">
-            Docs
+            {t("login.footer.docs")}
           </a>
           <span className="lp-footer-sep">·</span>
           <a href="#" className="lp-footer-link">
-            Privacy
+            {t("login.footer.privacy")}
           </a>
         </div>
       </footer>

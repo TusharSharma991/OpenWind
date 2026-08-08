@@ -41,6 +41,8 @@ export interface EntityInstance {
   fields: Record<string, unknown>;
   createdBy: string | null;
   assignedTo: string | null;
+  /** System field, independent of workflow state/SLA — docs/specs/due-date.md. */
+  dueDate: Date | null;
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
@@ -81,13 +83,26 @@ export type CreateEntityInput = {
   /** Display name snapshot stored in event metadata for immutable history. */
   actorName?: string | undefined;
   assignedTo?: string | undefined;
+  /** ISO datetime string, or null. Independent of workflow state/SLA. */
+  dueDate?: string | null | undefined;
   workflowId?: string | undefined;
   currentState?: string | undefined;
+  /**
+   * Automation-engine recursion depth (#120/#218), set only by
+   * executeCreateEntityAction when this creation is itself driven by an
+   * automation rule. Root callers (API routes) must never set this. When
+   * present, the resulting entity.created outbox event carries `depth + 1`
+   * so apps/worker/src/automation-worker.ts can enforce MAX_DEPTH across the
+   * async outbox hop instead of resetting to 0.
+   */
+  depth?: number | undefined;
 };
 
 export type UpdateEntityInput = {
   fields?: Record<string, unknown> | undefined;
   assignedTo?: string | null | undefined;
+  /** ISO datetime string, or null to clear. Independent of workflow state/SLA. */
+  dueDate?: string | null | undefined;
   currentState?: string | null | undefined;
   /** Actor performing the update — used by the audit hook. */
   actorId?: string | undefined;
@@ -177,6 +192,10 @@ export interface EntityCreatedEvent {
   entityTypeId: string;
   fields: Record<string, unknown>;
   createdBy: string | null;
+  // In-process recursion depth, set only when this creation was driven by
+  // the automation engine's create_entity action (#218) — see createEntity's
+  // `depth` input. Absent means depth 0 (a root-triggered creation).
+  depth?: number;
 }
 
 export interface EntityAssignedEvent {
@@ -191,4 +210,17 @@ export interface EntityAssignedEvent {
   // automation engine's set_field action (#120) — see updateEntity's `depth`
   // input. Absent means depth 0 (a root-triggered assignment).
   depth?: number;
+}
+
+// Internal scheduling marker consumed only by
+// apps/worker/src/due-date-scheduler.ts — NOT an automation trigger, so it
+// must never be added to apps/worker/src/outbox-poller.ts's allowlist (see
+// that file's comment on the workflow.sla_scheduled bug class this mirrors).
+export interface EntityDueDateScheduledEvent {
+  eventType: "entity.due_date_scheduled";
+  version: 1;
+  tenantId: string;
+  instanceId: string;
+  entityTypeId: string;
+  dueDate: string;
 }

@@ -1,16 +1,18 @@
 /**
  * Admin tenant lifecycle routes — superadmin only.
  *
- * Mutating routes (POST, PATCH, DELETE) require live token introspection to
- * prevent stolen-JWT attacks on destructive operations.
- * Read-only routes (GET) are guarded by requireRole only — no Zitadel
- * round-trip needed for reads.
+ * All routes are guarded by requireRole plus a PLATFORM_ORG_ID check (below)
+ * that blocks a customer-tenant user granted 'superadmin' from reaching
+ * another tenant's lifecycle routes. AuthNexus has no token introspection
+ * endpoint, so unlike the pre-swap Zitadel setup, JWKS-verified bearer auth
+ * is the only verification layer here — see .claude/skills/authnexus-pull-guard.
  */
 
 import { zValidator } from "../../lib/validator.js";
 import { z } from "zod";
 import { asc, eq } from "drizzle-orm";
 import { requireAuth, requireRole } from "@platform/auth";
+import { env } from "@platform/config";
 import { db, tenants } from "@platform/db";
 import {
   ProvisionTenantSchema,
@@ -57,6 +59,9 @@ export const listTenantsHandlers = factory.createHandlers(
   requireRole("superadmin"),
   zValidator("query", ListTenantsQuerySchema),
   async (c) => {
+    if (env.PLATFORM_ORG_ID && c.get("auth").tenantId !== env.PLATFORM_ORG_ID) {
+      return c.json({ error: "NOT_FOUND", message: "Tenant not found" }, 404);
+    }
     const { status, limit, offset } = c.req.valid("query");
 
     const rows = await db
@@ -79,6 +84,9 @@ export const getTenantHandlers = factory.createHandlers(
   zValidator("param", TenantIdParamSchema),
   async (c) => {
     const { id } = c.req.valid("param");
+    if (env.PLATFORM_ORG_ID && c.get("auth").tenantId !== env.PLATFORM_ORG_ID) {
+      return c.json({ error: "NOT_FOUND", message: "Tenant not found" }, 404);
+    }
 
     const [row] = await db
       .select(TENANT_COLUMNS)
@@ -130,6 +138,9 @@ export const suspendTenantHandlers = factory.createHandlers(
   async (c) => {
     const { id } = c.req.valid("param");
     const { userId } = c.get("auth");
+    if (env.PLATFORM_ORG_ID && c.get("auth").tenantId !== env.PLATFORM_ORG_ID) {
+      return c.json({ error: "NOT_FOUND", message: "Tenant not found" }, 404);
+    }
 
     try {
       await suspendTenant(id, userId);
@@ -166,6 +177,9 @@ export const reactivateTenantHandlers = factory.createHandlers(
   async (c) => {
     const { id } = c.req.valid("param");
     const { userId } = c.get("auth");
+    if (env.PLATFORM_ORG_ID && c.get("auth").tenantId !== env.PLATFORM_ORG_ID) {
+      return c.json({ error: "NOT_FOUND", message: "Tenant not found" }, 404);
+    }
 
     try {
       await reactivateTenant(id, userId);
@@ -209,6 +223,9 @@ export const deleteTenantHandlers = factory.createHandlers(
     const { id } = c.req.valid("param");
     const body = c.req.valid("json");
     const { userId } = c.get("auth");
+    if (env.PLATFORM_ORG_ID && c.get("auth").tenantId !== env.PLATFORM_ORG_ID) {
+      return c.json({ error: "NOT_FOUND", message: "Tenant not found" }, 404);
+    }
 
     try {
       const result = await scheduleTenantDeletion(id, userId, body.delayDays);

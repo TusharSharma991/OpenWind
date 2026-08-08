@@ -131,9 +131,23 @@ export const authProvider: AuthProvider = {
     return { success: true };
   },
   logout: async () => {
-    await userManager.removeUser();
-    await userManager.clearStaleState();
-    return { success: true, redirectTo: "/login" };
+    try {
+      const user = await userManager.getUser();
+      await userManager.clearStaleState();
+      // Ends the session at AuthNexus too, not just locally — signoutRedirect
+      // navigates the browser to AuthNexus's end-session endpoint, which then
+      // redirects back to post_logout_redirect_uri. It clears the local user
+      // itself, so no separate removeUser() call is needed.
+      await userManager.signoutRedirect(
+        user?.id_token ? { id_token_hint: user.id_token } : undefined,
+      );
+      return { success: true };
+    } catch (err) {
+      console.error("Failed to sign out via AuthNexus:", err);
+      await userManager.removeUser();
+      await userManager.clearStaleState();
+      return { success: true, redirectTo: "/login" };
+    }
   },
   onError: (error: unknown) => {
     if (

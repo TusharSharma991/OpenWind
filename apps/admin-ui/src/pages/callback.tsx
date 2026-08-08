@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { userManager, getRolesFromProfile } from "../authProvider.js";
+import { useTranslation } from "react-i18next";
+import { userManager } from "../authProvider.js";
 
 export function AuthCallback(): React.ReactElement {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
   const called = useRef(false);
@@ -13,14 +15,10 @@ export function AuthCallback(): React.ReactElement {
     userManager
       .signinCallback()
       .then(async () => {
-        const user = await userManager.getUser();
-        const profile = (user?.profile ?? {}) as Record<string, unknown>;
-        const roles = getRolesFromProfile(profile);
-        const isCustomer =
-          (roles.includes("user") || roles.includes("customer")) &&
-          !roles.includes("admin") &&
-          !roles.includes("agent");
-        navigate(isCustomer ? "/records" : "/");
+        // Personal dashboard is reachable by every role (docs/specs/personal-dashboard.md
+        // R5) — customers used to be sent straight to /records here, bypassing it entirely.
+        await userManager.getUser();
+        navigate("/dashboard");
       })
       .catch((err: Error) => {
         setError(err.message || String(err));
@@ -46,14 +44,14 @@ export function AuthCallback(): React.ReactElement {
             />
           </svg>
         </div>
-        <h2 style={{ marginBottom: "10px" }}>Authentication Error</h2>
+        <h2 style={{ marginBottom: "10px" }}>{t("authCallback.errorTitle")}</h2>
         <p className="loader-text">{error}</p>
         <button
           className="login-btn"
           onClick={() => navigate("/login")}
           style={{ marginTop: "24px", width: "auto" }}
         >
-          Back to Login
+          {t("authCallback.backToLogin")}
         </button>
       </div>
     );
@@ -62,9 +60,7 @@ export function AuthCallback(): React.ReactElement {
   return (
     <div className="loader-container">
       <div className="spinner"></div>
-      <p className="loader-text">
-        Verifying credentials and synchronizing session...
-      </p>
+      <p className="loader-text">{t("authCallback.verifying")}</p>
     </div>
   );
 }

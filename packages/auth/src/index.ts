@@ -18,6 +18,7 @@ export {
   listUserIdsWithRole,
   listUserRolesByUserId,
   getUserById,
+  getSubordinateIds,
   invalidateUserCache,
 } from "./authnexus-management.js";
-export type { OrgUser } from "./authnexus-management.js";
+export type { OrgUser, OrgSubordinates } from "./authnexus-management.js";

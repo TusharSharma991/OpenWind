@@ -117,15 +117,13 @@ R7: Short-TTL server-side caching, tolerant of AuthNexus's own staleness.
 
 ## §T Tasks
 
-| id  | task                                                                                                                                                              | phase | status | depends |
-| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- | ------ | ------- |
-| T1  | `getSubordinateIds()` in `authnexus-management.ts` — call `/connections?detail=ids`, flatten tree, handle `dataIncomplete`/error/cycle cases, short-TTL cache     | 1     | todo   | —       |
-| T2  | `GET /dashboard/org-view` route — self-userId only, calls T1 then `resolveUserScopedEntityIds`, reuses `my-view.ts`'s section builders (tickets/dueDates/slaRisk) | 1     | todo   | T1      |
-| T3  | Unit tests, mocked AuthNexus responses: happy path, 0 reports, `dataIncomplete`, `wasCycleMember`, non-200, deep tree                                             | 1     | todo   | T1, T2  |
-| T4  | Isolation tests — confirm org-view respects tenant scoping same as my-view                                                                                        | 1     | todo   | T2      |
-| T5  | `/dashboard/org` route + page component, reusing My View's visual conventions (filter tabs, SLA coloring, skeleton loaders)                                       | 2     | todo   | T2      |
-| T6  | Toggle on `/dashboard`, conditionally rendered after confirming `hasReports: true`                                                                                | 2     | todo   | T2, T5  |
-| T7  | Frontend tests — toggle visibility logic, unavailable-state rendering                                                                                             | 2     | todo   | T5, T6  |
+Full breakdown: `docs/specs/my-org-view-tasks.md` (21 tasks, 3 phases). Summary:
+
+| id      | task                                                                                                    | phase | status | depends |
+| ------- | ------------------------------------------------------------------------------------------------------- | ----- | ------ | ------- |
+| T1-T7   | `getSubordinateIds()` resolver (call, flatten, degrade, cache) + unit tests                             | 1     | todo   | —       |
+| T8-T16  | `GET /dashboard/org-view` route (self-scoped, reuses my-view.ts builders) + integration/isolation tests | 2     | todo   | T1-T7   |
+| T17-T21 | `/dashboard/org` page + toggle on `/dashboard` + frontend tests                                         | 3     | todo   | T8-T16  |
 
 phase gate: all unit + integration tests pass before advancing to next phase
 

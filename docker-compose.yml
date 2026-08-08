@@ -349,14 +349,13 @@ services:
     environment:
       DATABASE_URL: postgres://app_user:app_user_dev_password@pgbouncer:5432/platform
       REDIS_URL: redis://redis:6379
-      # AuthNexus connection — RS256 JWT verification via JWKS only (no introspection).
-      # AUTHNEXUS_ISSUER/JWKS_URL point at the AuthNexus instance; overridable via .env.local.
-      AUTHNEXUS_ISSUER: ${AUTHNEXUS_ISSUER:-https://auth.rokkalabs.com}
-      AUTHNEXUS_JWKS_URL: ${AUTHNEXUS_JWKS_URL:-https://auth.rokkalabs.com/api/v1/auth/jwks}
-      # aud claim is the OIDC client id (confirmed against a real token), not a
-      # Zitadel-style project urn — despite the project-scoped scope name at login.
-      AUTHNEXUS_AUDIENCE: ${AUTHNEXUS_AUDIENCE:-383330115230171139}
-      AUTHNEXUS_PROJECT_ID: ${AUTHNEXUS_PROJECT_ID:-383330037585149955}
+      # AuthNexus connection (AUTHNEXUS_ISSUER/JWKS_URL/AUDIENCE/PROJECT_ID) comes
+      # entirely from env_file (.env.local) above — deliberately NOT restated here
+      # via ${VAR:-default}. Compose interpolates ${VAR:-default} from the HOST
+      # shell/.env, not from env_file, so a hardcoded default here would silently
+      # override whatever .env.local actually sets for the same key (Compose
+      # precedence: environment: > env_file). That masked a real client-id
+      # mismatch during AuthNexus org-switch testing — see docs/specs/my-org-view.md.
       OPENBAO_ADDR: http://openbao:8200
       # Local-disk file storage (see docs/specs/local-disk-file-storage.md) —
       # in-container path only; the host-side bind-mount source is
@@ -404,10 +403,7 @@ services:
       DATABASE_URL: postgres://app_user:app_user_dev_password@pgbouncer:5432/platform
       MIGRATION_DATABASE_URL: postgresql://migration_user:migration_user_dev_password@postgres:5432/platform
       REDIS_URL: redis://redis:6379
-      AUTHNEXUS_ISSUER: ${AUTHNEXUS_ISSUER:-https://auth.rokkalabs.com}
-      AUTHNEXUS_JWKS_URL: ${AUTHNEXUS_JWKS_URL:-https://auth.rokkalabs.com/api/v1/auth/jwks}
-      AUTHNEXUS_AUDIENCE: ${AUTHNEXUS_AUDIENCE:-383330115230171139}
-      AUTHNEXUS_PROJECT_ID: ${AUTHNEXUS_PROJECT_ID:-383330037585149955}
+      # See ow-backend's comment above — AuthNexus vars come from env_file only.
       OPENBAO_ADDR: http://openbao:8200
       # Local-disk file storage (see docs/specs/local-disk-file-storage.md) —
       # must be the same in-container path as ow-backend so the AV scan

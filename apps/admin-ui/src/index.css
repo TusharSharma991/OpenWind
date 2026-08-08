@@ -592,8 +592,9 @@ h1, h2, h3, h4, h5, h6 {
   background: var(--accent-gradient);
   color: #fff;
   font-family: var(--font-heading);
-  font-size: 17px;
+  font-size: 13px;
   font-weight: 800;
+  letter-spacing: -0.5px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -710,7 +711,7 @@ h1, h2, h3, h4, h5, h6 {
   background: var(--accent-gradient);
   color: #fff;
   font-family: var(--font-heading);
-  font-size: 28px;
+  font-size: 22px;
   font-weight: 800;
   margin-bottom: 18px;
   box-shadow: 0 6px 20px color-mix(in srgb, var(--accent-primary) 35%, transparent);
@@ -3973,7 +3974,7 @@ select.form-input {
 
   .lp-card { border-radius: var(--radius-sm); }
   .lp-card-head { padding: 24px 20px 20px; }
-  .lp-card-logo { width: 50px; height: 50px; font-size: 24px; margin-bottom: 14px; }
+  .lp-card-logo { width: 50px; height: 50px; font-size: 19px; margin-bottom: 14px; }
   .lp-card-title { font-size: 19px; }
   .lp-card-body { padding: 20px 20px 16px; }
   .lp-security { margin: 0 20px 20px; }
@@ -3984,6 +3985,15 @@ select.form-input {
 /* ═══════════════════════════════════════════════════════════════
    RESPONSIVE — Dashboard page
    ═══════════════════════════════════════════════════════════════ */
+
+/* Page padding — used by both My View and My Org View (dashboard.tsx wraps
+   both in the same .dash-page root, since Org View renders inline now). */
+@media (max-width: 600px) {
+  .dash-page { padding: 16px !important; }
+}
+@media (max-width: 400px) {
+  .dash-page { padding: 12px !important; }
+}
 
 /* Page header — stack on narrow screens */
 @media (max-width: 600px) {

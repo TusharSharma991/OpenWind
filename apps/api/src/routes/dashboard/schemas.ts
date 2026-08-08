@@ -69,6 +69,11 @@ export const TicketSummarySchema = z.object({
   title: z.string(),
   dueDate: z.string().nullable(),
   isOverdue: z.boolean(),
+  assignedTo: z.string().nullable(),
+  // docs/specs/my-org-view.md R12 — populated only by org-view.ts (name
+  // resolution is AuthNexus-only); My View omits it since every ticket there
+  // is implicitly the caller's own.
+  assignedToName: z.string().nullable().optional(),
 });
 
 export const TicketsSectionSchema = z.object({
@@ -114,6 +119,21 @@ export const PendingApprovalsSectionSchema = z.object({
   items: z.array(PendingApprovalItemSchema),
   totalQualifying: z.number().int().nonnegative(),
   unavailable: z.boolean().optional(),
+});
+
+// docs/specs/my-org-view.md R12 — per-member roster row for the Org View
+// "Team" table: one row per direct/indirect report, independent of whether
+// they have any tickets at all (§V: the roster lists every subordinate, not
+// just ones with activity).
+export const TeamMemberSchema = z.object({
+  userId: z.string(),
+  name: z.string(),
+  ticketCount: z.number().int().nonnegative(),
+  overdueCount: z.number().int().nonnegative(),
+});
+
+export const TeamMembersSectionSchema = z.object({
+  items: z.array(TeamMemberSchema),
 });
 
 export const MyViewResponseSchema = z.object({

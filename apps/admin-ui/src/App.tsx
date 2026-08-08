@@ -114,6 +114,9 @@ export function App(): React.ReactElement {
           >
             {/* All authenticated users */}
             <Route index element={<Navigate to="/dashboard" replace />} />
+            {/* My Org View (docs/specs/my-org-view.md) — AuthNexus-fork-only —
+                is rendered INLINE on this page via a pill toggle (R4, amended
+                2026-08-08), not a separate route. */}
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/analytics" element={<Analytics />} />
             <Route path="/records" element={<AdminRecords />} />

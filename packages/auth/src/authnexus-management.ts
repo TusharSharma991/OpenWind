@@ -360,9 +360,181 @@ export async function getUserById(
   }
 }
 
+// ── Org hierarchy (My Org View — docs/specs/my-org-view.md) ────────────────────
+// AuthNexus-only: Zitadel (core's identity provider) has no manager/report-chain
+// data. This is the sole call site for /connections — keep it that way so a
+// contract change only needs updating here (see spec §T's "unstable API" note).
+
+interface NestedReportNode {
+  userId: string;
+  children?: NestedReportNode[];
+}
+
+interface OrgConnectionsResponse {
+  dataIncomplete: boolean;
+  user: { userId: string; wasCycleMember?: boolean } | null;
+  descendants: {
+    directReportsCount: number;
+    totalReportsCount: number;
+    reports: NestedReportNode[];
+  };
+}
+
+export interface OrgSubordinates {
+  ids: string[];
+  hasReports: boolean;
+  status: "ok" | "unavailable";
+}
+
+// Flattens the nested reports tree (any depth — AuthNexus confirmed no depth
+// cap in practice) into a flat list of userIds for
+// resolveUserScopedEntityIds(tenantId, [userId, ...ids]).
+function flattenReports(nodes: NestedReportNode[]): string[] {
+  const ids: string[] = [];
+  const stack = [...nodes];
+  while (stack.length > 0) {
+    // non-null assertion safe: loop condition guarantees stack.length > 0
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    const node = stack.pop()!;
+    ids.push(node.userId);
+    if (node.children && node.children.length > 0) stack.push(...node.children);
+  }
+  return ids;
+}
+
+interface OrgConnectionsCacheEntry extends OrgSubordinates {
+  expiresAt: number;
+}
+const _orgConnectionsCache = new Map<
+  string,
+  OrgConnectionsCacheEntry | Promise<OrgSubordinates>
+>();
+const ORG_CONNECTIONS_CACHE_TTL_MS = 5 * 60 * 1000;
+
+// dataIncomplete:true can mean "transient, will self-heal" or "permanently
+// excluded" (non-human account) — AuthNexus confirmed the response can't tell
+// these apart. Track how long a key has been seeing dataIncomplete; once past
+// budget, stop calling AuthNexus for it at all (until invalidateUserCache()).
+interface IncompleteTracker {
+  firstSeenAt: number;
+  permanentlyUnavailable: boolean;
+}
+const _orgIncompleteTracker = new Map<string, IncompleteTracker>();
+const DATA_INCOMPLETE_BUDGET_MS = 20 * 60 * 1000;
+
+// bearerToken is the CALLER'S OWN forwarded token, never a service-account
+// token minted on someone else's behalf — org-view.ts must always pass the
+// requesting user's own userId here (see spec §V: no client-supplied target
+// userId), and AuthNexus enforces no per-user authorization beyond the org
+// boundary, so this function must never be called with an arbitrary userId.
+export async function getSubordinateIds(
+  orgId: string,
+  userId: string,
+  bearerToken: string,
+): Promise<OrgSubordinates> {
+  if (!orgId || !userId) {
+    return { ids: [], hasReports: false, status: "unavailable" };
+  }
+
+  const cacheKey = `${orgId}:${userId}`;
+  const cached = _orgConnectionsCache.get(cacheKey);
+  if (cached && !(cached instanceof Promise) && Date.now() < cached.expiresAt) {
+    return {
+      ids: cached.ids,
+      hasReports: cached.hasReports,
+      status: cached.status,
+    };
+  }
+  if (cached instanceof Promise) return cached;
+
+  const pending = _fetchSubordinateIds(orgId, userId, bearerToken, cacheKey);
+  _orgConnectionsCache.set(cacheKey, pending);
+  return pending;
+}
+
+async function _fetchSubordinateIds(
+  orgId: string,
+  userId: string,
+  bearerToken: string,
+  cacheKey: string,
+): Promise<OrgSubordinates> {
+  const tracker = _orgIncompleteTracker.get(cacheKey);
+  if (tracker?.permanentlyUnavailable) {
+    _orgConnectionsCache.delete(cacheKey);
+    return { ids: [], hasReports: false, status: "unavailable" };
+  }
+
+  try {
+    const url = adminApiUrl(
+      `/api/admin/orgs/${encodeURIComponent(orgId)}/users/${encodeURIComponent(userId)}/connections?detail=ids`,
+    );
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${bearerToken}` },
+    });
+
+    if (!res.ok) {
+      logger.warn(
+        { status: res.status, orgId, userId },
+        "AuthNexus org-connections fetch failed",
+      );
+      _orgConnectionsCache.delete(cacheKey);
+      return { ids: [], hasReports: false, status: "unavailable" };
+    }
+
+    const data = (await res.json()) as OrgConnectionsResponse;
+
+    if (data.dataIncomplete) {
+      const now = Date.now();
+      const firstSeenAt = tracker?.firstSeenAt ?? now;
+      const permanentlyUnavailable =
+        now - firstSeenAt >= DATA_INCOMPLETE_BUDGET_MS;
+      _orgIncompleteTracker.set(cacheKey, {
+        firstSeenAt,
+        permanentlyUnavailable,
+      });
+      _orgConnectionsCache.delete(cacheKey);
+      return { ids: [], hasReports: false, status: "unavailable" };
+    }
+
+    // Resolved — clear any prior incomplete tracking for this key.
+    _orgIncompleteTracker.delete(cacheKey);
+
+    if (data.user?.wasCycleMember) {
+      // Data-quality issue in AuthNexus's source HR data (a manager-reference
+      // cycle got auto-corrected upstream) — log for follow-up, never surface
+      // to the end user (spec §V: the tree is still usable, just structurally
+      // wrong for the affected nodes).
+      logger.warn(
+        { orgId, userId },
+        "AuthNexus org-connections: user was a cycle member (upstream data-quality issue)",
+      );
+    }
+
+    const result: OrgSubordinates = {
+      ids: flattenReports(data.descendants.reports),
+      hasReports: data.descendants.directReportsCount > 0,
+      status: "ok",
+    };
+    _orgConnectionsCache.set(cacheKey, {
+      ...result,
+      expiresAt: Date.now() + ORG_CONNECTIONS_CACHE_TTL_MS,
+    });
+    return result;
+  } catch (err) {
+    logger.error(
+      { err, orgId, userId },
+      "Failed to fetch AuthNexus org connections",
+    );
+    _orgConnectionsCache.delete(cacheKey);
+    return { ids: [], hasReports: false, status: "unavailable" };
+  }
+}
+
 // ── Cache invalidation ────────────────────────────────────────────────────────
 
 export function invalidateUserCache(): void {
   _assignmentsCache.clear();
   _userByIdCache.clear();
+  _orgConnectionsCache.clear();
+  _orgIncompleteTracker.clear();
 }

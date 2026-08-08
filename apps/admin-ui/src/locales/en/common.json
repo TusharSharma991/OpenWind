@@ -9,7 +9,7 @@
     },
     "title": "Sign in to OpenWind",
     "description": "Your modular workflow platform. Access modules, configure workflows, and manage your workspace.",
-    "signInButton": "Sign in with Zitadel",
+    "signInButton": "Sign in",
     "redirecting": "Redirecting…",
     "securityNote": "Access is secured and session-scoped to your organisation",
     "helpPrompt": "Need access?",

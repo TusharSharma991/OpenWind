@@ -10,6 +10,49 @@ detail (typecheck/lint/test pass state) is only included where a PR's own body r
 
 ---
 
+## 2026-08-10 — fix outbound-notification dead-letter write missing tenant context
+
+**Session type:** Follow-up hotfix, same incident family as the outbox-sweeper fix above
+**Summary:** While verifying the outbox-sweeper fix locally (rebuilt `ow-backend`/`ow-worker`,
+tested login + a mention), found emails still weren't sending. Server/local logs showed two
+separate things: (1) the actual outbound handoff failing with `401` from the outbound delivery
+service and `403` from an AuthNexus service-account token exchange — both external
+credential/config issues on the AuthNexus/Novu side, not this repo's code (org/project IDs
+verified correctly configured; needs someone with AuthNexus admin access to check the
+`openwind-api-bot`/`novu-outbound-caller` machine users); and (2) a real code bug:
+`notification-outbound-worker.ts`'s `handleFailedJob` recorded that permanent failure via a
+bare `db.insert(outboxEvents)` with no tenant context, so _that_ insert also failed with the
+same `invalid input syntax for type uuid` RLS error as the sweeper bug — meaning even the "notify
+admins that email delivery is broken" fallback was silently broken. Its own comment claimed
+"RLS disabled by design" citing `0006_remove_internal_table_rls.sql`, which was true until
+`0050_outbox_events_rls.sql` re-enabled RLS on this table and was never updated.
+**Fix:** wrapped the insert in `withTenantContext(tenantId, ...)`, matching every other
+tenant-scoped outbox write in the codebase (`av-scan.ts`, `due-date-worker.ts`,
+`sla-breacher.ts`) — not `setOutboxSweeperRole`, which is reserved for genuinely cross-tenant
+sweeps. Removed the now-unused `db` import; updated the existing unit test's `@platform/db` mock
+to route `insert` through the same `tx` mock `withTenantContext` already uses.
+**Verification:** `pnpm typecheck`/`lint` PASS, `pnpm --filter @platform/worker test` PASS
+(133/133). Four independent adversarial `/review` passes (reuse/simplification/efficiency/
+altitude, removed-behavior audit, cross-file trace, line-by-line scan) — no correctness issues.
+One pass raised `engine.ts`/`child-relations.ts`'s plain `db.insert(outboxEvents)` as
+potentially the same bug class; verified false positive — `db` there is a `DbOrTx` _parameter_
+shadowing the import, receiving an already-tenant-scoped `tx` from the caller's own
+`withTenantContext`, which is why entity/ticket creation already worked correctly throughout
+this whole incident. Rebuilt and deployed to local `ow-worker`; confirmed clean startup.
+**Also fixed locally (not committed — `.env.local` is gitignored):** raised
+`RATE_LIMIT_TENANT_PER_MIN` to 1000 for local dev — the production default (100/min) is shared
+across _all_ local browser sessions via `DEV_TENANT_ID`'s single-dev-tenant fallback, so normal
+SPA usage was tripping 429s that don't reflect a real per-user limit.
+**Separately identified, not a bug:** a workflow-detail 404 traced to a real product gap (any
+workflow with zero existing tickets and no assigned admin is unopenable by non-admin users,
+including its own future first ticket-creator) — this predates today's session (restored 2 days
+ago in commit `16d5cae` to match upstream's intended H2 security fix, not caused by anything
+here) and is still open, awaiting a decision on the fix approach.
+**Next:** deploy both this fix and the outbox-sweeper fix to the hosting server; get someone with
+AuthNexus admin access to check the two service-account credentials.
+
+---
+
 ## 2026-08-10 — fix outbox RLS cross-tenant sweep outage (hotfix)
 
 **Session type:** Production incident hotfix, direct to server-hosting worktree (no PR)

@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useGetIdentity } from "@refinedev/core";
 import { fetchWithAuth, API_URL } from "../lib/api.js";
 import { useEntityTypes, toTypeSlug } from "../entity-type-context.js";
-import { useHoverStyle, TOKENS } from "@platform/ui";
+import { useHoverStyle, TOKENS, Button } from "@platform/ui";
 import {
   listNotifications,
   getUnreadCount,
@@ -176,6 +176,15 @@ function formatHoursOver(hours: number): string {
   return `${Math.round(hours / 24)}d over SLA`;
 }
 
+// Severity tiers for SLA-risk rows — a ticket 5 minutes over SLA and one 5
+// days over were previously rendered in the exact same pink, giving no visual
+// signal of how bad each one actually is.
+function slaSeverityColor(hoursOver: number): string {
+  if (hoursOver >= 72) return "hsl(350,85%,50%)";
+  if (hoursOver >= 24) return "hsl(340,80%,58%)";
+  return "hsl(35,90%,50%)";
+}
+
 function formatDueDateLong(iso: string | null): string {
   if (iso === null) return "—";
   return new Date(iso).toLocaleDateString("en-IN", {
@@ -281,6 +290,49 @@ function Donut({
         TICKETS
       </text>
     </svg>
+  );
+}
+
+// Shimmer placeholder shaped like the content it stands in for, instead of a
+// plain "Loading…" line in every card.
+function Skeleton({
+  height = "14px",
+  width = "100%",
+  round = false,
+}: {
+  height?: string;
+  width?: string;
+  round?: boolean;
+}): React.ReactElement {
+  return (
+    <div
+      style={{
+        height,
+        width,
+        borderRadius: round ? "50%" : "6px",
+        flexShrink: 0,
+        background:
+          "linear-gradient(90deg, var(--bg-tertiary) 25%, var(--bg-secondary) 50%, var(--bg-tertiary) 75%)",
+        backgroundSize: "200% 100%",
+        animation: "dash-skeleton 1.4s ease-in-out infinite",
+      }}
+    />
+  );
+}
+
+function SkeletonRows({ count }: { count: number }): React.ReactElement {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+      {Array.from({ length: count }).map((_, i) => (
+        <div
+          key={i}
+          style={{ display: "flex", alignItems: "center", gap: "10px" }}
+        >
+          <Skeleton width="60%" />
+          <Skeleton width="20%" />
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -635,6 +687,47 @@ function TicketRow({
   );
 }
 
+type TicketSortKey = "title" | "workflowName" | "dueDate";
+type SortDir = "asc" | "desc";
+
+function SortableHeader({
+  label,
+  sortKey,
+  align = "left",
+  active,
+  dir,
+  onSort,
+}: {
+  label: string;
+  sortKey: TicketSortKey;
+  align?: "left" | "right";
+  active: boolean;
+  dir: SortDir;
+  onSort: (key: TicketSortKey) => void;
+}): React.ReactElement {
+  return (
+    <th
+      onClick={() => onSort(sortKey)}
+      style={{
+        textAlign: align,
+        fontSize: "11px",
+        fontWeight: 600,
+        textTransform: "uppercase",
+        letterSpacing: "0.05em",
+        color: active ? "var(--accent-primary)" : "var(--text-muted)",
+        padding: "0 4px 8px",
+        borderBottom: "1px solid var(--border-color)",
+        whiteSpace: "nowrap",
+        cursor: "pointer",
+        userSelect: "none",
+      }}
+    >
+      {label}
+      {active && (dir === "asc" ? " ↑" : " ↓")}
+    </th>
+  );
+}
+
 function TicketDueDateTable({
   items,
   unavailable,
@@ -648,6 +741,36 @@ function TicketDueDateTable({
   emptyLabel: string;
   onOpen: (entityTypeId: string, entityId: string) => void;
 }): React.ReactElement {
+  // No sort applied by default — items arrive already ordered overdue-first
+  // then soonest-first by the API. Clicking a header opts into a client-side
+  // re-sort on top of that.
+  const [sortKey, setSortKey] = useState<TicketSortKey | null>(null);
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
+
+  function handleSort(key: TicketSortKey): void {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  }
+
+  const sortedItems = useMemo(() => {
+    if (!sortKey) return items;
+    const sorted = [...items].sort((a, b) => {
+      if (sortKey === "dueDate") {
+        const av = a.dueDate ? new Date(a.dueDate).getTime() : Infinity;
+        const bv = b.dueDate ? new Date(b.dueDate).getTime() : Infinity;
+        return av - bv;
+      }
+      const av = (sortKey === "title" ? a.title : a.workflowName) ?? "";
+      const bv = (sortKey === "title" ? b.title : b.workflowName) ?? "";
+      return av.localeCompare(bv);
+    });
+    return sortDir === "asc" ? sorted : sorted.reverse();
+  }, [items, sortKey, sortDir]);
+
   return (
     <div>
       {unavailable ? (
@@ -655,9 +778,7 @@ function TicketDueDateTable({
           Temporarily unavailable — the rest of your dashboard is unaffected.
         </div>
       ) : loading ? (
-        <div style={{ fontSize: "13px", color: "var(--text-muted)" }}>
-          Loading…
-        </div>
+        <SkeletonRows count={4} />
       ) : items.length === 0 ? (
         <div style={{ fontSize: "13px", color: "var(--text-muted)" }}>
           {emptyLabel}
@@ -674,50 +795,27 @@ function TicketDueDateTable({
           >
             <thead>
               <tr>
-                <th
-                  style={{
-                    textAlign: "left",
-                    fontSize: "11px",
-                    fontWeight: 600,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.05em",
-                    color: "var(--text-muted)",
-                    padding: "0 4px 8px",
-                    borderBottom: "1px solid var(--border-color)",
-                  }}
-                >
-                  Ticket
-                </th>
-                <th
-                  style={{
-                    textAlign: "left",
-                    fontSize: "11px",
-                    fontWeight: 600,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.05em",
-                    color: "var(--text-muted)",
-                    padding: "0 4px 8px",
-                    borderBottom: "1px solid var(--border-color)",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  Workflow
-                </th>
-                <th
-                  style={{
-                    textAlign: "left",
-                    fontSize: "11px",
-                    fontWeight: 600,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.05em",
-                    color: "var(--text-muted)",
-                    padding: "0 4px 8px",
-                    borderBottom: "1px solid var(--border-color)",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  Due Date
-                </th>
+                <SortableHeader
+                  label="Ticket"
+                  sortKey="title"
+                  active={sortKey === "title"}
+                  dir={sortDir}
+                  onSort={handleSort}
+                />
+                <SortableHeader
+                  label="Workflow"
+                  sortKey="workflowName"
+                  active={sortKey === "workflowName"}
+                  dir={sortDir}
+                  onSort={handleSort}
+                />
+                <SortableHeader
+                  label="Due Date"
+                  sortKey="dueDate"
+                  active={sortKey === "dueDate"}
+                  dir={sortDir}
+                  onSort={handleSort}
+                />
                 <th
                   style={{
                     textAlign: "right",
@@ -736,7 +834,7 @@ function TicketDueDateTable({
               </tr>
             </thead>
             <tbody>
-              {items.map((item) => (
+              {sortedItems.map((item) => (
                 <TicketRow key={item.entityId} item={item} onOpen={onOpen} />
               ))}
             </tbody>
@@ -914,11 +1012,24 @@ export function Dashboard(): React.ReactElement {
     [view.tickets.items],
   );
   const [ticketFilter, setTicketFilter] = useState<TicketFilter>("all");
+  const [ticketSearch, setTicketSearch] = useState("");
   const filteredTickets = useMemo(() => {
-    if (ticketFilter === "overdue") return overdueTickets;
-    if (ticketFilter === "due-soon") return dueSoonTickets;
-    return view.tickets.items;
-  }, [ticketFilter, overdueTickets, dueSoonTickets, view.tickets.items]);
+    const base =
+      ticketFilter === "overdue"
+        ? overdueTickets
+        : ticketFilter === "due-soon"
+          ? dueSoonTickets
+          : view.tickets.items;
+    const query = ticketSearch.trim().toLowerCase();
+    if (!query) return base;
+    return base.filter((t) => t.title.toLowerCase().includes(query));
+  }, [
+    ticketFilter,
+    ticketSearch,
+    overdueTickets,
+    dueSoonTickets,
+    view.tickets.items,
+  ]);
   const maxWorkflowTotal = useMemo(
     () => Math.max(1, ...view.workflows.map((w) => w.total)),
     [view.workflows],
@@ -962,6 +1073,14 @@ export function Dashboard(): React.ReactElement {
 
   const hasWorkload = view.workflows.length > 0;
   const needsAttentionCount = overdueTickets.length + view.slaRisk.items.length;
+  const isBrandNewUser =
+    !loading &&
+    totalTickets === 0 &&
+    view.slaRisk.items.length === 0 &&
+    view.adminWorkflows.length === 0 &&
+    view.pendingApprovals.items.length === 0 &&
+    view.savedViews.length === 0 &&
+    recentNotifications.length === 0;
 
   return (
     <div className="dash-page" style={{ padding: "24px 28px" }}>
@@ -1131,6 +1250,41 @@ export function Dashboard(): React.ReactElement {
           loading={orgViewLoading}
           onOpenRecord={openRecord}
         />
+      ) : isBrandNewUser ? (
+        <div
+          className="data-panel"
+          style={{
+            padding: "48px 24px",
+            textAlign: "center",
+            marginBottom: 0,
+          }}
+        >
+          <div style={{ fontSize: "40px", marginBottom: "12px" }}>🌱</div>
+          <h3
+            style={{
+              fontSize: "16px",
+              fontWeight: 700,
+              color: "var(--text-primary)",
+              margin: "0 0 6px",
+            }}
+          >
+            Nothing here yet
+          </h3>
+          <p
+            style={{
+              fontSize: "13px",
+              color: "var(--text-muted)",
+              margin: "0 0 18px",
+            }}
+          >
+            You have no tickets assigned, created, or watched. Once you do,
+            they'll show up here with due dates, SLA risk, and everything else
+            that needs your attention.
+          </p>
+          <Button variant="primary" onClick={() => navigate("/records")}>
+            Go to Records
+          </Button>
+        </div>
       ) : (
         <>
           {/* ── KPI strip ─────────────────────────────────────────────────────── */}
@@ -1182,6 +1336,23 @@ export function Dashboard(): React.ReactElement {
               title="My Tickets"
               icon="📋"
               color="hsl(211,100%,50%)"
+              action={
+                <input
+                  type="text"
+                  value={ticketSearch}
+                  onChange={(e) => setTicketSearch(e.target.value)}
+                  placeholder="Search by title…"
+                  style={{
+                    fontSize: "12px",
+                    padding: "6px 12px",
+                    borderRadius: "999px",
+                    border: "1px solid var(--border-color)",
+                    background: "var(--bg-secondary)",
+                    color: "var(--text-primary)",
+                    width: "180px",
+                  }}
+                />
+              }
             />
             <FilterTabs
               active={ticketFilter}
@@ -1197,14 +1368,33 @@ export function Dashboard(): React.ReactElement {
               unavailable={view.tickets.unavailable}
               loading={loading}
               emptyLabel={
-                ticketFilter === "overdue"
-                  ? "Nothing overdue. ✅"
-                  : ticketFilter === "due-soon"
-                    ? "Nothing due in the next 2 days."
-                    : "No tickets assigned, created, or watched by you yet."
+                ticketSearch.trim()
+                  ? "No tickets match your search."
+                  : ticketFilter === "overdue"
+                    ? "Nothing overdue. ✅"
+                    : ticketFilter === "due-soon"
+                      ? "Nothing due in the next 2 days."
+                      : "No tickets assigned, created, or watched by you yet."
               }
               onOpen={openRecord}
             />
+            {!loading &&
+              ticketFilter === "all" &&
+              !ticketSearch.trim() &&
+              view.tickets.totalQualifying > filteredTickets.length && (
+                <div
+                  style={{
+                    fontSize: "12px",
+                    color: "var(--text-muted)",
+                    textAlign: "center",
+                    marginTop: "12px",
+                  }}
+                >
+                  Showing {filteredTickets.length} of{" "}
+                  {view.tickets.totalQualifying} tickets — narrow with a filter
+                  or search above.
+                </div>
+              )}
           </Card>
 
           {/* ── two-column body ───────────────────────────────────────────────── */}
@@ -1227,9 +1417,7 @@ export function Dashboard(): React.ReactElement {
                   color="hsl(265,84%,60%)"
                 />
                 {loading ? (
-                  <div style={{ fontSize: "13px", color: "var(--text-muted)" }}>
-                    Loading…
-                  </div>
+                  <SkeletonRows count={3} />
                 ) : !hasWorkload ? (
                   <div style={{ fontSize: "13px", color: "var(--text-muted)" }}>
                     No tickets assigned, created, or watched by you yet.
@@ -1265,8 +1453,17 @@ export function Dashboard(): React.ReactElement {
                   color="hsl(150,75%,40%)"
                 />
                 {loading ? (
-                  <div style={{ fontSize: "13px", color: "var(--text-muted)" }}>
-                    Loading…
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "22px",
+                    }}
+                  >
+                    <Skeleton height="120px" width="120px" round />
+                    <div style={{ flex: 1 }}>
+                      <SkeletonRows count={3} />
+                    </div>
                   </div>
                 ) : stateMix.length === 0 ? (
                   <div style={{ fontSize: "13px", color: "var(--text-muted)" }}>
@@ -1320,9 +1517,7 @@ export function Dashboard(): React.ReactElement {
                   unaffected.
                 </div>
               ) : loading ? (
-                <div style={{ fontSize: "13px", color: "var(--text-muted)" }}>
-                  Loading…
-                </div>
+                <SkeletonRows count={3} />
               ) : view.slaRisk.items.length === 0 ? (
                 <div style={{ fontSize: "13px", color: "var(--text-muted)" }}>
                   Nothing over its SLA. ✅
@@ -1370,7 +1565,7 @@ export function Dashboard(): React.ReactElement {
                         style={{
                           fontSize: "11px",
                           fontWeight: 700,
-                          color: "hsl(340,80%,58%)",
+                          color: slaSeverityColor(s.hoursOver),
                           whiteSpace: "nowrap",
                           flexShrink: 0,
                         }}

@@ -1162,13 +1162,15 @@ export function Analytics(): React.ReactElement {
           className="dash-header-actions"
           style={{ display: "flex", gap: "8px", flexShrink: 0 }}
         >
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => navigate("/workflows/new")}
-          >
-            + New Workflow
-          </Button>
+          {roles.includes("admin") && (
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => navigate("/workflows/new")}
+            >
+              + New Workflow
+            </Button>
+          )}
           <Button
             variant="secondary"
             size="sm"
@@ -1493,7 +1495,15 @@ export function Analytics(): React.ReactElement {
               style={{ display: "flex", flexDirection: "column", gap: "8px" }}
             >
               {[
-                { label: "New Workflow", path: "/workflows/new", icon: "+" },
+                ...(roles.includes("admin")
+                  ? [
+                      {
+                        label: "New Workflow",
+                        path: "/workflows/new",
+                        icon: "+",
+                      },
+                    ]
+                  : []),
                 { label: "Browse Modules", path: "/modules", icon: "🧩" },
                 { label: "View Records", path: "/records", icon: "📋" },
               ].map((a) => (

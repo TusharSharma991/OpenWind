@@ -10,6 +10,40 @@ detail (typecheck/lint/test pass state) is only included where a PR's own body r
 
 ---
 
+## 2026-08-10 — fix workflow-admin assignment 404 for org members who haven't logged in
+
+**Session type:** Bug report → fix, reproduced on both local and prod
+**Summary:** `PATCH /workflows/:id` rejected valid `assignedTo` (workflow-admin) user ids with
+`404 "One or more users not found in this tenant"`, even for real, currently-picked AuthNexus
+org members. Root cause: the workflow-admin picker (`apps/admin-ui/.../workflows/detail.tsx`)
+sources candidates from `GET /users`, which deliberately surfaces every AuthNexus org member
+regardless of local login history (by design — it also feeds the @mention picker, so customers
+can be mentioned before their first login). But `update.ts`'s validation checked candidates
+against `tenant_users`, a table that only gets a row for someone on their _first login_
+(`packages/auth/src/middleware.ts`). Any org member who hadn't personally logged into the app
+yet would always be offered by the picker and always rejected by the write — reproduced
+identically on the hosting server, not a local-data artifact.
+**Fix:** `update.ts` now validates `assignedTo` against AuthNexus org membership directly via
+`listOrgUsers` — the exact same call `GET /users` already uses — instead of the local
+`tenant_users` cache. Added a diagnostic warning log for the case where `listOrgUsers` returns
+zero users (which could mean a genuinely empty org, or `listOrgUsers` silently swallowing an
+AuthNexus fetch failure into `[]` — a pre-existing, shared ambiguity in that function used by
+several other callers too; not changing its contract here, just making the ambiguity visible
+at this call site rather than silently misreading an outage as "users don't exist").
+**Known dev-only limitation (documented, not fixed):** `DEV_TENANT_ID`'s local-dev override
+maps every login to one seeded tenant while `orgId` stays the real AuthNexus org id, so a
+fixture/seed-only user (never a real AuthNexus org member) can no longer be assigned as a
+workflow admin in local dev — only affects fake fixture data locally; production has no
+`DEV_TENANT_ID` fallback so this doesn't apply there.
+**Verification:** `pnpm typecheck`/`lint` PASS; `update.test.ts` rewritten for the new
+AuthNexus-based check (7/7 pass, including a new test for the exact previously-broken case —
+assigning an org member with zero local login history — and a test asserting the diagnostic
+warning fires). Rebuilt and restarted local `ow-backend`; manually confirmed the exact reported
+case now succeeds (assigned a real org member with no `tenant_users` row as a workflow admin).
+One round of adversarial `/review` — two findings, both addressed (see above).
+
+---
+
 ## 2026-08-10 — deployed outbox RLS + outbound-notification fixes to hosting server
 
 **Session type:** Deploy, follow-up to the two hotfix commits above (`1d06256`, `df927d6`)

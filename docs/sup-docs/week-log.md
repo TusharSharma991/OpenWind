@@ -10,6 +10,30 @@ detail (typecheck/lint/test pass state) is only included where a PR's own body r
 
 ---
 
+## 2026-08-10 — deployed outbox RLS + outbound-notification fixes to hosting server
+
+**Session type:** Deploy, follow-up to the two hotfix commits above (`1d06256`, `df927d6`)
+**Summary:** Deployed both commits to the AuthNexus hosting server (`rokka-virtual-machine`).
+`git pull` alone was insufficient — the server runs prebuilt Docker images, not
+source-mounted/tsx-hot-reload containers, so `docker compose restart ow-worker ow-backend`
+picked up the pull but kept running the old baked-in code; confirmed via logs still showing the
+exact pre-fix RLS failure after the restart. Required `docker compose build ow-worker
+ow-backend` (rebuild, not restart) before the fix actually took effect — worth remembering for
+any future server deploy in this repo, not just this one.
+**Verification:** post-rebuild logs show clean `Notification poller: delivered events to
+queue` / `Notification: in-app delivery complete` for a real `comment.mentioned` event, no RLS
+errors. A live end-to-end test (real @mention via the UI) confirmed **both** in-app
+notification and email delivered successfully on the server — meaning the AuthNexus
+service-account 403/401 seen during local testing was local-only (a different/stale credential
+setup for the local test org), not a problem with the server's actual configured credentials.
+No AuthNexus admin action needed after all; that open item from the two hotfix entries above is
+resolved.
+**Still open (unrelated to this deploy):** the workflow-detail 404 gap documented in
+`C:\Users\User\Desktop\Tushar\OFF\work docs\tushar-branch-pull-outbox-rls-fix.md`'s "Known
+issue" section — not fixed, not deployed, no decision made yet on approach.
+
+---
+
 ## 2026-08-10 — fix outbound-notification dead-letter write missing tenant context
 
 **Session type:** Follow-up hotfix, same incident family as the outbox-sweeper fix above

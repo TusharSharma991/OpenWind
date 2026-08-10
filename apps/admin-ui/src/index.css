@@ -810,21 +810,6 @@ h1, h2, h3, h4, h5, h6 {
   gap: 7px;
 }
 
-/* Help */
-.lp-help {
-  margin-top: 16px;
-  font-size: 13px;
-  color: var(--text-muted);
-}
-.lp-help-link {
-  color: var(--accent-primary);
-  font-weight: 600;
-  text-decoration: none;
-}
-.lp-help-link:hover {
-  text-decoration: underline;
-}
-
 /* Footer */
 .lp-footer {
   background: var(--bg-secondary);

@@ -12,8 +12,6 @@
     "signInButton": "Sign in",
     "redirecting": "Redirecting…",
     "securityNote": "Access is secured and session-scoped to your organisation",
-    "helpPrompt": "Need access?",
-    "contactAdmin": "Contact your admin",
     "footer": {
       "copyright": "© 2026 OpenWind. Open-source platform.",
       "github": "GitHub",

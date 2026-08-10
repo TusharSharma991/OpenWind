@@ -191,13 +191,6 @@ export function Login(): React.ReactElement {
             {t("login.securityNote")}
           </div>
         </div>
-
-        <p className="lp-help">
-          {t("login.helpPrompt")}{" "}
-          <a href="mailto:support@openwind.io" className="lp-help-link">
-            {t("login.contactAdmin")}
-          </a>
-        </p>
       </main>
 
       {/* ── Footer ── */}

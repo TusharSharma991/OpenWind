@@ -33,6 +33,5 @@ describe("Login", () => {
       screen.getByRole("heading", { name: "Sign in to OpenWind" }),
     ).toBeDefined();
     expect(screen.getByRole("button", { name: /Sign in/ })).toBeDefined();
-    expect(screen.getByText("Contact your admin")).toBeDefined();
   });
 });

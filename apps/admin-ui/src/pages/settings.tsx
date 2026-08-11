@@ -10,8 +10,16 @@ import {
   type ThemeMode,
   type AccentColor,
 } from "../lib/theme.js";
+import { Button } from "@platform/ui";
 import { fetchWithAuth, API_URL } from "../lib/api.js";
 import { userManager, getRolesFromProfile } from "../authProvider.js";
+import {
+  getPasswordPolicy,
+  verifyCurrentPassword,
+  directResetPassword,
+  PasswordResetError,
+  type PasswordPolicy,
+} from "../lib/password-reset.js";
 
 type ModuleRow = {
   slug: string;
@@ -19,7 +27,29 @@ type ModuleRow = {
   isVisible: boolean;
 };
 
-type SettingsTab = "appearance" | "notifications" | "templates";
+type SettingsTab = "appearance" | "security" | "notifications" | "templates";
+
+function ReqChipIcon({ met }: { met: boolean }): React.ReactElement {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      viewBox="0 0 24 24"
+      strokeWidth="3"
+      stroke="currentColor"
+    >
+      {met ? (
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="m4.5 12.75 6 6 9-13.5"
+        />
+      ) : (
+        <circle cx="12" cy="12" r="8.5" />
+      )}
+    </svg>
+  );
+}
 
 export function Settings(): React.ReactElement {
   const [theme, setTheme] = useState<ThemeMode>(getSavedTheme);
@@ -37,6 +67,93 @@ export function Settings(): React.ReactElement {
   const [outboundLoading, setOutboundLoading] = useState(false);
   const [outboundToggling, setOutboundToggling] = useState(false);
 
+  // ── Security tab: direct password reset (AuthNexus's unauthenticated
+  // password-reset API — see .claude/skills/authnexus-pull-guard) ──────────
+  const [username, setUsername] = useState("");
+  const [passwordPolicy, setPasswordPolicy] = useState<PasswordPolicy | null>(
+    null,
+  );
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [verifying, setVerifying] = useState(false);
+  const [verified, setVerified] = useState(false);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitSuccess, setSubmitSuccess] = useState(false);
+
+  useEffect(() => {
+    void userManager.getUser().then((u) => {
+      const profile = u?.profile as Record<string, unknown> | undefined;
+      setUsername(
+        (profile?.["preferred_username"] as string | undefined) ??
+          (profile?.["email"] as string | undefined) ??
+          "",
+      );
+    });
+  }, []);
+
+  useEffect(() => {
+    if (activeTab !== "security" || passwordPolicy) return;
+    void getPasswordPolicy()
+      .then(setPasswordPolicy)
+      .catch(() => setPasswordPolicy(null));
+  }, [activeTab, passwordPolicy]);
+
+  function resetSecurityForm(): void {
+    setCurrentPassword("");
+    setVerified(false);
+    setVerifyError(null);
+    setNewPassword("");
+    setConfirmPassword("");
+    setSubmitError(null);
+  }
+
+  async function handleVerifyPassword(): Promise<void> {
+    setVerifying(true);
+    setVerifyError(null);
+    try {
+      const valid = await verifyCurrentPassword(username, currentPassword);
+      if (valid) {
+        setVerified(true);
+      } else {
+        setVerifyError("Incorrect current password.");
+      }
+    } catch (err) {
+      setVerifyError(
+        err instanceof PasswordResetError
+          ? err.message
+          : "Could not verify password.",
+      );
+    } finally {
+      setVerifying(false);
+    }
+  }
+
+  const passwordsMismatch =
+    confirmPassword.length > 0 && newPassword !== confirmPassword;
+
+  async function handleUpdatePassword(): Promise<void> {
+    if (passwordsMismatch || !newPassword) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    setSubmitSuccess(false);
+    try {
+      await directResetPassword(username, currentPassword, newPassword);
+      setSubmitSuccess(true);
+      resetSecurityForm();
+    } catch (err) {
+      setSubmitError(
+        err instanceof PasswordResetError
+          ? err.message
+          : "Could not update password.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   useEffect(() => {
     void userManager.getUser().then((u) => {
       if (!u) {
@@ -50,9 +167,10 @@ export function Settings(): React.ReactElement {
   }, []);
 
   // Fall back to Appearance if the active tab is admin-only and the user
-  // turns out not to be an admin (or role hasn't loaded yet).
+  // turns out not to be an admin (or role hasn't loaded yet). Security is
+  // available to every role, so it's exempt from this redirect.
   useEffect(() => {
-    if (!isAdmin && activeTab !== "appearance") {
+    if (!isAdmin && activeTab !== "appearance" && activeTab !== "security") {
       setActiveTab("appearance");
     }
   }, [isAdmin, activeTab]);
@@ -153,6 +271,25 @@ export function Settings(): React.ReactElement {
             strokeLinecap="round"
             strokeLinejoin="round"
             d="M12 3v2.25m6.364.386-1.591 1.591M21 12h-2.25m-.386 6.364-1.591-1.591M12 18.75V21m-4.773-4.227-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z"
+          />
+        </svg>
+      ),
+    },
+    {
+      id: "security",
+      label: "Security",
+      icon: (
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          fill="none"
+          viewBox="0 0 24 24"
+          strokeWidth="2"
+          stroke="currentColor"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"
           />
         </svg>
       ),
@@ -336,6 +473,303 @@ export function Settings(): React.ReactElement {
             </div>
           </div>
         )}
+
+        {/* Security — every role. AuthNexus's direct password-reset API:
+            unauthenticated, called straight from the browser. current
+            password must verify before the new-password fields appear, and
+            direct-reset-password re-verifies it again server-side either way. */}
+        {activeTab === "security" && (
+          <div className="settings-section-body security-panel">
+            <div className="security-header">
+              <div className="security-header-icon">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  strokeWidth="2"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"
+                  />
+                </svg>
+              </div>
+              <div>
+                <h3 className="security-header-title">Change password</h3>
+                <p className="security-header-desc">
+                  Update your AuthNexus account password directly — no email
+                  round-trip, no reset link to wait on.
+                </p>
+              </div>
+            </div>
+
+            {/* Step 1 — identity */}
+            <div className="security-step">
+              <div className="security-step-head">
+                <div className="security-step-head-left">
+                  <span className="security-step-number">1</span>
+                  <span className="security-step-title">
+                    Verify your identity
+                  </span>
+                </div>
+                {verified ? (
+                  <span className="badge badge-success">Verified</span>
+                ) : (
+                  <span className="badge badge-muted">Not verified</span>
+                )}
+              </div>
+
+              <div className="settings-field-label" style={{ marginBottom: 8 }}>
+                <span>Username</span>
+              </div>
+              <input
+                className="form-input"
+                value={username}
+                disabled
+                readOnly
+                style={{ marginBottom: 16 }}
+              />
+
+              <div className="settings-field-label" style={{ marginBottom: 8 }}>
+                <span>Current password</span>
+              </div>
+              <div className="security-field-row">
+                <input
+                  type="password"
+                  className="form-input"
+                  value={currentPassword}
+                  disabled={verified}
+                  onChange={(e) => {
+                    setCurrentPassword(e.target.value);
+                    setVerifyError(null);
+                  }}
+                  placeholder="Enter current password"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !verified && currentPassword) {
+                      void handleVerifyPassword();
+                    }
+                  }}
+                />
+                {!verified && (
+                  <Button
+                    variant="secondary"
+                    disabled={verifying || !currentPassword}
+                    onClick={() => void handleVerifyPassword()}
+                  >
+                    {verifying ? "Verifying…" : "Verify"}
+                  </Button>
+                )}
+              </div>
+
+              {verifyError && (
+                <div className="security-note security-note-danger">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    strokeWidth="2"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"
+                    />
+                  </svg>
+                  {verifyError}
+                </div>
+              )}
+              {verified && (
+                <div className="security-note security-note-success">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    strokeWidth="2"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="m4.5 12.75 6 6 9-13.5"
+                    />
+                  </svg>
+                  Identity verified — set a new password below.
+                </div>
+              )}
+            </div>
+
+            {/* Step 2 — new password */}
+            <div
+              className={`security-step ${!verified ? "security-step-disabled" : ""}`}
+            >
+              <div className="security-step-head">
+                <div className="security-step-head-left">
+                  <span className="security-step-number">2</span>
+                  <span className="security-step-title">
+                    Choose a new password
+                  </span>
+                </div>
+              </div>
+
+              <div className="settings-field-label" style={{ marginBottom: 8 }}>
+                <span>New password</span>
+              </div>
+              <input
+                type="password"
+                className="form-input"
+                style={{ marginBottom: 16 }}
+                value={newPassword}
+                disabled={!verified}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="Enter new password"
+              />
+
+              <div className="settings-field-label" style={{ marginBottom: 8 }}>
+                <span>Confirm new password</span>
+              </div>
+              <input
+                type="password"
+                className="form-input"
+                value={confirmPassword}
+                disabled={!verified}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Re-enter new password"
+              />
+
+              {passwordPolicy && (
+                <div className="security-requirements">
+                  <span
+                    className={`security-req-chip ${
+                      newPassword.length >= passwordPolicy.minLength
+                        ? "security-req-chip-met"
+                        : ""
+                    }`}
+                  >
+                    <ReqChipIcon
+                      met={newPassword.length >= passwordPolicy.minLength}
+                    />
+                    {passwordPolicy.minLength}+ characters
+                  </span>
+                  {passwordPolicy.requireUppercase && (
+                    <span
+                      className={`security-req-chip ${
+                        /[A-Z]/.test(newPassword) ? "security-req-chip-met" : ""
+                      }`}
+                    >
+                      <ReqChipIcon met={/[A-Z]/.test(newPassword)} />
+                      Uppercase letter
+                    </span>
+                  )}
+                  {passwordPolicy.requireLowercase && (
+                    <span
+                      className={`security-req-chip ${
+                        /[a-z]/.test(newPassword) ? "security-req-chip-met" : ""
+                      }`}
+                    >
+                      <ReqChipIcon met={/[a-z]/.test(newPassword)} />
+                      Lowercase letter
+                    </span>
+                  )}
+                  {passwordPolicy.requireNumber && (
+                    <span
+                      className={`security-req-chip ${
+                        /[0-9]/.test(newPassword) ? "security-req-chip-met" : ""
+                      }`}
+                    >
+                      <ReqChipIcon met={/[0-9]/.test(newPassword)} />
+                      Number
+                    </span>
+                  )}
+                  {passwordPolicy.requireSymbol && (
+                    <span
+                      className={`security-req-chip ${
+                        /[^a-zA-Z0-9]/.test(newPassword)
+                          ? "security-req-chip-met"
+                          : ""
+                      }`}
+                    >
+                      <ReqChipIcon met={/[^a-zA-Z0-9]/.test(newPassword)} />
+                      Symbol
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {passwordsMismatch && (
+                <div className="security-note security-note-danger">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    strokeWidth="2"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"
+                    />
+                  </svg>
+                  Passwords do not match.
+                </div>
+              )}
+
+              <div
+                style={{
+                  marginTop: 20,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 14,
+                }}
+              >
+                <Button
+                  variant="primary"
+                  disabled={
+                    !verified ||
+                    submitting ||
+                    !newPassword ||
+                    !confirmPassword ||
+                    passwordsMismatch
+                  }
+                  onClick={() => void handleUpdatePassword()}
+                >
+                  {submitting ? "Updating…" : "Update password"}
+                </Button>
+                {submitError && (
+                  <span
+                    className="settings-field-hint"
+                    style={{ color: "var(--danger)" }}
+                  >
+                    {submitError}
+                  </span>
+                )}
+              </div>
+
+              {submitSuccess && (
+                <div className="security-note security-note-success">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    strokeWidth="2"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="m4.5 12.75 6 6 9-13.5"
+                    />
+                  </svg>
+                  Password updated successfully.
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Notifications — admin only. Global kill switch for the outbound
             email/SMS/WhatsApp handoff
             (docs/specs/outbound-notifications-kill-switch.md). Not

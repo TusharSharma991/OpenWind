@@ -15,12 +15,12 @@ declare const window: Window & {
 // import.meta.env keys are not statically declared so we cast to a generic record.
 const viteEnv = import.meta.env as Record<string, string | undefined>;
 const cfg = window.__CONFIG__ ?? {};
-const authority =
+export const authority =
   cfg.AUTHNEXUS_AUTHORITY ??
   viteEnv["VITE_AUTH_AUTHORITY"] ??
   "https://auth.rokkalabs.com";
 const clientId = cfg.AUTHNEXUS_CLIENT_ID ?? viteEnv["VITE_CLIENT_ID"] ?? "";
-const orgId = cfg.AUTHNEXUS_ORG_ID ?? viteEnv["VITE_ORG_ID"] ?? "";
+export const orgId = cfg.AUTHNEXUS_ORG_ID ?? viteEnv["VITE_ORG_ID"] ?? "";
 const projectId = cfg.AUTHNEXUS_PROJECT_ID ?? viteEnv["VITE_PROJECT_ID"] ?? "";
 
 // AuthNexus's actual claim shape (confirmed against a real token) is
@@ -57,7 +57,7 @@ export const userManager = new UserManager({
   extraQueryParams: {
     org_id: orgId,
     project_id: projectId,
-    project_name: "OpenWind",
+    project_name: "JMV Work",
     primary_origin: window.location.origin,
   },
   metadata: {

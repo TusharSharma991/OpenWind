@@ -94,7 +94,7 @@ export function Login(): React.ReactElement {
         <div className="lp-topbar-inner">
           {/* Brand */}
           <div className="lp-brand">
-            <div className="lp-brand-logo">OW</div>
+            <img className="lp-brand-logo" src="/jmv-logo.png" alt="JMV Work" />
             <span className="lp-brand-name">{t("login.brandName")}</span>
           </div>
 
@@ -132,7 +132,7 @@ export function Login(): React.ReactElement {
         <div className="lp-card">
           {/* Card header */}
           <div className="lp-card-head">
-            <div className="lp-card-logo">OW</div>
+            <img className="lp-card-logo" src="/jmv-logo.png" alt="JMV Work" />
             <h1 className="lp-card-title">{t("login.title")}</h1>
             <p className="lp-card-desc">{t("login.description")}</p>
           </div>

@@ -1,19 +1,19 @@
 {
   "login": {
-    "brandName": "OpenWind",
+    "brandName": "JMV Work",
     "theme": {
       "switchToLight": "Switch to light mode",
       "switchToDark": "Switch to dark mode",
       "light": "Light",
       "dark": "Dark"
     },
-    "title": "Sign in to OpenWind",
+    "title": "Sign in to JMV Work",
     "description": "Your modular workflow platform. Access modules, configure workflows, and manage your workspace.",
     "signInButton": "Sign in",
     "redirecting": "Redirecting…",
     "securityNote": "Access is secured and session-scoped to your organisation",
     "footer": {
-      "copyright": "© 2026 OpenWind. Open-source platform.",
+      "copyright": "© 2026 JMV Work.",
       "github": "GitHub",
       "docs": "Docs",
       "privacy": "Privacy"

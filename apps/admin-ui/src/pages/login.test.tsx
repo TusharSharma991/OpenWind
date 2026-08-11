@@ -30,7 +30,7 @@ describe("Login", () => {
     render(<Login />);
 
     expect(
-      screen.getByRole("heading", { name: "Sign in to OpenWind" }),
+      screen.getByRole("heading", { name: "Sign in to JMV Work" }),
     ).toBeDefined();
     expect(screen.getByRole("button", { name: /Sign in/ })).toBeDefined();
   });

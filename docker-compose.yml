@@ -447,6 +447,7 @@ services:
       VITE_API_PROXY_TARGET: http://ow-backend:3000
     volumes:
       - ./apps/admin-ui/src:/app/apps/admin-ui/src
+      - ./apps/admin-ui/public:/app/apps/admin-ui/public
       - ./apps/admin-ui/index.html:/app/apps/admin-ui/index.html
       - ./apps/admin-ui/vite.config.ts:/app/apps/admin-ui/vite.config.ts
       - ./.env.local:/app/.env.local:ro

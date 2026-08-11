@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { fetchWithAuth, API_URL } from "../lib/api.js";
 import { useHoverStyle } from "@platform/ui";
 import {
@@ -88,11 +89,18 @@ export const EMPTY_ORG_VIEW: OrgView = {
 
 // Single shared fetch — dashboard.tsx uses this to gate the toggle AND to
 // render the body, so switching tabs never triggers a second network call.
-export function useOrgView(): { view: OrgView; loading: boolean } {
+// `enabled: false` (used by the "view as subordinate" page, R13) skips the
+// fetch entirely — that page never shows the Org View toggle, so probing
+// hasReports there would just be a wasted request.
+export function useOrgView(enabled = true): {
+  view: OrgView;
+  loading: boolean;
+} {
   const [view, setView] = useState<OrgView>(EMPTY_ORG_VIEW);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(enabled);
 
   useEffect(() => {
+    if (!enabled) return;
     fetchWithAuth(`${API_URL}/dashboard/org-view`)
       .then((res) => {
         const data = (res as { data?: OrgView }).data;
@@ -100,7 +108,7 @@ export function useOrgView(): { view: OrgView; loading: boolean } {
       })
       .catch(() => setView({ ...EMPTY_ORG_VIEW, unavailable: true }))
       .finally(() => setLoading(false));
-  }, []);
+  }, [enabled]);
 
   return { view, loading };
 }
@@ -117,6 +125,7 @@ function daysUntil(iso: string): number {
 // Own hover state per row (not one shared toggle for the whole table) —
 // matches TicketRow's convention in dashboard.tsx.
 function TeamMemberRow({ member }: { member: TeamMember }): React.ReactElement {
+  const navigate = useNavigate();
   const rowHover = useHoverStyle({
     base: { background: "transparent" },
     hover: { background: "var(--bg-tertiary)" },
@@ -132,10 +141,34 @@ function TeamMemberRow({ member }: { member: TeamMember }): React.ReactElement {
         style={{
           padding: "9px 4px",
           borderBottom: "1px solid var(--border-color)",
-          color: "var(--text-primary)",
         }}
       >
-        {member.name}
+        {/* "View as subordinate" (docs/specs/my-org-view.md R13) — clicking
+            a team member's name opens their own dashboard, read-only.
+            Authorization is re-checked server-side on every request; this
+            link existing is not itself a grant of access. */}
+        <button
+          type="button"
+          onClick={() => navigate(`/dashboard/team/${member.userId}`)}
+          style={{
+            background: "none",
+            border: "none",
+            padding: 0,
+            font: "inherit",
+            color: "var(--text-primary)",
+            cursor: "pointer",
+            textDecoration: "underline",
+            textDecorationColor: "transparent",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.textDecorationColor = "var(--text-primary)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.textDecorationColor = "transparent";
+          }}
+        >
+          {member.name}
+        </button>
       </td>
       <td
         style={{

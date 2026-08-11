@@ -6,10 +6,19 @@ import {
   cleanup,
   fireEvent,
 } from "@testing-library/react";
+import type * as ReactRouterDom from "react-router-dom";
 
 // docs/specs/my-org-view.md R3/R1/R12 — rendering coverage for OrgDashboardBody,
 // the presentational piece dashboard.tsx mounts inline (R4, amended
-// 2026-08-08) — no route, no navigation involved.
+// 2026-08-08). TeamMemberRow navigates on click (R13, "view as subordinate"),
+// so useNavigate needs mocking even though this suite never asserts on it.
+
+const mockNavigate = vi.fn();
+vi.mock("react-router-dom", async () => {
+  const actual =
+    await vi.importActual<typeof ReactRouterDom>("react-router-dom");
+  return { ...actual, useNavigate: () => mockNavigate };
+});
 
 const mockFetchWithAuth = vi.fn((_url: string) =>
   Promise.resolve({ data: undefined as unknown }),
@@ -38,6 +47,7 @@ describe("OrgDashboardBody", () => {
     cleanup();
     mockFetchWithAuth.mockReset();
     onOpenRecord.mockReset();
+    mockNavigate.mockReset();
   });
 
   it("shows an unavailable message (never an error) when the view reports unavailable:true", () => {
@@ -124,6 +134,10 @@ describe("OrgDashboardBody", () => {
     expect(screen.getByText("Priyanka Kushwaha")).toBeDefined();
     expect(screen.getByText("Deepika Sijwali")).toBeDefined();
     expect(screen.getByText("Report Assignee")).toBeDefined();
+
+    // R13 — clicking a team member's name navigates to their own dashboard.
+    fireEvent.click(screen.getByText("Priyanka Kushwaha"));
+    expect(mockNavigate).toHaveBeenCalledWith("/dashboard/team/u1");
   });
 
   it("filters the Team Tickets list to Overdue/Due in 2 Days/All", () => {

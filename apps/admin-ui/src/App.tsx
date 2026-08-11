@@ -118,6 +118,14 @@ export function App(): React.ReactElement {
                 is rendered INLINE on this page via a pill toggle (R4, amended
                 2026-08-08), not a separate route. */}
             <Route path="/dashboard" element={<Dashboard />} />
+            {/* "View as subordinate" (docs/specs/my-org-view.md R13) —
+                AuthNexus-fork-only. Same Dashboard component, read-only,
+                reached from a team member's name in the Org View team table
+                (dashboard-org.tsx). Authorization (is :userId actually a
+                subordinate of the caller?) is enforced server-side on every
+                request by GET /dashboard/team-member-view/:userId — never
+                trust the route param alone. */}
+            <Route path="/dashboard/team/:userId" element={<Dashboard />} />
             <Route path="/analytics" element={<Analytics />} />
             <Route path="/records" element={<AdminRecords />} />
             <Route

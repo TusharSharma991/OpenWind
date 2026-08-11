@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { useGetIdentity } from "@refinedev/core";
 import { fetchWithAuth, API_URL } from "../lib/api.js";
 import { useEntityTypes, toTypeSlug } from "../entity-type-context.js";
@@ -92,7 +92,13 @@ type PendingApprovalItem = {
   createdAt: string;
 };
 
+// "View as subordinate" (docs/specs/my-org-view.md R13) — present only when
+// fetched from /dashboard/team-member-view/:userId, absent for the caller's
+// own /dashboard/my-view.
+type TargetUser = { userId: string; name: string };
+
 type MyView = {
+  targetUser?: TargetUser;
   workflows: WorkflowBreakdown[];
   tickets: {
     items: TicketSummary[];
@@ -935,6 +941,13 @@ export function Dashboard(): React.ReactElement {
   const navigate = useNavigate();
   const { getTypeById } = useEntityTypes();
   const { data: identity } = useGetIdentity<{ name: string }>();
+  // "View as subordinate" (docs/specs/my-org-view.md R13) — present only when
+  // reached via /dashboard/team/:userId (a manager drilling into a direct or
+  // indirect report's own dashboard from the Org View team table). Absent on
+  // the normal /dashboard route, which is what every other check below falls
+  // back to.
+  const { userId: viewAsUserId } = useParams<{ userId?: string }>();
+  const isViewingAs = Boolean(viewAsUserId);
   const [view, setView] = useState<MyView>(EMPTY_VIEW);
   const [loading, setLoading] = useState(true);
   const [recentNotifications, setRecentNotifications] = useState<
@@ -945,21 +958,34 @@ export function Dashboard(): React.ReactElement {
   // Single shared fetch (useOrgView) — its own request/state, a failure here
   // never touches My View's own loading/data. Toggle is gated on hasReports
   // (a fact from AuthNexus), never role. R4 (amended 2026-08-08): rendered
-  // inline via a pill switcher, not a separate routed page.
-  const { view: orgView, loading: orgViewLoading } = useOrgView();
+  // inline via a pill switcher, not a separate routed page. Disabled entirely
+  // in "view as" mode (R13) — that page never shows the toggle.
+  const { view: orgView, loading: orgViewLoading } = useOrgView(!isViewingAs);
   const [activeTab, setActiveTab] = useState<"my" | "org">("my");
 
   useEffect(() => {
-    fetchWithAuth(`${API_URL}/dashboard/my-view`)
+    const endpoint = viewAsUserId
+      ? `${API_URL}/dashboard/team-member-view/${viewAsUserId}`
+      : `${API_URL}/dashboard/my-view`;
+    setLoading(true);
+    fetchWithAuth(endpoint)
       .then((res) => {
         const data = (res as { data?: MyView }).data;
         setView(data ?? EMPTY_VIEW);
       })
       .catch(() => setView(EMPTY_VIEW))
       .finally(() => setLoading(false));
-  }, []);
+  }, [viewAsUserId]);
 
   useEffect(() => {
+    // R13 — notifications are always the CALLER's own inbox; showing them
+    // while viewing a subordinate's dashboard would be misleading (they'd
+    // look like the subordinate's notifications), so skip the fetch entirely.
+    if (isViewingAs) {
+      setRecentNotifications([]);
+      setUnreadCount(0);
+      return;
+    }
     Promise.all([listNotifications(), getUnreadCount()])
       .then(([list, count]) => {
         setRecentNotifications(list.data.slice(0, 5));
@@ -969,7 +995,7 @@ export function Dashboard(): React.ReactElement {
         setRecentNotifications([]);
         setUnreadCount(0);
       });
-  }, []);
+  }, [isViewingAs]);
 
   const firstName = (identity?.name ?? "there").split(" ")[0] ?? "there";
 
@@ -1082,8 +1108,44 @@ export function Dashboard(): React.ReactElement {
     view.savedViews.length === 0 &&
     recentNotifications.length === 0;
 
+  const viewingAsName = view.targetUser?.name ?? viewAsUserId ?? "";
+  const headerInitial = isViewingAs
+    ? (viewingAsName.charAt(0) || "?").toUpperCase()
+    : firstName.charAt(0).toUpperCase();
+
   return (
     <div className="dash-page" style={{ padding: "24px 28px" }}>
+      {/* "View as subordinate" banner (docs/specs/my-org-view.md R13) — always
+          the first thing rendered in this mode, so it's never possible to
+          mistake this for the manager's own dashboard. Read-only: nothing
+          here lets the manager act as the subordinate — clicking a ticket
+          below still navigates with the manager's own real permissions. */}
+      {isViewingAs && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "12px",
+            padding: "10px 16px",
+            borderRadius: "var(--radius-md)",
+            background: "hsla(185,80%,40%,.12)",
+            border: "1px solid hsla(185,80%,40%,.3)",
+            marginBottom: "16px",
+            fontSize: "13px",
+            color: "var(--text-primary)",
+          }}
+        >
+          <span>
+            👥 Viewing <strong>{viewingAsName}</strong>&apos;s dashboard —
+            read-only.
+          </span>
+          <Button variant="secondary" onClick={() => navigate("/dashboard")}>
+            ← Back to my dashboard
+          </Button>
+        </div>
+      )}
+
       {/* ── header ────────────────────────────────────────────────────────── */}
       <div
         className="dash-header"
@@ -1116,7 +1178,7 @@ export function Dashboard(): React.ReactElement {
               flexShrink: 0,
             }}
           >
-            {firstName.charAt(0).toUpperCase()}
+            {headerInitial}
           </div>
           <div>
             <div
@@ -1129,7 +1191,7 @@ export function Dashboard(): React.ReactElement {
                 marginBottom: "3px",
               }}
             >
-              My Dashboard
+              {isViewingAs ? "Team Member Dashboard" : "My Dashboard"}
             </div>
             <h2
               style={{
@@ -1140,7 +1202,7 @@ export function Dashboard(): React.ReactElement {
                 margin: 0,
               }}
             >
-              Hi {firstName}
+              {isViewingAs ? viewingAsName : `Hi ${firstName}`}
             </h2>
           </div>
         </div>
@@ -1175,7 +1237,7 @@ export function Dashboard(): React.ReactElement {
           renders below, in place — no route change (R4, amended 2026-08-08).
           Centered, with a sliding accent-filled highlight behind the active
           tab (transform-based, so it animates smoothly between the two). */}
-      {orgView.hasReports && (
+      {!isViewingAs && orgView.hasReports && (
         <div
           style={{
             display: "flex",
@@ -1244,7 +1306,7 @@ export function Dashboard(): React.ReactElement {
         </div>
       )}
 
-      {activeTab === "org" && orgView.hasReports ? (
+      {!isViewingAs && activeTab === "org" && orgView.hasReports ? (
         <OrgDashboardBody
           view={orgView}
           loading={orgViewLoading}
@@ -1581,203 +1643,84 @@ export function Dashboard(): React.ReactElement {
 
           {/* ── v1.1 widgets — each omitted entirely when empty (no admin
           workflows / no pending approvals / no saved views is the common
-          case for a plain user, not an error state) ─────────────────────── */}
-          {(recentNotifications.length > 0 ||
-            view.adminWorkflows.length > 0 ||
-            view.pendingApprovals.items.length > 0 ||
-            view.savedViews.length > 0) && (
-            <div
-              className="dash-body"
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-                gap: "20px",
-                marginTop: "20px",
-              }}
-            >
-              {recentNotifications.length > 0 && (
-                <Card accentColor="hsl(211,100%,50%)">
-                  <SectionHeader
-                    title="Notifications"
-                    icon="🔔"
-                    color="hsl(211,100%,50%)"
-                    action={
-                      unreadCount > 0 ? (
-                        <span
-                          style={{
-                            fontSize: "10px",
-                            fontWeight: 700,
-                            padding: "2px 8px",
-                            borderRadius: "20px",
-                            background: "hsla(211,100%,50%,.12)",
-                            color: "hsl(211,100%,45%)",
-                            border: "1px solid hsla(211,100%,50%,.25)",
-                          }}
-                        >
-                          {unreadCount} unread
-                        </span>
-                      ) : undefined
-                    }
-                  />
-                  <div style={{ display: "flex", flexDirection: "column" }}>
-                    {recentNotifications.map((n, idx) => (
-                      <div
-                        key={n.id}
-                        onClick={() => openNotification(n)}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "10px",
-                          padding: "9px 4px",
-                          borderBottom:
-                            idx < recentNotifications.length - 1
-                              ? "1px solid var(--border-color)"
-                              : "none",
-                          cursor: "pointer",
-                        }}
-                      >
-                        {!n.read && (
-                          <div
+          case for a plain user, not an error state). Also always omitted in
+          "view as" mode (R13) — the endpoint returns these empty by design
+          (personal-workspace items, not ticket data), but the explicit
+          !isViewingAs guard here is defense-in-depth, not the only thing
+          keeping a subordinate's saved views from showing. ───────────────── */}
+          {!isViewingAs &&
+            (recentNotifications.length > 0 ||
+              view.adminWorkflows.length > 0 ||
+              view.pendingApprovals.items.length > 0 ||
+              view.savedViews.length > 0) && (
+              <div
+                className="dash-body"
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+                  gap: "20px",
+                  marginTop: "20px",
+                }}
+              >
+                {recentNotifications.length > 0 && (
+                  <Card accentColor="hsl(211,100%,50%)">
+                    <SectionHeader
+                      title="Notifications"
+                      icon="🔔"
+                      color="hsl(211,100%,50%)"
+                      action={
+                        unreadCount > 0 ? (
+                          <span
                             style={{
-                              width: "7px",
-                              height: "7px",
-                              borderRadius: "50%",
-                              background: "hsl(211,100%,50%)",
-                              flexShrink: 0,
-                            }}
-                          />
-                        )}
-                        <div
-                          style={{
-                            flex: 1,
-                            minWidth: 0,
-                            marginLeft: n.read ? "17px" : 0,
-                          }}
-                        >
-                          <div
-                            style={{
-                              fontSize: "13px",
-                              color: "var(--text-primary)",
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
+                              fontSize: "10px",
+                              fontWeight: 700,
+                              padding: "2px 8px",
+                              borderRadius: "20px",
+                              background: "hsla(211,100%,50%,.12)",
+                              color: "hsl(211,100%,45%)",
+                              border: "1px solid hsla(211,100%,50%,.25)",
                             }}
                           >
-                            {n.title}
-                          </div>
-                        </div>
-                        <span
-                          style={{
-                            fontSize: "11px",
-                            color: "var(--text-muted)",
-                            whiteSpace: "nowrap",
-                            flexShrink: 0,
-                          }}
-                        >
-                          {relativeTime(n.createdAt)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </Card>
-              )}
-
-              {view.adminWorkflows.length > 0 && (
-                <Card accentColor="hsl(185,80%,40%)">
-                  <SectionHeader
-                    title="Workflows I Administer"
-                    icon="🛡️"
-                    color="hsl(185,80%,40%)"
-                  />
-                  <div
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "2px",
-                    }}
-                  >
-                    {view.adminWorkflows.map((wf) => (
-                      <div
-                        key={wf.workflowId}
-                        onClick={() => openAdminWorkflow(wf.workflowName)}
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          padding: "9px 4px",
-                          cursor: "pointer",
-                          fontSize: "13px",
-                          color: "var(--text-primary)",
-                        }}
-                      >
-                        <span
-                          style={{
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {wf.workflowName}
-                        </span>
-                        <span
-                          style={{ color: "var(--text-muted)", flexShrink: 0 }}
-                        >
-                          →
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </Card>
-              )}
-
-              {view.pendingApprovals.items.length > 0 && (
-                <Card accentColor="hsl(35,90%,50%)">
-                  <SectionHeader
-                    title="Awaiting Your Approval"
-                    icon="✋"
-                    color="hsl(35,90%,50%)"
-                    action={
-                      <span
-                        style={{
-                          fontSize: "10px",
-                          fontWeight: 700,
-                          padding: "2px 8px",
-                          borderRadius: "20px",
-                          background: "hsla(35,90%,50%,.12)",
-                          color: "hsl(35,90%,50%)",
-                          border: "1px solid hsla(35,90%,50%,.25)",
-                        }}
-                      >
-                        {view.pendingApprovals.totalQualifying}
-                      </span>
-                    }
-                  />
-                  {view.pendingApprovals.unavailable ? (
-                    <div
-                      style={{ fontSize: "13px", color: "var(--text-muted)" }}
-                    >
-                      Temporarily unavailable — the rest of your dashboard is
-                      unaffected.
-                    </div>
-                  ) : (
+                            {unreadCount} unread
+                          </span>
+                        ) : undefined
+                      }
+                    />
                     <div style={{ display: "flex", flexDirection: "column" }}>
-                      {view.pendingApprovals.items.map((a, idx) => (
+                      {recentNotifications.map((n, idx) => (
                         <div
-                          key={a.requestId}
-                          onClick={() => openRecord(a.entityTypeId, a.entityId)}
+                          key={n.id}
+                          onClick={() => openNotification(n)}
                           style={{
                             display: "flex",
                             alignItems: "center",
                             gap: "10px",
                             padding: "9px 4px",
                             borderBottom:
-                              idx < view.pendingApprovals.items.length - 1
+                              idx < recentNotifications.length - 1
                                 ? "1px solid var(--border-color)"
                                 : "none",
                             cursor: "pointer",
                           }}
                         >
-                          <div style={{ flex: 1, minWidth: 0 }}>
+                          {!n.read && (
+                            <div
+                              style={{
+                                width: "7px",
+                                height: "7px",
+                                borderRadius: "50%",
+                                background: "hsl(211,100%,50%)",
+                                flexShrink: 0,
+                              }}
+                            />
+                          )}
+                          <div
+                            style={{
+                              flex: 1,
+                              minWidth: 0,
+                              marginLeft: n.read ? "17px" : 0,
+                            }}
+                          >
                             <div
                               style={{
                                 fontSize: "13px",
@@ -1787,16 +1730,7 @@ export function Dashboard(): React.ReactElement {
                                 whiteSpace: "nowrap",
                               }}
                             >
-                              {a.title}
-                            </div>
-                            <div
-                              style={{
-                                fontSize: "11px",
-                                color: "var(--text-muted)",
-                              }}
-                            >
-                              {a.workflowName} · requested{" "}
-                              {a.requestedLevel.replace("_", " ")}
+                              {n.title}
                             </div>
                           </div>
                           <span
@@ -1807,47 +1741,185 @@ export function Dashboard(): React.ReactElement {
                               flexShrink: 0,
                             }}
                           >
-                            {relativeTime(a.createdAt)}
+                            {relativeTime(n.createdAt)}
                           </span>
                         </div>
                       ))}
                     </div>
-                  )}
-                </Card>
-              )}
+                  </Card>
+                )}
 
-              {view.savedViews.length > 0 && (
-                <Card accentColor="hsl(265,84%,60%)">
-                  <SectionHeader
-                    title="Saved Views"
-                    icon="⭐"
-                    color="hsl(265,84%,60%)"
-                  />
-                  <div
-                    style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}
-                  >
-                    {view.savedViews.map((v) => (
-                      <span
-                        key={v.id}
-                        onClick={openSavedView}
-                        style={{
-                          fontSize: "12px",
-                          fontWeight: 600,
-                          padding: "6px 12px",
-                          borderRadius: "999px",
-                          background: "var(--bg-tertiary)",
-                          color: "var(--text-secondary)",
-                          cursor: "pointer",
-                        }}
+                {view.adminWorkflows.length > 0 && (
+                  <Card accentColor="hsl(185,80%,40%)">
+                    <SectionHeader
+                      title="Workflows I Administer"
+                      icon="🛡️"
+                      color="hsl(185,80%,40%)"
+                    />
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "2px",
+                      }}
+                    >
+                      {view.adminWorkflows.map((wf) => (
+                        <div
+                          key={wf.workflowId}
+                          onClick={() => openAdminWorkflow(wf.workflowName)}
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            padding: "9px 4px",
+                            cursor: "pointer",
+                            fontSize: "13px",
+                            color: "var(--text-primary)",
+                          }}
+                        >
+                          <span
+                            style={{
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {wf.workflowName}
+                          </span>
+                          <span
+                            style={{
+                              color: "var(--text-muted)",
+                              flexShrink: 0,
+                            }}
+                          >
+                            →
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                )}
+
+                {view.pendingApprovals.items.length > 0 && (
+                  <Card accentColor="hsl(35,90%,50%)">
+                    <SectionHeader
+                      title="Awaiting Your Approval"
+                      icon="✋"
+                      color="hsl(35,90%,50%)"
+                      action={
+                        <span
+                          style={{
+                            fontSize: "10px",
+                            fontWeight: 700,
+                            padding: "2px 8px",
+                            borderRadius: "20px",
+                            background: "hsla(35,90%,50%,.12)",
+                            color: "hsl(35,90%,50%)",
+                            border: "1px solid hsla(35,90%,50%,.25)",
+                          }}
+                        >
+                          {view.pendingApprovals.totalQualifying}
+                        </span>
+                      }
+                    />
+                    {view.pendingApprovals.unavailable ? (
+                      <div
+                        style={{ fontSize: "13px", color: "var(--text-muted)" }}
                       >
-                        {v.name}
-                      </span>
-                    ))}
-                  </div>
-                </Card>
-              )}
-            </div>
-          )}
+                        Temporarily unavailable — the rest of your dashboard is
+                        unaffected.
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column" }}>
+                        {view.pendingApprovals.items.map((a, idx) => (
+                          <div
+                            key={a.requestId}
+                            onClick={() =>
+                              openRecord(a.entityTypeId, a.entityId)
+                            }
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "10px",
+                              padding: "9px 4px",
+                              borderBottom:
+                                idx < view.pendingApprovals.items.length - 1
+                                  ? "1px solid var(--border-color)"
+                                  : "none",
+                              cursor: "pointer",
+                            }}
+                          >
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div
+                                style={{
+                                  fontSize: "13px",
+                                  color: "var(--text-primary)",
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {a.title}
+                              </div>
+                              <div
+                                style={{
+                                  fontSize: "11px",
+                                  color: "var(--text-muted)",
+                                }}
+                              >
+                                {a.workflowName} · requested{" "}
+                                {a.requestedLevel.replace("_", " ")}
+                              </div>
+                            </div>
+                            <span
+                              style={{
+                                fontSize: "11px",
+                                color: "var(--text-muted)",
+                                whiteSpace: "nowrap",
+                                flexShrink: 0,
+                              }}
+                            >
+                              {relativeTime(a.createdAt)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </Card>
+                )}
+
+                {view.savedViews.length > 0 && (
+                  <Card accentColor="hsl(265,84%,60%)">
+                    <SectionHeader
+                      title="Saved Views"
+                      icon="⭐"
+                      color="hsl(265,84%,60%)"
+                    />
+                    <div
+                      style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}
+                    >
+                      {view.savedViews.map((v) => (
+                        <span
+                          key={v.id}
+                          onClick={openSavedView}
+                          style={{
+                            fontSize: "12px",
+                            fontWeight: 600,
+                            padding: "6px 12px",
+                            borderRadius: "999px",
+                            background: "var(--bg-tertiary)",
+                            color: "var(--text-secondary)",
+                            cursor: "pointer",
+                          }}
+                        >
+                          {v.name}
+                        </span>
+                      ))}
+                    </div>
+                  </Card>
+                )}
+              </div>
+            )}
         </>
       )}
     </div>

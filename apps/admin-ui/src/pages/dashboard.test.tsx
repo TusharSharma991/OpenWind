@@ -13,10 +13,15 @@ vi.mock("@refinedev/core", () => ({
   }),
 }));
 
+let mockParams: { userId?: string } = {};
 vi.mock("react-router-dom", async () => {
   const actual =
     await vi.importActual<typeof ReactRouterDom>("react-router-dom");
-  return { ...actual, useNavigate: () => vi.fn() };
+  return {
+    ...actual,
+    useNavigate: () => vi.fn(),
+    useParams: () => mockParams,
+  };
 });
 
 vi.mock("../entity-type-context.js", () => ({
@@ -54,6 +59,7 @@ describe("Dashboard — My Org View toggle", () => {
   afterEach(() => {
     cleanup();
     mockFetchWithAuth.mockReset();
+    mockParams = {};
   });
 
   it("shows the toggle when GET /dashboard/org-view reports hasReports:true", async () => {
@@ -99,6 +105,73 @@ describe("Dashboard — My Org View toggle", () => {
     await waitFor(() => expect(mockFetchWithAuth).toHaveBeenCalled());
     await new Promise((r) => setTimeout(r, 0));
 
+    expect(screen.queryByText(/org view/i)).toBeNull();
+  });
+});
+
+describe("Dashboard — view as subordinate (docs/specs/my-org-view.md R13)", () => {
+  afterEach(() => {
+    cleanup();
+    mockFetchWithAuth.mockReset();
+    mockParams = {};
+  });
+
+  it("fetches from /dashboard/team-member-view/:userId and shows a read-only banner with the target's name when a userId param is present", async () => {
+    mockParams = { userId: "report-1" };
+    mockFetchWithAuth.mockImplementation((url: string) => {
+      if (url.endsWith("/dashboard/team-member-view/report-1")) {
+        return Promise.resolve({
+          data: {
+            targetUser: { userId: "report-1", name: "Priyanka Kushwaha" },
+            ...EMPTY_MY_VIEW,
+          },
+        });
+      }
+      // Should never be called in view-as mode — asserted below too.
+      return Promise.resolve({ data: { hasReports: true } });
+    });
+
+    render(<Dashboard />);
+
+    await waitFor(() =>
+      expect(screen.getAllByText(/priyanka kushwaha/i).length).toBeGreaterThan(
+        0,
+      ),
+    );
+    expect(screen.getByText(/read-only/i)).toBeDefined();
+    expect(
+      mockFetchWithAuth.mock.calls.some((c) =>
+        String(c[0]).endsWith("/dashboard/my-view"),
+      ),
+    ).toBe(false);
+  });
+
+  it("never probes /dashboard/org-view or shows the Org View toggle while viewing as a subordinate", async () => {
+    mockParams = { userId: "report-1" };
+    mockFetchWithAuth.mockImplementation((url: string) => {
+      if (url.endsWith("/dashboard/team-member-view/report-1")) {
+        return Promise.resolve({
+          data: {
+            targetUser: { userId: "report-1", name: "Priyanka Kushwaha" },
+            ...EMPTY_MY_VIEW,
+          },
+        });
+      }
+      return Promise.resolve({ data: { hasReports: true } });
+    });
+
+    render(<Dashboard />);
+
+    await waitFor(() =>
+      expect(screen.getAllByText(/priyanka kushwaha/i).length).toBeGreaterThan(
+        0,
+      ),
+    );
+    expect(
+      mockFetchWithAuth.mock.calls.some((c) =>
+        String(c[0]).endsWith("/dashboard/org-view"),
+      ),
+    ).toBe(false);
     expect(screen.queryByText(/org view/i)).toBeNull();
   });
 });

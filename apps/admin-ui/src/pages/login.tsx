@@ -192,30 +192,6 @@ export function Login(): React.ReactElement {
           </div>
         </div>
       </main>
-
-      {/* ── Footer ── */}
-      <footer className="lp-footer">
-        <div className="lp-footer-inner">
-          <span>{t("login.footer.copyright")}</span>
-          <span className="lp-footer-sep">·</span>
-          <a
-            href="https://github.com/openwind"
-            className="lp-footer-link"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            {t("login.footer.github")}
-          </a>
-          <span className="lp-footer-sep">·</span>
-          <a href="#" className="lp-footer-link">
-            {t("login.footer.docs")}
-          </a>
-          <span className="lp-footer-sep">·</span>
-          <a href="#" className="lp-footer-link">
-            {t("login.footer.privacy")}
-          </a>
-        </div>
-      </footer>
     </div>
   );
 }

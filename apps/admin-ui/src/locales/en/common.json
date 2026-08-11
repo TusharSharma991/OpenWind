@@ -11,13 +11,7 @@
     "description": "Your modular workflow platform. Access modules, configure workflows, and manage your workspace.",
     "signInButton": "Sign in",
     "redirecting": "Redirecting…",
-    "securityNote": "Access is secured and session-scoped to your organisation",
-    "footer": {
-      "copyright": "© 2026 JMV Work.",
-      "github": "GitHub",
-      "docs": "Docs",
-      "privacy": "Privacy"
-    }
+    "securityNote": "Access is secured and session-scoped to your organisation"
   },
   "authCallback": {
     "errorTitle": "Authentication Error",

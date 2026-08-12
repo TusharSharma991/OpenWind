@@ -265,4 +265,72 @@ describe("OrgDashboardBody", () => {
 
     expect(screen.getByText(/no direct or indirect reports/i)).toBeDefined();
   });
+
+  it("paginates the Team roster at 10 per page and Next/Prev walks through it", () => {
+    const members = Array.from({ length: 25 }, (_, i) => ({
+      userId: `u-${i}`,
+      name: `Member ${String(i).padStart(2, "0")}`,
+      ticketCount: 25 - i,
+      overdueCount: 0,
+    }));
+
+    render(
+      <OrgDashboardBody
+        view={{ ...BASE_VIEW, teamMembers: { items: members } }}
+        loading={false}
+        onOpenRecord={onOpenRecord}
+      />,
+    );
+
+    // Sorted by ticketCount desc, so page 1 is Member 00..09.
+    expect(screen.getByText("Member 00")).toBeDefined();
+    expect(screen.getByText("Member 09")).toBeDefined();
+    expect(screen.queryByText("Member 10")).toBeNull();
+    expect(screen.getByText("1–10 of 25")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: /next/i }));
+    expect(screen.getByText("Member 10")).toBeDefined();
+    expect(screen.queryByText("Member 00")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /prev/i }));
+    expect(screen.getByText("Member 00")).toBeDefined();
+  });
+
+  it("paginates the Team Tickets list and resets to page 1 when the filter changes", () => {
+    const tickets = Array.from({ length: 15 }, (_, i) => ({
+      entityId: `e-${i}`,
+      entityTypeId: "et-1",
+      entityTypeName: "Ticket",
+      workflowId: "wf-1",
+      workflowName: "Helpdesk",
+      stateName: "Open",
+      title: `Ticket ${String(i).padStart(2, "0")}`,
+      dueDate: null,
+      isOverdue: false,
+      assignedTo: "u1",
+      assignedToName: "Report Assignee",
+    }));
+
+    render(
+      <OrgDashboardBody
+        view={{
+          ...BASE_VIEW,
+          tickets: { items: tickets, totalQualifying: 15 },
+        }}
+        loading={false}
+        onOpenRecord={onOpenRecord}
+      />,
+    );
+
+    expect(screen.getByText("Ticket 00")).toBeDefined();
+    expect(screen.queryByText("Ticket 10")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /next/i }));
+    expect(screen.getByText("Ticket 10")).toBeDefined();
+    expect(screen.queryByText("Ticket 00")).toBeNull();
+
+    // Changing the filter should snap back to page 1.
+    fireEvent.click(screen.getByRole("button", { name: /^All/ }));
+    expect(screen.getByText("Ticket 00")).toBeDefined();
+  });
 });

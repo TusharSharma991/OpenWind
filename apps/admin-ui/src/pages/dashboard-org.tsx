@@ -113,6 +113,85 @@ export function useOrgView(enabled = true): {
   return { view, loading };
 }
 
+const PAGE_SIZE = 10;
+
+// Shared paginator for the Team and Team Tickets cards — both can grow large
+// for a manager with a big org, so neither renders its full list unbounded.
+function Pagination({
+  page,
+  totalItems,
+  onChange,
+}: {
+  page: number;
+  totalItems: number;
+  onChange: (page: number) => void;
+}): React.ReactElement | null {
+  const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
+  if (totalPages <= 1) return null;
+
+  const from = (page - 1) * PAGE_SIZE + 1;
+  const to = Math.min(page * PAGE_SIZE, totalItems);
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: "12px",
+        marginTop: "12px",
+        paddingTop: "12px",
+        borderTop: "1px solid var(--border-color)",
+        fontSize: "12px",
+        color: "var(--text-muted)",
+      }}
+    >
+      <span>
+        {from}–{to} of {totalItems}
+      </span>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+        <button
+          type="button"
+          disabled={page <= 1}
+          onClick={() => onChange(page - 1)}
+          style={{
+            padding: "4px 10px",
+            borderRadius: "6px",
+            border: "1px solid var(--border-color)",
+            background: "var(--bg-tertiary)",
+            color: "var(--text-primary)",
+            fontSize: "12px",
+            cursor: page <= 1 ? "default" : "pointer",
+            opacity: page <= 1 ? 0.5 : 1,
+          }}
+        >
+          ← Prev
+        </button>
+        <span>
+          Page {page} of {totalPages}
+        </span>
+        <button
+          type="button"
+          disabled={page >= totalPages}
+          onClick={() => onChange(page + 1)}
+          style={{
+            padding: "4px 10px",
+            borderRadius: "6px",
+            border: "1px solid var(--border-color)",
+            background: "var(--bg-tertiary)",
+            color: "var(--text-primary)",
+            fontSize: "12px",
+            cursor: page >= totalPages ? "default" : "pointer",
+            opacity: page >= totalPages ? 0.5 : 1,
+          }}
+        >
+          Next →
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function formatHoursOver(hours: number): string {
   if (hours < 24) return `${Math.round(hours)}h over SLA`;
   return `${Math.round(hours / 24)}d over SLA`;
@@ -202,8 +281,12 @@ function TeamMemberRow({ member }: { member: TeamMember }): React.ReactElement {
 // subset with activity.
 function TeamMembersTable({
   items,
+  page,
+  onPageChange,
 }: {
   items: TeamMember[];
+  page: number;
+  onPageChange: (page: number) => void;
 }): React.ReactElement {
   if (items.length === 0) {
     return (
@@ -213,70 +296,78 @@ function TeamMembersTable({
     );
   }
   const sorted = [...items].sort((a, b) => b.ticketCount - a.ticketCount);
+  const pageItems = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   return (
-    <div className="table-scroll">
-      <table
-        style={{
-          width: "100%",
-          minWidth: "360px",
-          borderCollapse: "collapse",
-          fontSize: "13px",
-        }}
-      >
-        <thead>
-          <tr>
-            <th
-              style={{
-                textAlign: "left",
-                fontSize: "11px",
-                fontWeight: 600,
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
-                color: "var(--text-muted)",
-                padding: "0 4px 8px",
-                borderBottom: "1px solid var(--border-color)",
-              }}
-            >
-              Team member
-            </th>
-            <th
-              style={{
-                textAlign: "right",
-                fontSize: "11px",
-                fontWeight: 600,
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
-                color: "var(--text-muted)",
-                padding: "0 4px 8px",
-                borderBottom: "1px solid var(--border-color)",
-                whiteSpace: "nowrap",
-              }}
-            >
-              Tickets
-            </th>
-            <th
-              style={{
-                textAlign: "right",
-                fontSize: "11px",
-                fontWeight: 600,
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
-                color: "var(--text-muted)",
-                padding: "0 4px 8px",
-                borderBottom: "1px solid var(--border-color)",
-                whiteSpace: "nowrap",
-              }}
-            >
-              Overdue
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map((m) => (
-            <TeamMemberRow key={m.userId} member={m} />
-          ))}
-        </tbody>
-      </table>
+    <div>
+      <div className="table-scroll">
+        <table
+          style={{
+            width: "100%",
+            minWidth: "360px",
+            borderCollapse: "collapse",
+            fontSize: "13px",
+          }}
+        >
+          <thead>
+            <tr>
+              <th
+                style={{
+                  textAlign: "left",
+                  fontSize: "11px",
+                  fontWeight: 600,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                  color: "var(--text-muted)",
+                  padding: "0 4px 8px",
+                  borderBottom: "1px solid var(--border-color)",
+                }}
+              >
+                Team member
+              </th>
+              <th
+                style={{
+                  textAlign: "right",
+                  fontSize: "11px",
+                  fontWeight: 600,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                  color: "var(--text-muted)",
+                  padding: "0 4px 8px",
+                  borderBottom: "1px solid var(--border-color)",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Tickets
+              </th>
+              <th
+                style={{
+                  textAlign: "right",
+                  fontSize: "11px",
+                  fontWeight: 600,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                  color: "var(--text-muted)",
+                  padding: "0 4px 8px",
+                  borderBottom: "1px solid var(--border-color)",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Overdue
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {pageItems.map((m) => (
+              <TeamMemberRow key={m.userId} member={m} />
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <Pagination
+        page={page}
+        totalItems={sorted.length}
+        onChange={onPageChange}
+      />
     </div>
   );
 }
@@ -368,6 +459,8 @@ export function OrgDashboardBody({
   // false and the ticket list actually renders.
   const [ticketFilter, setTicketFilter] = useState<TicketFilter>("all");
   const [ticketSearch, setTicketSearch] = useState("");
+  const [ticketPage, setTicketPage] = useState(1);
+  const [teamPage, setTeamPage] = useState(1);
 
   if (loading) {
     return (
@@ -422,6 +515,10 @@ export function OrgDashboardBody({
           (t.assignedToName ?? "").toLowerCase().includes(searchTerm),
       )
     : tabFilteredTickets;
+  const pagedTickets = filteredTickets.slice(
+    (ticketPage - 1) * PAGE_SIZE,
+    ticketPage * PAGE_SIZE,
+  );
 
   return (
     <div>
@@ -467,7 +564,11 @@ export function OrgDashboardBody({
           icon="👥"
           color="hsl(185,80%,40%)"
         />
-        <TeamMembersTable items={view.teamMembers.items} />
+        <TeamMembersTable
+          items={view.teamMembers.items}
+          page={teamPage}
+          onPageChange={setTeamPage}
+        />
       </Card>
 
       <div
@@ -636,7 +737,10 @@ export function OrgDashboardBody({
         >
           <FilterTabs
             active={ticketFilter}
-            onChange={setTicketFilter}
+            onChange={(f) => {
+              setTicketFilter(f);
+              setTicketPage(1);
+            }}
             counts={{
               all: view.tickets.items.length,
               dueSoon: dueSoonTickets.length,
@@ -646,7 +750,10 @@ export function OrgDashboardBody({
           <input
             type="text"
             value={ticketSearch}
-            onChange={(e) => setTicketSearch(e.target.value)}
+            onChange={(e) => {
+              setTicketSearch(e.target.value);
+              setTicketPage(1);
+            }}
             placeholder="Search by ticket or team member…"
             style={{
               flex: 1,
@@ -744,7 +851,7 @@ export function OrgDashboardBody({
                 </tr>
               </thead>
               <tbody>
-                {filteredTickets.map((t) => (
+                {pagedTickets.map((t) => (
                   <TeamTicketRow
                     key={t.entityId}
                     ticket={t}
@@ -755,6 +862,11 @@ export function OrgDashboardBody({
             </table>
           </div>
         )}
+        <Pagination
+          page={ticketPage}
+          totalItems={filteredTickets.length}
+          onChange={setTicketPage}
+        />
       </Card>
     </div>
   );

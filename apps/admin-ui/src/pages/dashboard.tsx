@@ -750,6 +750,86 @@ function SortableHeader({
   );
 }
 
+export const PAGE_SIZE = 10;
+
+// Shared paginator — also used by dashboard-org.tsx's Team/Team Tickets
+// cards. Any list that can grow large (many tickets, many team members)
+// should use this rather than rendering unbounded.
+export function Pagination({
+  page,
+  totalItems,
+  onChange,
+}: {
+  page: number;
+  totalItems: number;
+  onChange: (page: number) => void;
+}): React.ReactElement | null {
+  const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
+  if (totalPages <= 1) return null;
+
+  const from = (page - 1) * PAGE_SIZE + 1;
+  const to = Math.min(page * PAGE_SIZE, totalItems);
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: "12px",
+        marginTop: "12px",
+        paddingTop: "12px",
+        borderTop: "1px solid var(--border-color)",
+        fontSize: "12px",
+        color: "var(--text-muted)",
+      }}
+    >
+      <span>
+        {from}–{to} of {totalItems}
+      </span>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+        <button
+          type="button"
+          disabled={page <= 1}
+          onClick={() => onChange(page - 1)}
+          style={{
+            padding: "4px 10px",
+            borderRadius: "6px",
+            border: "1px solid var(--border-color)",
+            background: "var(--bg-tertiary)",
+            color: "var(--text-primary)",
+            fontSize: "12px",
+            cursor: page <= 1 ? "default" : "pointer",
+            opacity: page <= 1 ? 0.5 : 1,
+          }}
+        >
+          ← Prev
+        </button>
+        <span>
+          Page {page} of {totalPages}
+        </span>
+        <button
+          type="button"
+          disabled={page >= totalPages}
+          onClick={() => onChange(page + 1)}
+          style={{
+            padding: "4px 10px",
+            borderRadius: "6px",
+            border: "1px solid var(--border-color)",
+            background: "var(--bg-tertiary)",
+            color: "var(--text-primary)",
+            fontSize: "12px",
+            cursor: page >= totalPages ? "default" : "pointer",
+            opacity: page >= totalPages ? 0.5 : 1,
+          }}
+        >
+          Next →
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function TicketDueDateTable({
   items,
   unavailable,
@@ -768,6 +848,7 @@ function TicketDueDateTable({
   // re-sort on top of that.
   const [sortKey, setSortKey] = useState<TicketSortKey | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [page, setPage] = useState(1);
 
   function handleSort(key: TicketSortKey): void {
     if (sortKey === key) {
@@ -776,6 +857,7 @@ function TicketDueDateTable({
       setSortKey(key);
       setSortDir("asc");
     }
+    setPage(1);
   }
 
   const sortedItems = useMemo(() => {
@@ -792,6 +874,18 @@ function TicketDueDateTable({
     });
     return sortDir === "asc" ? sorted : sorted.reverse();
   }, [items, sortKey, sortDir]);
+
+  // Reset to page 1 whenever the underlying item set changes (parent's
+  // filter/search/KPI-tile selection) — otherwise narrowing results could
+  // strand the view on a now-empty page.
+  useEffect(() => {
+    setPage(1);
+  }, [items]);
+
+  const pagedItems = sortedItems.slice(
+    (page - 1) * PAGE_SIZE,
+    page * PAGE_SIZE,
+  );
 
   return (
     <div>
@@ -856,12 +950,19 @@ function TicketDueDateTable({
               </tr>
             </thead>
             <tbody>
-              {sortedItems.map((item) => (
+              {pagedItems.map((item) => (
                 <TicketRow key={item.entityId} item={item} onOpen={onOpen} />
               ))}
             </tbody>
           </table>
         </div>
+      )}
+      {!unavailable && !loading && (
+        <Pagination
+          page={page}
+          totalItems={sortedItems.length}
+          onChange={setPage}
+        />
       )}
     </div>
   );

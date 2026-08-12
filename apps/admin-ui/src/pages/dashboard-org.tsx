@@ -7,6 +7,8 @@ import {
   SectionHeader,
   KpiTile,
   FilterTabs,
+  Pagination,
+  PAGE_SIZE,
   type TicketFilter,
 } from "./dashboard.js";
 
@@ -111,85 +113,6 @@ export function useOrgView(enabled = true): {
   }, [enabled]);
 
   return { view, loading };
-}
-
-const PAGE_SIZE = 10;
-
-// Shared paginator for the Team and Team Tickets cards — both can grow large
-// for a manager with a big org, so neither renders its full list unbounded.
-function Pagination({
-  page,
-  totalItems,
-  onChange,
-}: {
-  page: number;
-  totalItems: number;
-  onChange: (page: number) => void;
-}): React.ReactElement | null {
-  const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
-  if (totalPages <= 1) return null;
-
-  const from = (page - 1) * PAGE_SIZE + 1;
-  const to = Math.min(page * PAGE_SIZE, totalItems);
-
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: "12px",
-        marginTop: "12px",
-        paddingTop: "12px",
-        borderTop: "1px solid var(--border-color)",
-        fontSize: "12px",
-        color: "var(--text-muted)",
-      }}
-    >
-      <span>
-        {from}–{to} of {totalItems}
-      </span>
-      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-        <button
-          type="button"
-          disabled={page <= 1}
-          onClick={() => onChange(page - 1)}
-          style={{
-            padding: "4px 10px",
-            borderRadius: "6px",
-            border: "1px solid var(--border-color)",
-            background: "var(--bg-tertiary)",
-            color: "var(--text-primary)",
-            fontSize: "12px",
-            cursor: page <= 1 ? "default" : "pointer",
-            opacity: page <= 1 ? 0.5 : 1,
-          }}
-        >
-          ← Prev
-        </button>
-        <span>
-          Page {page} of {totalPages}
-        </span>
-        <button
-          type="button"
-          disabled={page >= totalPages}
-          onClick={() => onChange(page + 1)}
-          style={{
-            padding: "4px 10px",
-            borderRadius: "6px",
-            border: "1px solid var(--border-color)",
-            background: "var(--bg-tertiary)",
-            color: "var(--text-primary)",
-            fontSize: "12px",
-            cursor: page >= totalPages ? "default" : "pointer",
-            opacity: page >= totalPages ? 0.5 : 1,
-          }}
-        >
-          Next →
-        </button>
-      </div>
-    </div>
-  );
 }
 
 function formatHoursOver(hours: number): string {

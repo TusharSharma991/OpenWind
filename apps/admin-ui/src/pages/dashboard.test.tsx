@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, waitFor, cleanup } from "@testing-library/react";
+import {
+  render,
+  screen,
+  waitFor,
+  cleanup,
+  fireEvent,
+  within,
+} from "@testing-library/react";
 import type * as ReactRouterDom from "react-router-dom";
 
 // docs/specs/my-org-view.md R1/R4 — the "Org View" toggle on My View must
@@ -173,5 +180,154 @@ describe("Dashboard — view as subordinate (docs/specs/my-org-view.md R13)", ()
       ),
     ).toBe(false);
     expect(screen.queryByText(/org view/i)).toBeNull();
+  });
+});
+
+describe("Dashboard — KPI tiles filter the My Tickets list", () => {
+  afterEach(() => {
+    cleanup();
+    mockFetchWithAuth.mockReset();
+    mockParams = {};
+  });
+
+  const overdueTicket = {
+    entityId: "e-overdue",
+    entityTypeId: "et-1",
+    entityTypeName: "Ticket",
+    workflowId: "wf-1",
+    workflowName: "Helpdesk",
+    stateName: "Open",
+    title: "Overdue ticket",
+    dueDate: new Date(Date.now() - 86_400_000).toISOString(),
+    isOverdue: true,
+  };
+  const dueThisWeekTicket = {
+    entityId: "e-dueweek",
+    entityTypeId: "et-1",
+    entityTypeName: "Ticket",
+    workflowId: "wf-1",
+    workflowName: "Helpdesk",
+    stateName: "Open",
+    title: "Due this week ticket",
+    dueDate: new Date(Date.now() + 3 * 86_400_000).toISOString(),
+    isOverdue: false,
+  };
+  const atRiskTicket = {
+    entityId: "e-atrisk",
+    entityTypeId: "et-1",
+    entityTypeName: "Ticket",
+    workflowId: "wf-1",
+    workflowName: "Helpdesk",
+    stateName: "Open",
+    title: "At risk ticket",
+    dueDate: null,
+    isOverdue: false,
+  };
+  const VIEW_WITH_TICKETS = {
+    ...EMPTY_MY_VIEW,
+    tickets: {
+      items: [overdueTicket, dueThisWeekTicket, atRiskTicket],
+      totalQualifying: 3,
+    },
+    slaRisk: {
+      items: [
+        {
+          entityId: "e-atrisk",
+          entityTypeId: "et-1",
+          entityTypeName: "Ticket",
+          title: "At risk ticket",
+          workflowId: "wf-1",
+          stateName: "Open",
+          hoursOver: 5,
+        },
+      ],
+      totalQualifying: 1,
+    },
+  };
+
+  function mockMyView(): void {
+    mockFetchWithAuth.mockImplementation((url: string) => {
+      if (url.endsWith("/dashboard/org-view")) {
+        return Promise.resolve({ data: { hasReports: false } });
+      }
+      return Promise.resolve({ data: VIEW_WITH_TICKETS });
+    });
+  }
+
+  // The SLA Risk side panel independently lists "At risk ticket" too (it's a
+  // separate signal, §V), so ticket-list assertions scope to the My Tickets
+  // <table> via `within` to avoid colliding with that panel's own rendering.
+  function ticketTable(): HTMLElement {
+    return screen.getByRole("table");
+  }
+
+  it("defaults to 'My Tickets' active, showing every ticket", async () => {
+    mockMyView();
+    render(<Dashboard />);
+
+    await waitFor(() =>
+      expect(within(ticketTable()).getByText("Overdue ticket")).toBeDefined(),
+    );
+    expect(
+      within(ticketTable()).getByText("Due this week ticket"),
+    ).toBeDefined();
+    expect(within(ticketTable()).getByText("At risk ticket")).toBeDefined();
+
+    const kpiStrip = document.querySelector(".dash-kpi");
+    const myTicketsTile = within(kpiStrip as HTMLElement).getByText(
+      "My Tickets",
+    ).parentElement?.parentElement;
+    expect(myTicketsTile?.style.background).toBe("rgb(0, 111, 230)");
+  });
+
+  it("filters to only overdue tickets when the Overdue tile is clicked, and highlights it", async () => {
+    mockMyView();
+    render(<Dashboard />);
+
+    await waitFor(() =>
+      expect(within(ticketTable()).getByText("Overdue ticket")).toBeDefined(),
+    );
+
+    fireEvent.click(screen.getByText("Overdue"));
+
+    expect(within(ticketTable()).getByText("Overdue ticket")).toBeDefined();
+    expect(
+      within(ticketTable()).queryByText("Due this week ticket"),
+    ).toBeNull();
+    expect(within(ticketTable()).queryByText("At risk ticket")).toBeNull();
+  });
+
+  it("filters to only at-risk tickets when the At SLA Risk tile is clicked", async () => {
+    mockMyView();
+    render(<Dashboard />);
+
+    await waitFor(() =>
+      expect(within(ticketTable()).getByText("Overdue ticket")).toBeDefined(),
+    );
+
+    fireEvent.click(screen.getByText("At SLA Risk"));
+
+    expect(within(ticketTable()).getByText("At risk ticket")).toBeDefined();
+    expect(within(ticketTable()).queryByText("Overdue ticket")).toBeNull();
+    expect(
+      within(ticketTable()).queryByText("Due this week ticket"),
+    ).toBeNull();
+  });
+
+  it("filters to only tickets due this week when the Due This Week tile is clicked", async () => {
+    mockMyView();
+    render(<Dashboard />);
+
+    await waitFor(() =>
+      expect(within(ticketTable()).getByText("Overdue ticket")).toBeDefined(),
+    );
+
+    fireEvent.click(screen.getByText("Due This Week"));
+
+    expect(
+      within(ticketTable()).getByText("Due this week ticket"),
+    ).toBeDefined();
+    expect(within(ticketTable()).queryByText("Overdue ticket")).toBeNull();
+    expect(within(ticketTable()).queryByText("At risk ticket")).toBeNull();
   });
 });

@@ -7,6 +7,7 @@ import { createEntity } from "@platform/entity-engine";
 import { factory } from "./factory.js";
 import { handleEntityError } from "../../lib/handle-entity-error.js";
 import { listUserIdsWithRole } from "../../lib/authnexus-management.js";
+import { ensureUserRefsKnown } from "../../lib/ensure-user-refs.js";
 
 const CreateEntitySchema = z.object({
   entityTypeId: z.string().uuid(),
@@ -48,6 +49,7 @@ export const createEntityHandler = factory.createHandlers(
   async (c) => {
     const { tenantId, userId, orgId } = c.get("auth");
     const input = c.req.valid("json");
+    const bearerToken = c.req.header("Authorization")?.slice(7) ?? "";
 
     // assignedTo must resolve to a real tenant member holding the "user" role —
     // the same pool GET /platform/users exposes. Role membership is AuthNexus-side
@@ -55,7 +57,6 @@ export const createEntityHandler = factory.createHandlers(
     // cross-tenant user id (they simply won't appear in this org's role set).
     // Fail closed (no orgId → reject) rather than silently skipping the check.
     if (input.assignedTo !== undefined) {
-      const bearerToken = c.req.header("Authorization")?.slice(7) ?? "";
       const usersWithRole = orgId
         ? await listUserIdsWithRole(orgId, "user", bearerToken)
         : new Set<string>();
@@ -97,14 +98,27 @@ export const createEntityHandler = factory.createHandlers(
             ? dbUser.email
             : null;
 
-      const instance = await withTenantContext(tenantId, (tx) =>
-        createEntity(tx, tenantId, {
+      const instance = await withTenantContext(tenantId, async (tx) => {
+        // Upsert tenant_users for any user_ref field referencing a genuine
+        // org member who hasn't logged into this app yet - otherwise
+        // createEntity's own validateUserRefs (tenant_users-only) wrongly
+        // rejects them. Must run inside this same transaction, before
+        // createEntity, so its validation sees the freshly-inserted rows.
+        await ensureUserRefsKnown(
+          tx,
+          tenantId,
+          input.entityTypeId,
+          input.fields,
+          orgId,
+          bearerToken,
+        );
+        return createEntity(tx, tenantId, {
           ...input,
           actorId: userId,
           actorName: actorName ?? undefined,
           createdBy: userId,
-        }),
-      );
+        });
+      });
 
       // Link any file/files custom-field values uploaded before this entity
       // existed - otherwise GET /entities/:id/attachments (which filters on

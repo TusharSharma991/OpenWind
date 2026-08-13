@@ -1253,7 +1253,7 @@ export function WorkflowDetail(): React.ReactElement {
       ? `● ${workflowName} — Workflow`
       : `${workflowName} — Workflow`;
     return () => {
-      document.title = "OpenWind";
+      document.title = "JMV Work";
     };
   }, [canvasDirty, workflowName]);
 

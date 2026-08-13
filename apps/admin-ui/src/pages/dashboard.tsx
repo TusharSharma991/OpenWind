@@ -1235,14 +1235,6 @@ export function Dashboard(): React.ReactElement {
 
   const hasWorkload = view.workflows.length > 0;
   const needsAttentionCount = overdueTickets.length + view.slaRisk.items.length;
-  const isBrandNewUser =
-    !loading &&
-    totalTickets === 0 &&
-    view.slaRisk.items.length === 0 &&
-    view.adminWorkflows.length === 0 &&
-    view.pendingApprovals.items.length === 0 &&
-    view.savedViews.length === 0 &&
-    recentNotifications.length === 0;
 
   const viewingAsName = view.targetUser?.name ?? viewAsUserId ?? "";
   const headerInitial = isViewingAs
@@ -1449,41 +1441,6 @@ export function Dashboard(): React.ReactElement {
           loading={orgViewLoading}
           onOpenRecord={openRecord}
         />
-      ) : isBrandNewUser ? (
-        <div
-          className="data-panel"
-          style={{
-            padding: "48px 24px",
-            textAlign: "center",
-            marginBottom: 0,
-          }}
-        >
-          <div style={{ fontSize: "40px", marginBottom: "12px" }}>🌱</div>
-          <h3
-            style={{
-              fontSize: "16px",
-              fontWeight: 700,
-              color: "var(--text-primary)",
-              margin: "0 0 6px",
-            }}
-          >
-            Nothing here yet
-          </h3>
-          <p
-            style={{
-              fontSize: "13px",
-              color: "var(--text-muted)",
-              margin: "0 0 18px",
-            }}
-          >
-            You have no tickets assigned, created, or watched. Once you do,
-            they'll show up here with due dates, SLA risk, and everything else
-            that needs your attention.
-          </p>
-          <Button variant="primary" onClick={() => navigate("/records")}>
-            Go to Records
-          </Button>
-        </div>
       ) : (
         <>
           {/* ── KPI strip ─────────────────────────────────────────────────────── */}
@@ -1620,8 +1577,14 @@ export function Dashboard(): React.ReactElement {
                 {loading ? (
                   <SkeletonRows count={3} />
                 ) : !hasWorkload ? (
-                  <div style={{ fontSize: "13px", color: "var(--text-muted)" }}>
-                    No tickets assigned, created, or watched by you yet.
+                  <div
+                    style={{
+                      fontSize: "13px",
+                      fontWeight: 700,
+                      color: "var(--text-muted)",
+                    }}
+                  >
+                    0 workflows
                   </div>
                 ) : (
                   <div
@@ -1666,10 +1629,6 @@ export function Dashboard(): React.ReactElement {
                       <SkeletonRows count={3} />
                     </div>
                   </div>
-                ) : stateMix.length === 0 ? (
-                  <div style={{ fontSize: "13px", color: "var(--text-muted)" }}>
-                    Nothing to show yet.
-                  </div>
                 ) : (
                   <div
                     style={{
@@ -1679,6 +1638,9 @@ export function Dashboard(): React.ReactElement {
                       gap: "22px",
                     }}
                   >
+                    {/* Donut already renders a full grey ring with a literal
+                        "0" center label when segments total 0 - no separate
+                        empty-state branch needed. */}
                     <Donut segments={stateMix} />
                     <div style={{ flex: "1 1 160px", minWidth: 0 }}>
                       <Legend segments={stateMix} />
@@ -1696,21 +1658,19 @@ export function Dashboard(): React.ReactElement {
                 icon="⚠️"
                 color="hsl(340,80%,58%)"
                 action={
-                  view.slaRisk.items.length > 0 ? (
-                    <span
-                      style={{
-                        fontSize: "10px",
-                        fontWeight: 700,
-                        padding: "2px 8px",
-                        borderRadius: "20px",
-                        background: "hsla(340,80%,58%,.12)",
-                        color: "hsl(340,80%,58%)",
-                        border: "1px solid hsla(340,80%,58%,.25)",
-                      }}
-                    >
-                      {view.slaRisk.totalQualifying}
-                    </span>
-                  ) : undefined
+                  <span
+                    style={{
+                      fontSize: "10px",
+                      fontWeight: 700,
+                      padding: "2px 8px",
+                      borderRadius: "20px",
+                      background: "hsla(340,80%,58%,.12)",
+                      color: "hsl(340,80%,58%)",
+                      border: "1px solid hsla(340,80%,58%,.25)",
+                    }}
+                  >
+                    {view.slaRisk.totalQualifying}
+                  </span>
                 }
               />
               {view.slaRisk.unavailable ? (
@@ -1781,285 +1741,312 @@ export function Dashboard(): React.ReactElement {
             </Card>
           </div>
 
-          {/* ── v1.1 widgets — each omitted entirely when empty (no admin
-          workflows / no pending approvals / no saved views is the common
-          case for a plain user, not an error state). Also always omitted in
-          "view as" mode (R13) — the endpoint returns these empty by design
-          (personal-workspace items, not ticket data), but the explicit
-          !isViewingAs guard here is defense-in-depth, not the only thing
-          keeping a subordinate's saved views from showing. ───────────────── */}
-          {!isViewingAs &&
-            (recentNotifications.length > 0 ||
-              view.adminWorkflows.length > 0 ||
-              view.pendingApprovals.items.length > 0 ||
-              view.savedViews.length > 0) && (
-              <div
-                className="dash-body"
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-                  gap: "20px",
-                  marginTop: "20px",
-                }}
-              >
-                {recentNotifications.length > 0 && (
-                  <Card accentColor="hsl(211,100%,50%)">
-                    <SectionHeader
-                      title="Notifications"
-                      icon="🔔"
-                      color="hsl(211,100%,50%)"
-                      action={
-                        unreadCount > 0 ? (
-                          <span
-                            style={{
-                              fontSize: "10px",
-                              fontWeight: 700,
-                              padding: "2px 8px",
-                              borderRadius: "20px",
-                              background: "hsla(211,100%,50%,.12)",
-                              color: "hsl(211,100%,45%)",
-                              border: "1px solid hsla(211,100%,50%,.25)",
-                            }}
-                          >
-                            {unreadCount} unread
-                          </span>
-                        ) : undefined
-                      }
-                    />
-                    <div style={{ display: "flex", flexDirection: "column" }}>
-                      {recentNotifications.map((n, idx) => (
-                        <div
-                          key={n.id}
-                          onClick={() => openNotification(n)}
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "10px",
-                            padding: "9px 4px",
-                            borderBottom:
-                              idx < recentNotifications.length - 1
-                                ? "1px solid var(--border-color)"
-                                : "none",
-                            cursor: "pointer",
-                          }}
-                        >
-                          {!n.read && (
-                            <div
-                              style={{
-                                width: "7px",
-                                height: "7px",
-                                borderRadius: "50%",
-                                background: "hsl(211,100%,50%)",
-                                flexShrink: 0,
-                              }}
-                            />
-                          )}
-                          <div
-                            style={{
-                              flex: 1,
-                              minWidth: 0,
-                              marginLeft: n.read ? "17px" : 0,
-                            }}
-                          >
-                            <div
-                              style={{
-                                fontSize: "13px",
-                                color: "var(--text-primary)",
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                                whiteSpace: "nowrap",
-                              }}
-                            >
-                              {n.title}
-                            </div>
-                          </div>
-                          <span
-                            style={{
-                              fontSize: "11px",
-                              color: "var(--text-muted)",
-                              whiteSpace: "nowrap",
-                              flexShrink: 0,
-                            }}
-                          >
-                            {relativeTime(n.createdAt)}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </Card>
-                )}
-
-                {view.adminWorkflows.length > 0 && (
-                  <Card accentColor="hsl(185,80%,40%)">
-                    <SectionHeader
-                      title="Workflows I Administer"
-                      icon="🛡️"
-                      color="hsl(185,80%,40%)"
-                    />
-                    <div
+          {/* ── v1.1 widgets — always rendered, whether or not "view as" mode
+          (R13) omits them (the endpoint returns these empty by design for a
+          subordinate's view - personal-workspace items, not ticket data).
+          Each card shows a 0 value in its body when its own list is empty,
+          rather than being omitted - matching the KPI strip / SLA Risk /
+          Status Mix / My Workload cards, which always render too. ───────── */}
+          {!isViewingAs && (
+            <div
+              className="dash-body"
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+                gap: "20px",
+                marginTop: "20px",
+              }}
+            >
+              <Card accentColor="hsl(211,100%,50%)">
+                <SectionHeader
+                  title="Notifications"
+                  icon="🔔"
+                  color="hsl(211,100%,50%)"
+                  action={
+                    <span
                       style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: "2px",
+                        fontSize: "10px",
+                        fontWeight: 700,
+                        padding: "2px 8px",
+                        borderRadius: "20px",
+                        background: "hsla(211,100%,50%,.12)",
+                        color: "hsl(211,100%,45%)",
+                        border: "1px solid hsla(211,100%,50%,.25)",
                       }}
                     >
-                      {view.adminWorkflows.map((wf) => (
+                      {unreadCount} unread
+                    </span>
+                  }
+                />
+                {recentNotifications.length === 0 ? (
+                  <div
+                    style={{
+                      fontSize: "13px",
+                      fontWeight: 700,
+                      color: "var(--text-muted)",
+                    }}
+                  >
+                    0 notifications
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column" }}>
+                    {recentNotifications.map((n, idx) => (
+                      <div
+                        key={n.id}
+                        onClick={() => openNotification(n)}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "10px",
+                          padding: "9px 4px",
+                          borderBottom:
+                            idx < recentNotifications.length - 1
+                              ? "1px solid var(--border-color)"
+                              : "none",
+                          cursor: "pointer",
+                        }}
+                      >
+                        {!n.read && (
+                          <div
+                            style={{
+                              width: "7px",
+                              height: "7px",
+                              borderRadius: "50%",
+                              background: "hsl(211,100%,50%)",
+                              flexShrink: 0,
+                            }}
+                          />
+                        )}
                         <div
-                          key={wf.workflowId}
-                          onClick={() => openAdminWorkflow(wf.workflowName)}
                           style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "center",
-                            padding: "9px 4px",
-                            cursor: "pointer",
-                            fontSize: "13px",
-                            color: "var(--text-primary)",
+                            flex: 1,
+                            minWidth: 0,
+                            marginLeft: n.read ? "17px" : 0,
                           }}
                         >
-                          <span
+                          <div
                             style={{
+                              fontSize: "13px",
+                              color: "var(--text-primary)",
                               overflow: "hidden",
                               textOverflow: "ellipsis",
                               whiteSpace: "nowrap",
                             }}
                           >
-                            {wf.workflowName}
-                          </span>
-                          <span
-                            style={{
-                              color: "var(--text-muted)",
-                              flexShrink: 0,
-                            }}
-                          >
-                            →
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </Card>
-                )}
-
-                {view.pendingApprovals.items.length > 0 && (
-                  <Card accentColor="hsl(35,90%,50%)">
-                    <SectionHeader
-                      title="Awaiting Your Approval"
-                      icon="✋"
-                      color="hsl(35,90%,50%)"
-                      action={
-                        <span
-                          style={{
-                            fontSize: "10px",
-                            fontWeight: 700,
-                            padding: "2px 8px",
-                            borderRadius: "20px",
-                            background: "hsla(35,90%,50%,.12)",
-                            color: "hsl(35,90%,50%)",
-                            border: "1px solid hsla(35,90%,50%,.25)",
-                          }}
-                        >
-                          {view.pendingApprovals.totalQualifying}
-                        </span>
-                      }
-                    />
-                    {view.pendingApprovals.unavailable ? (
-                      <div
-                        style={{ fontSize: "13px", color: "var(--text-muted)" }}
-                      >
-                        Temporarily unavailable — the rest of your dashboard is
-                        unaffected.
-                      </div>
-                    ) : (
-                      <div style={{ display: "flex", flexDirection: "column" }}>
-                        {view.pendingApprovals.items.map((a, idx) => (
-                          <div
-                            key={a.requestId}
-                            onClick={() =>
-                              openRecord(a.entityTypeId, a.entityId)
-                            }
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "10px",
-                              padding: "9px 4px",
-                              borderBottom:
-                                idx < view.pendingApprovals.items.length - 1
-                                  ? "1px solid var(--border-color)"
-                                  : "none",
-                              cursor: "pointer",
-                            }}
-                          >
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div
-                                style={{
-                                  fontSize: "13px",
-                                  color: "var(--text-primary)",
-                                  overflow: "hidden",
-                                  textOverflow: "ellipsis",
-                                  whiteSpace: "nowrap",
-                                }}
-                              >
-                                {a.title}
-                              </div>
-                              <div
-                                style={{
-                                  fontSize: "11px",
-                                  color: "var(--text-muted)",
-                                }}
-                              >
-                                {a.workflowName} · requested{" "}
-                                {a.requestedLevel.replace("_", " ")}
-                              </div>
-                            </div>
-                            <span
-                              style={{
-                                fontSize: "11px",
-                                color: "var(--text-muted)",
-                                whiteSpace: "nowrap",
-                                flexShrink: 0,
-                              }}
-                            >
-                              {relativeTime(a.createdAt)}
-                            </span>
+                            {n.title}
                           </div>
-                        ))}
-                      </div>
-                    )}
-                  </Card>
-                )}
-
-                {view.savedViews.length > 0 && (
-                  <Card accentColor="hsl(265,84%,60%)">
-                    <SectionHeader
-                      title="Saved Views"
-                      icon="⭐"
-                      color="hsl(265,84%,60%)"
-                    />
-                    <div
-                      style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}
-                    >
-                      {view.savedViews.map((v) => (
+                        </div>
                         <span
-                          key={v.id}
-                          onClick={openSavedView}
                           style={{
-                            fontSize: "12px",
-                            fontWeight: 600,
-                            padding: "6px 12px",
-                            borderRadius: "999px",
-                            background: "var(--bg-tertiary)",
-                            color: "var(--text-secondary)",
-                            cursor: "pointer",
+                            fontSize: "11px",
+                            color: "var(--text-muted)",
+                            whiteSpace: "nowrap",
+                            flexShrink: 0,
                           }}
                         >
-                          {v.name}
+                          {relativeTime(n.createdAt)}
                         </span>
-                      ))}
-                    </div>
-                  </Card>
+                      </div>
+                    ))}
+                  </div>
                 )}
-              </div>
-            )}
+              </Card>
+
+              <Card accentColor="hsl(185,80%,40%)">
+                <SectionHeader
+                  title="Workflows I Administer"
+                  icon="🛡️"
+                  color="hsl(185,80%,40%)"
+                />
+                {view.adminWorkflows.length === 0 ? (
+                  <div
+                    style={{
+                      fontSize: "13px",
+                      fontWeight: 700,
+                      color: "var(--text-muted)",
+                    }}
+                  >
+                    0 workflows
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "2px",
+                    }}
+                  >
+                    {view.adminWorkflows.map((wf) => (
+                      <div
+                        key={wf.workflowId}
+                        onClick={() => openAdminWorkflow(wf.workflowName)}
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          padding: "9px 4px",
+                          cursor: "pointer",
+                          fontSize: "13px",
+                          color: "var(--text-primary)",
+                        }}
+                      >
+                        <span
+                          style={{
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {wf.workflowName}
+                        </span>
+                        <span
+                          style={{
+                            color: "var(--text-muted)",
+                            flexShrink: 0,
+                          }}
+                        >
+                          →
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Card>
+
+              <Card accentColor="hsl(35,90%,50%)">
+                <SectionHeader
+                  title="Awaiting Your Approval"
+                  icon="✋"
+                  color="hsl(35,90%,50%)"
+                  action={
+                    <span
+                      style={{
+                        fontSize: "10px",
+                        fontWeight: 700,
+                        padding: "2px 8px",
+                        borderRadius: "20px",
+                        background: "hsla(35,90%,50%,.12)",
+                        color: "hsl(35,90%,50%)",
+                        border: "1px solid hsla(35,90%,50%,.25)",
+                      }}
+                    >
+                      {view.pendingApprovals.totalQualifying}
+                    </span>
+                  }
+                />
+                {view.pendingApprovals.unavailable ? (
+                  <div style={{ fontSize: "13px", color: "var(--text-muted)" }}>
+                    Temporarily unavailable — the rest of your dashboard is
+                    unaffected.
+                  </div>
+                ) : view.pendingApprovals.items.length === 0 ? (
+                  <div
+                    style={{
+                      fontSize: "13px",
+                      fontWeight: 700,
+                      color: "var(--text-muted)",
+                    }}
+                  >
+                    0 pending approvals
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column" }}>
+                    {view.pendingApprovals.items.map((a, idx) => (
+                      <div
+                        key={a.requestId}
+                        onClick={() => openRecord(a.entityTypeId, a.entityId)}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "10px",
+                          padding: "9px 4px",
+                          borderBottom:
+                            idx < view.pendingApprovals.items.length - 1
+                              ? "1px solid var(--border-color)"
+                              : "none",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div
+                            style={{
+                              fontSize: "13px",
+                              color: "var(--text-primary)",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {a.title}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "11px",
+                              color: "var(--text-muted)",
+                            }}
+                          >
+                            {a.workflowName} · requested{" "}
+                            {a.requestedLevel.replace("_", " ")}
+                          </div>
+                        </div>
+                        <span
+                          style={{
+                            fontSize: "11px",
+                            color: "var(--text-muted)",
+                            whiteSpace: "nowrap",
+                            flexShrink: 0,
+                          }}
+                        >
+                          {relativeTime(a.createdAt)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Card>
+
+              <Card accentColor="hsl(265,84%,60%)">
+                <SectionHeader
+                  title="Saved Views"
+                  icon="⭐"
+                  color="hsl(265,84%,60%)"
+                />
+                {view.savedViews.length === 0 ? (
+                  <div
+                    style={{
+                      fontSize: "13px",
+                      fontWeight: 700,
+                      color: "var(--text-muted)",
+                    }}
+                  >
+                    0 saved views
+                  </div>
+                ) : (
+                  <div
+                    style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}
+                  >
+                    {view.savedViews.map((v) => (
+                      <span
+                        key={v.id}
+                        onClick={openSavedView}
+                        style={{
+                          fontSize: "12px",
+                          fontWeight: 600,
+                          padding: "6px 12px",
+                          borderRadius: "999px",
+                          background: "var(--bg-tertiary)",
+                          color: "var(--text-secondary)",
+                          cursor: "pointer",
+                        }}
+                      >
+                        {v.name}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </Card>
+            </div>
+          )}
         </>
       )}
     </div>

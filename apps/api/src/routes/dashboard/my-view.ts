@@ -150,6 +150,11 @@ async function fetchPendingApprovals(
   return { items, totalQualifying: rows.length };
 }
 
+// No requireRole() — intentional, not an oversight. Every section here is
+// keyed off c.get("auth").userId (never a caller-supplied target user) and
+// scoped to the caller's own tenant, so there is no role for which this
+// route would need to be blocked (docs/specs/personal-dashboard.md R5:
+// reachable by every authenticated role, admin through customer).
 export const myViewHandler = factory.createHandlers(
   requireAuth(),
   async (c) => {

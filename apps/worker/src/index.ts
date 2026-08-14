@@ -11,6 +11,7 @@ import {
   stopDueDateScheduler,
 } from "./due-date-scheduler.js";
 import { dueDateWorker } from "./due-date-worker.js";
+import { dueDateApproachingWorker } from "./due-date-approaching-worker.js";
 import { stopAvScanWorker } from "./av-scan.js";
 import { scheduleFileCleanup, stopFileCleanupWorker } from "./file-cleanup.js";
 import { stopTenantPurgeWorker } from "./tenant-purge.js";
@@ -22,6 +23,7 @@ import {
 } from "./notification-poller.js";
 import { stopNotificationWorker } from "./notification-worker.js";
 import { stopNotificationOutboundWorker } from "./notification-outbound-worker.js";
+import { stopConnectorOutboundWorker } from "./connector-outbound-worker.js";
 
 logger.info({}, "Worker process starting");
 
@@ -37,8 +39,8 @@ startNotificationPoller();
 void scheduleFileCleanup();
 
 // automationWorker, slaBreacher, avScanWorker, fileCleanupWorker,
-// notificationWorker, notificationOutboundWorker all start processing on
-// import above.
+// notificationWorker, notificationOutboundWorker, connectorOutboundWorker all
+// start processing on import above.
 
 async function shutdown(): Promise<void> {
   logger.info({}, "Worker shutting down");
@@ -52,6 +54,7 @@ async function shutdown(): Promise<void> {
     slaBreacher.close(),
     alertWorker.close(),
     dueDateWorker.close(),
+    dueDateApproachingWorker.close(),
     stopAvScanWorker(),
     stopFileCleanupWorker(),
     stopTenantPurgeWorker(),
@@ -59,6 +62,7 @@ async function shutdown(): Promise<void> {
     stopHealthServer(),
     stopNotificationWorker(),
     stopNotificationOutboundWorker(),
+    stopConnectorOutboundWorker(),
     closeRedis(),
   ]);
   process.exit(0);

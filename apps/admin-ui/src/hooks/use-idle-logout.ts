@@ -43,13 +43,27 @@ function rawTimeoutMinutesSetting(): string | undefined {
   );
 }
 
+// True for Vite's dev server (`pnpm dev` / `vite dev`) and for anything
+// served off localhost/127.0.0.1 (e.g. `docker compose up -d`'s admin-ui
+// container published to the host) — both are "developer's own machine"
+// contexts, never a real deployment.
+function isDevOrLocalhost(): boolean {
+  if (viteEnv["DEV"]) return true;
+  const hostname = window.location.hostname;
+  return (
+    hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1"
+  );
+}
+
 // Config-driven (docs/specs/auto-logout-on-inactivity.md): the fixed 5-minute
 // timeout was too strict for local dev with no way to relax it short of
-// editing source.
+// editing source. An explicit VITE_IDLE_LOGOUT_ENABLED always wins; absent
+// that, dev/localhost defaults to disabled and every other environment keeps
+// the prior always-on default.
 function isEnabledFromEnv(): boolean {
   const raw = rawEnabledSetting();
-  if (raw === undefined) return DEFAULT_ENABLED;
-  return raw !== "false";
+  if (raw !== undefined) return raw !== "false";
+  return isDevOrLocalhost() ? false : DEFAULT_ENABLED;
 }
 
 function timeoutMinutesFromEnv(): number {
@@ -78,8 +92,9 @@ const ACTIVITY_EVENTS = [
  * whether timeoutMs is passed — so useIdleLogout(5000) with
  * VITE_IDLE_LOGOUT_ENABLED="false" is still a no-op. When timeoutMs is
  * omitted, the timeout also comes from env — VITE_IDLE_LOGOUT_ENABLED
- * ("false" to disable, anything else/unset defaults to enabled) and
- * VITE_IDLE_LOGOUT_TIMEOUT_MINUTES (whole minutes, defaults to 5 if
+ * ("false" to disable, "true" to force-enable, unset to auto-detect: off on
+ * Vite's dev server and any localhost/127.0.0.1 origin, on everywhere else)
+ * and VITE_IDLE_LOGOUT_TIMEOUT_MINUTES (whole minutes, defaults to 5 if
  * unset/invalid).
  */
 export function useIdleLogout(timeoutMs?: number): void {

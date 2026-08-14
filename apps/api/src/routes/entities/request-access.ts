@@ -1,14 +1,17 @@
 import { zValidator } from "../../lib/validator.js";
+import { logger } from "@platform/logger";
 import { z } from "zod";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, requireRole } from "@platform/auth";
 import {
   entityInstances,
   accessRequests,
+  outboxEvents,
   withTenantContext,
 } from "@platform/db";
 import { factory } from "./factory.js";
 import { handleEntityError } from "../../lib/handle-entity-error.js";
+import { emitAccessRequestSubmitted } from "../../lib/emit-access-event.js";
 
 const RequestAccessSchema = z.object({
   requestedLevel: z
@@ -74,6 +77,12 @@ export const requestAccessHandler = factory.createHandlers(
             .set({ requestedLevel, updatedAt: new Date() })
             .where(eq(accessRequests.id, pendingRow.id)),
         );
+        void emitAccessRequestSubmitted(
+          tenantId,
+          id,
+          requesterId,
+          requestedLevel,
+        );
         return c.json({ data: { id: pendingRow.id, created: false } }, 200);
       }
 
@@ -89,7 +98,48 @@ export const requestAccessHandler = factory.createHandlers(
           .returning({ id: accessRequests.id }),
       );
 
-      return c.json({ data: { id: inserted[0]?.id, created: true } }, 201);
+      const requestId = inserted[0]?.id;
+      if (requestId) {
+        void emitAccessRequestSubmitted(
+          tenantId,
+          id,
+          requesterId,
+          requestedLevel,
+        );
+        // Feeds the ticket-room WS live-push path
+        // (docs/specs/ticket-live-updates.md) — a re-request against an
+        // existing pending row (the branch above) doesn't re-fire this, only
+        // a genuinely new request does.
+        try {
+          await withTenantContext(tenantId, (tx) =>
+            tx.insert(outboxEvents).values({
+              tenantId,
+              eventType: "access_request.created",
+              version: 1,
+              payload: {
+                eventType: "access_request.created",
+                version: 1,
+                tenantId,
+                instanceId: id,
+                actorId: requesterId,
+                requestId,
+              },
+            }),
+          );
+        } catch (outboxErr) {
+          logger.warn(
+            {
+              outboxErr,
+              tenantId,
+              instanceId: id,
+              eventType: "access_request.created",
+            },
+            "room-push outbox write failed — live push missed, primary operation succeeded",
+          );
+        }
+      }
+
+      return c.json({ data: { id: requestId, created: true } }, 201);
     } catch (err) {
       return handleEntityError(c, err);
     }

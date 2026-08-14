@@ -22,16 +22,41 @@ function wrapper({ children }: { children: React.ReactNode }) {
   return React.createElement(MemoryRouter, null, children);
 }
 
+const originalLocation = window.location;
+
+function setHostname(hostname: string): void {
+  Object.defineProperty(window, "location", {
+    value: { ...originalLocation, hostname },
+    writable: true,
+    configurable: true,
+  });
+}
+
+function restoreLocation(): void {
+  Object.defineProperty(window, "location", {
+    value: originalLocation,
+    writable: true,
+    configurable: true,
+  });
+}
+
 describe("useIdleLogout", () => {
+  const originalEnabled = import.meta.env["VITE_IDLE_LOGOUT_ENABLED"];
+
   beforeEach(() => {
     vi.useFakeTimers();
     mockLogout.mockClear();
     mockNavigate.mockClear();
+    // These tests exercise the timer/listener mechanics directly via the
+    // timeoutMs override; they don't care about the dev/localhost default,
+    // so force-enable to isolate that from jsdom's localhost hostname.
+    import.meta.env["VITE_IDLE_LOGOUT_ENABLED"] = "true";
   });
 
   afterEach(() => {
     cleanup();
     vi.useRealTimers();
+    import.meta.env["VITE_IDLE_LOGOUT_ENABLED"] = originalEnabled;
   });
 
   it("logs out and navigates to /login after the timeout with no activity", async () => {
@@ -117,9 +142,12 @@ describe("useIdleLogout — config-driven via env (no explicit timeoutMs overrid
     addSpy.mockRestore();
   });
 
-  it("defaults to enabled with a 5-minute timeout when neither env var is set", async () => {
-    import.meta.env["VITE_IDLE_LOGOUT_ENABLED"] = undefined;
-    import.meta.env["VITE_IDLE_LOGOUT_TIMEOUT_MINUTES"] = undefined;
+  it("defaults to enabled with a 5-minute timeout when neither env var is set and not on localhost/dev", async () => {
+    delete import.meta.env["VITE_IDLE_LOGOUT_ENABLED"];
+    delete import.meta.env["VITE_IDLE_LOGOUT_TIMEOUT_MINUTES"];
+    const originalDev = import.meta.env["DEV"];
+    import.meta.env["DEV"] = false;
+    setHostname("openwind-nexus.rokkalabs.com");
 
     renderHook(() => useIdleLogout(), { wrapper });
 
@@ -127,10 +155,45 @@ describe("useIdleLogout — config-driven via env (no explicit timeoutMs overrid
     expect(mockLogout).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     expect(mockLogout).toHaveBeenCalled();
+
+    restoreLocation();
+    import.meta.env["DEV"] = originalDev;
+  });
+
+  it("defaults to disabled on localhost when neither env var is set (no import.meta.env.DEV override)", async () => {
+    delete import.meta.env["VITE_IDLE_LOGOUT_ENABLED"];
+    delete import.meta.env["VITE_IDLE_LOGOUT_TIMEOUT_MINUTES"];
+    const originalDev = import.meta.env["DEV"];
+    import.meta.env["DEV"] = false;
+    setHostname("localhost");
+    const addSpy = vi.spyOn(window, "addEventListener");
+
+    renderHook(() => useIdleLogout(), { wrapper });
+    await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
+
+    expect(mockLogout).not.toHaveBeenCalled();
+    expect(addSpy).not.toHaveBeenCalledWith("mousemove", expect.any(Function));
+
+    addSpy.mockRestore();
+    restoreLocation();
+    import.meta.env["DEV"] = originalDev;
+  });
+
+  it("an explicit VITE_IDLE_LOGOUT_ENABLED=true overrides the localhost default-off", async () => {
+    import.meta.env["VITE_IDLE_LOGOUT_ENABLED"] = "true";
+    import.meta.env["VITE_IDLE_LOGOUT_TIMEOUT_MINUTES"] = undefined;
+    setHostname("localhost");
+
+    renderHook(() => useIdleLogout(), { wrapper });
+
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+    expect(mockLogout).toHaveBeenCalled();
+
+    restoreLocation();
   });
 
   it("uses VITE_IDLE_LOGOUT_TIMEOUT_MINUTES to compute the timeout in ms", async () => {
-    import.meta.env["VITE_IDLE_LOGOUT_ENABLED"] = undefined;
+    import.meta.env["VITE_IDLE_LOGOUT_ENABLED"] = "true";
     import.meta.env["VITE_IDLE_LOGOUT_TIMEOUT_MINUTES"] = "10";
 
     renderHook(() => useIdleLogout(), { wrapper });
@@ -142,7 +205,7 @@ describe("useIdleLogout — config-driven via env (no explicit timeoutMs overrid
   });
 
   it("falls back to the 5-minute default for an invalid VITE_IDLE_LOGOUT_TIMEOUT_MINUTES value", async () => {
-    import.meta.env["VITE_IDLE_LOGOUT_ENABLED"] = undefined;
+    import.meta.env["VITE_IDLE_LOGOUT_ENABLED"] = "true";
     import.meta.env["VITE_IDLE_LOGOUT_TIMEOUT_MINUTES"] = "not-a-number";
 
     renderHook(() => useIdleLogout(), { wrapper });
@@ -152,6 +215,7 @@ describe("useIdleLogout — config-driven via env (no explicit timeoutMs overrid
   });
 
   it("prefers window.__CONFIG__ over the Vite build-time env var (Docker runtime-config precedence, matches authProvider.ts)", async () => {
+    import.meta.env["VITE_IDLE_LOGOUT_ENABLED"] = "true";
     import.meta.env["VITE_IDLE_LOGOUT_TIMEOUT_MINUTES"] = "5";
     (
       window as unknown as {

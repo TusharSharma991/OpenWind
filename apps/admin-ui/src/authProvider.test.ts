@@ -12,10 +12,10 @@ vi.mock("oidc-client-ts", () => ({
     return {
       signinSilent: mockSigninSilent,
       getUser: mockGetUser,
-      events: { addUserLoaded: mockAddUserLoaded },
       signoutRedirect: mockSignoutRedirect,
       removeUser: mockRemoveUser,
       clearStaleState: mockClearStaleState,
+      events: { addUserLoaded: mockAddUserLoaded },
     };
   }),
   WebStorageStateStore: vi.fn(),
@@ -87,15 +87,6 @@ describe("authProvider.logout", () => {
     mockGetUser.mockResolvedValue(null);
   });
 
-  it("ends the AuthNexus SSO session via signoutRedirect instead of only clearing the local token", async () => {
-    mockSignoutRedirect.mockResolvedValue(undefined);
-
-    await authProvider.logout({});
-
-    expect(mockSignoutRedirect).toHaveBeenCalledTimes(1);
-    expect(mockRemoveUser).not.toHaveBeenCalled();
-  });
-
   it("passes id_token_hint when a user is present, so AuthNexus can end that exact session", async () => {
     mockGetUser.mockResolvedValue({ id_token: "id-tok-123" });
     mockSignoutRedirect.mockResolvedValue(undefined);
@@ -107,13 +98,22 @@ describe("authProvider.logout", () => {
     });
   });
 
-  it("falls back to local-only cleanup when signoutRedirect fails", async () => {
-    mockSignoutRedirect.mockRejectedValue(new Error("network error"));
+  it("returns success with no redirectTo when signoutRedirect succeeds — the browser navigates away before Refine acts on the return value", async () => {
+    mockSignoutRedirect.mockResolvedValue(undefined);
 
     const result = await authProvider.logout({});
 
-    expect(mockRemoveUser).toHaveBeenCalledTimes(1);
-    expect(mockClearStaleState).toHaveBeenCalled();
+    expect(mockSignoutRedirect).toHaveBeenCalled();
+    expect(mockRemoveUser).not.toHaveBeenCalled();
+    expect(result).toEqual({ success: true });
+  });
+
+  it("falls back to a local-only logout when signoutRedirect throws (AuthNexus unreachable)", async () => {
+    mockSignoutRedirect.mockRejectedValue(new Error("network timeout"));
+
+    const result = await authProvider.logout({});
+
+    expect(mockRemoveUser).toHaveBeenCalled();
     expect(result).toEqual({ success: true, redirectTo: "/login" });
   });
 });

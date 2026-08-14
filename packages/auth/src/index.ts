@@ -4,6 +4,8 @@ export {
   hashApiKey,
   hashApiKeyArgon2,
   lookupTenantIdByOrgId,
+  API_KEY_DEFAULT_TTL_DAYS,
+  API_KEY_ROTATION_OVERLAP_HOURS,
 } from "./middleware.js";
 export {
   invalidateTenantStatusCache,
@@ -22,3 +24,5 @@ export {
   invalidateUserCache,
 } from "./authnexus-management.js";
 export type { OrgUser, OrgSubordinates } from "./authnexus-management.js";
+export { detectScopesFormat } from "./scopes.js";
+export type { ScopesFormat } from "./scopes.js";

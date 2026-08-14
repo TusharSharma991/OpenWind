@@ -33,6 +33,7 @@ import type {
   BulkSetStateResult,
   EntityCreatedEvent,
   EntityAssignedEvent,
+  EntityUnassignedEvent,
   EntityDueDateScheduledEvent,
   FieldSensitivity,
 } from "./types.js";
@@ -120,6 +121,26 @@ export function buildEntityAssignedPayload(
     // depth + 1 for the guard, mirroring the transition action's convention
     // (packages/automation-engine/src/actions/transition.ts) — only set when
     // this assignment was itself driven by an automation rule (#120).
+    ...(depth !== undefined && { depth: depth + 1 }),
+  };
+}
+
+export function buildEntityUnassignedPayload(
+  tenantId: string,
+  instanceId: string,
+  entityTypeId: string,
+  previousAssigneeId: string,
+  actorId: string | null,
+  depth?: number,
+): EntityUnassignedEvent {
+  return {
+    eventType: "entity.unassigned",
+    version: 1,
+    tenantId,
+    instanceId,
+    entityTypeId,
+    previousAssigneeId,
+    actorId,
     ...(depth !== undefined && { depth: depth + 1 }),
   };
 }
@@ -630,6 +651,29 @@ export async function updateEntity(
       });
     }
 
+    // Notifies the user who LOST the assignment, distinct from the above
+    // entity.assigned (which only ever notifies the new assignee) —
+    // requires a real previous assignee, so this never fires on a
+    // first-time assignment (existing.assignedTo === null).
+    if (
+      existing.assignedTo !== null &&
+      row.assignedTo !== existing.assignedTo
+    ) {
+      await db.insert(outboxEvents).values({
+        tenantId,
+        eventType: "entity.unassigned",
+        version: 1,
+        payload: buildEntityUnassignedPayload(
+          tenantId,
+          row.id,
+          row.entityTypeId,
+          existing.assignedTo,
+          input.actorId ?? null,
+          input.depth,
+        ),
+      });
+    }
+
     if (input.dueDate !== undefined) {
       await rescheduleDueDate(
         db,
@@ -723,6 +767,29 @@ export async function updateEntity(
             type: "update",
             changed,
             actorName: input.actorName ?? null,
+          },
+        });
+      }
+
+      // ui-feature-checklist-and-rules.md §2.5 — a genuine custom-field edit
+      // notifies creator + assignedTo. Deliberately excludes the case where
+      // `changed` contains ONLY the synthetic "assignedTo"/"state" pseudo-keys
+      // above — those are entity.assigned's and workflow.transitioned's jobs
+      // respectively (§2.4), and firing both here too would double-notify.
+      const realFieldKeys = Object.keys(changed).filter(
+        (k) => k !== "assignedTo" && k !== "state",
+      );
+      if (realFieldKeys.length > 0) {
+        await db.insert(outboxEvents).values({
+          tenantId,
+          eventType: "entity.updated",
+          version: 1,
+          payload: {
+            eventType: "entity.updated",
+            version: 1,
+            tenantId,
+            instanceId,
+            actorId: input.actorId ?? null,
           },
         });
       }
@@ -821,6 +888,29 @@ export async function updateEntity(
           row.entityTypeId,
           row.assignedTo,
           resolveAssignedBy(input.actorId, row.createdBy),
+          input.depth,
+        ),
+      });
+    }
+
+    // Notifies the user who LOST the assignment, distinct from the above
+    // entity.assigned (which only ever notifies the new assignee) —
+    // requires a real previous assignee, so this never fires on a
+    // first-time assignment (existing.assignedTo === null).
+    if (
+      existing.assignedTo !== null &&
+      row.assignedTo !== existing.assignedTo
+    ) {
+      await db.insert(outboxEvents).values({
+        tenantId,
+        eventType: "entity.unassigned",
+        version: 1,
+        payload: buildEntityUnassignedPayload(
+          tenantId,
+          row.id,
+          row.entityTypeId,
+          existing.assignedTo,
+          input.actorId ?? null,
           input.depth,
         ),
       });
@@ -1476,12 +1566,20 @@ export async function bulkUpdateEntities(
   // Collected across all items and inserted once after Promise.all, instead
   // of one insert per item (#126 review: bulkCreateEntities already batches
   // its outbox rows; this matches that pattern instead of doing N round trips).
-  const assignedOutboxRows: Array<{
-    tenantId: string;
-    eventType: "entity.assigned";
-    version: 1;
-    payload: EntityAssignedEvent;
-  }> = [];
+  const assignedOutboxRows: Array<
+    | {
+        tenantId: string;
+        eventType: "entity.assigned";
+        version: 1;
+        payload: EntityAssignedEvent;
+      }
+    | {
+        tenantId: string;
+        eventType: "entity.unassigned";
+        version: 1;
+        payload: EntityUnassignedEvent;
+      }
+  > = [];
 
   // Fetch all rows in one query instead of one SELECT per item (#196 N+1) —
   // mirrors bulkSetState's foundMap pattern below. Per-row UPDATEs still
@@ -1629,6 +1727,25 @@ export async function bulkUpdateEntities(
               ),
             });
           }
+          // See the singular updateEntity's identical comment above.
+          if (
+            existing.assignedTo !== null &&
+            row.assignedTo !== existing.assignedTo
+          ) {
+            assignedOutboxRows.push({
+              tenantId,
+              eventType: "entity.unassigned",
+              version: 1,
+              payload: buildEntityUnassignedPayload(
+                tenantId,
+                row.id,
+                row.entityTypeId,
+                existing.assignedTo,
+                input.actorId ?? null,
+                input.depth,
+              ),
+            });
+          }
           if (input.dueDate !== undefined) {
             await rescheduleDueDate(
               db,
@@ -1697,6 +1814,25 @@ export async function bulkUpdateEntities(
                 row.entityTypeId,
                 row.assignedTo,
                 resolveAssignedBy(input.actorId, row.createdBy),
+                input.depth,
+              ),
+            });
+          }
+          // See the singular updateEntity's identical comment above.
+          if (
+            existing.assignedTo !== null &&
+            row.assignedTo !== existing.assignedTo
+          ) {
+            assignedOutboxRows.push({
+              tenantId,
+              eventType: "entity.unassigned",
+              version: 1,
+              payload: buildEntityUnassignedPayload(
+                tenantId,
+                row.id,
+                row.entityTypeId,
+                existing.assignedTo,
+                input.actorId ?? null,
                 input.depth,
               ),
             });

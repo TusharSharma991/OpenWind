@@ -978,6 +978,66 @@ button.menu-item.sidebar-logout {
   color: var(--text-muted);
 }
 
+/* ── Login Page — "Field notebook" card ─────────────────────────────────
+   Keeps the existing single-card, centered layout (.lp-page/.lp-main/
+   .lp-card/.lp-card-glow above) exactly as-is - including the theme
+   toggle in .lp-topbar - and only restyles the card interior: a
+   breadcrumb-style header instead of the stacked logo/title/description
+   block, and a rounder card. Every value below reads from the same
+   --bg-*/--text-*/--accent-primary/--border-color tokens the rest of the
+   page already uses, so it follows the light/dark toggle and saved accent
+   color with no theme-specific overrides needed. */
+.lp-card-notebook {
+  border-radius: 18px;
+  border-top-width: 1px;
+  border-bottom-width: 1px;
+  box-shadow: 0 40px 90px -30px rgba(0, 0, 0, 0.55);
+}
+.lp-notebook-head {
+  text-align: left;
+  padding: 40px 34px 22px;
+}
+.lp-notebook-crumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 22px;
+}
+.lp-notebook-crumb-sep {
+  color: var(--border-color);
+}
+.lp-notebook-crumb-current {
+  color: var(--accent-primary);
+}
+.lp-notebook-title {
+  text-align: left;
+  font-size: 26px;
+}
+.lp-card-notebook .lp-card-desc {
+  text-align: left;
+}
+.lp-notebook-body {
+  padding: 24px 34px 0;
+}
+
+/* Quiet meta row instead of the filled security badge - a hairline top
+   rule with the note on the left, matching the notebook card's
+   understated pattern. */
+.lp-notebook-security {
+  margin: 24px 34px 32px;
+  padding: 16px 0 0;
+  background: none;
+  border: none;
+  border-top: 1px solid var(--border-color);
+  border-radius: 0;
+  color: var(--text-muted);
+}
+
 /* Loader Styles */
 .loader-container {
   display: flex;

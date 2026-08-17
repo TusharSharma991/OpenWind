@@ -10,6 +10,29 @@ detail (typecheck/lint/test pass state) is only included where a PR's own body r
 
 ---
 
+## 2026-08-14 — fix `notifications_type_check` blocking 6 already-wired notification event types
+
+**Session type:** Bug report → root cause → fix, verified live end-to-end
+**Summary:** `notification-poller.ts`'s `NOTIFICATION_EVENT_TYPES` allowlist and
+`notification-recipients.ts`/`notification-templates.ts` already handled `access.updated`,
+`workflow.transitioned`, `entity.updated`, `entity.due_date_approaching`,
+`access_request.created`, and `access_request.updated` — all correctly, per their own unit
+tests. But the `notifications` table's own `notifications_type_check` CHECK constraint was
+never extended to match, so every INSERT for these 6 types silently failed at the DB layer and
+landed in `dead_letter_events`, even though the outbox event, recipient resolution, and template
+build all succeeded. Caught via live user testing against
+`ui-feature-checklist-and-rules.md` (an access-level change produced no in-app notification
+despite the code path looking correct) and root-caused by watching `aw-worker` logs
+(`"Notification: job moved to dead letter queue"`) and querying `dead_letter_events` directly.
+**Fix:** migration `0060_notifications_type_check_missing_types.sql` drops and recreates the
+constraint with all 6 types added (16 total). Verified live post-migration: `access.updated`
+now inserts successfully (previously 0 successful rows, confirmed via direct `psql` query).
+**Lesson:** a Postgres CHECK constraint enum is a silent failure mode that unit tests with a
+mocked DB layer cannot catch — any new `notifications.type` value needs both the TS-side
+allowlist/resolver/template AND this constraint updated in the same change.
+
+---
+
 ## 2026-08-10 — fix workflow-admin assignment 404 for org members who haven't logged in
 
 **Session type:** Bug report → fix, reproduced on both local and prod

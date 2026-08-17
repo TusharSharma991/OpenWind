@@ -10,6 +10,26 @@ detail (typecheck/lint/test pass state) is only included where a PR's own body r
 
 ---
 
+## 2026-08-17 — fix comments tab growing the whole page instead of scrolling internally
+
+**Session type:** Bug report → fix, verified live in browser
+**Summary:** the ticket detail page's Comments tab had no bounded height, so a long comment
+thread grew the entire page instead of scrolling within its own panel — the existing
+`commentsScrollRef` auto-scroll-to-bottom effect (`record-detail.tsx`) was already correct but
+inert, since no ancestor gave the container an actual bounded height to scroll within
+(`.rcd-page`/`.rcd-two-col` were deliberately made page-scrolling in an earlier redesign,
+`fd2365d`, 2026-08-13).
+**Fix:** added a `rcd-comments-scroll` class (`apps/admin-ui/src/index.css`) to the comments
+panel only — `min-height: 320px; max-height: 640px` (uncapped under the 900px breakpoint, where
+`.rcd-activity-card` is already a real bounded 520px box). Deliberately scoped to comments only,
+not the shared `.rcd-tab-scroll` class — Sub-tasks/Linked tabs use the same class and were
+intentionally left page-scrolling; confirmed no dropdown-clipping regression risk since neither
+of those tables has an absolutely-positioned menu.
+**Verified:** rebuilt `ow-frontend`, confirmed live in browser — comments panel now scrolls
+internally and opens already scrolled to the latest comment.
+
+---
+
 ## 2026-08-17 — live re-verification of ui-feature-checklist-and-rules.md finds 2 more bugs
 
 **Session type:** Full live re-verification (real Postgres/Redis, not mocked unit tests) of

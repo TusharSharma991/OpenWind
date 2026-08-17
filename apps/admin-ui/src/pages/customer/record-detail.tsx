@@ -4148,7 +4148,10 @@ export function CustomerRecordDetail(): React.ReactElement {
           <div className="rcd-tab-panel">
             {activeTab === "comments" ? (
               <>
-                <div className="rcd-tab-scroll" ref={commentsScrollRef}>
+                <div
+                  className="rcd-tab-scroll rcd-comments-scroll"
+                  ref={commentsScrollRef}
+                >
                   {topLevelComments.length === 0 ? (
                     <p className="rcd-empty-hint rcd-empty-hint-feed">
                       No comments yet. Be the first to comment.

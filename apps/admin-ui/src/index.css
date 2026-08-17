@@ -4095,6 +4095,17 @@ select.form-input {
 }
 .rcd-tab-scroll::-webkit-scrollbar { width: 4px; }
 .rcd-tab-scroll::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 4px; }
+/* Comments specifically need a bounded, internally-scrolling box (chat-style
+   auto-scroll-to-bottom, via commentsScrollRef) rather than growing the
+   whole page - unlike Sub-tasks/Linked's tables, which were deliberately
+   left page-scrolling (see .rcd-page's comment above .rcd-two-col). Explicit
+   min/max-height works regardless of .rcd-tab-scroll's flex:1/min-height:0
+   being otherwise inert (no ancestor gives it a bounded height to flex
+   within) - min/max-height are respected independent of flex context. */
+.rcd-comments-scroll {
+  min-height: 320px;
+  max-height: 640px;
+}
 .rcd-linked-tab-actions {
   display: flex;
   justify-content: flex-end;
@@ -4188,6 +4199,9 @@ select.form-input {
   .rcd-two-col > .rcd-card.rcd-activity-card { flex: none; height: 520px; }
   .rcd-sidebar { flex: none; height: auto; }
   .rcd-sidebar-section { flex: none; min-height: 200px; max-height: 320px; }
+  /* the activity card is a real bounded 520px box here, so cap comments to
+     fit inside it rather than the desktop 640px max */
+  .rcd-comments-scroll { min-height: 0; max-height: none; }
 }
 @media (max-width: 640px) {
   .rcd-nav { padding: 10px 14px 0; }

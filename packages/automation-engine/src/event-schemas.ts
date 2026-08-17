@@ -18,7 +18,10 @@ export const WorkflowTransitionedV1Schema = baseEvent.extend({
   fromState: z.string().nullable(),
   toState: z.string(),
   triggeredBy: z.enum(["user", "automation", "api", "system"]),
-  actorId: z.string().uuid().nullable(),
+  // Identity-provider user id, not a Postgres entity UUID - AuthNexus issues
+  // numeric-string ids, not UUIDs (see entity-engine/src/validation/
+  // schema-builder.ts's user_ref field comment for the same fact).
+  actorId: z.string().min(1).nullable(),
   occurredAt: z.string().datetime(),
   // Automation recursion depth this transition was triggered at (see issue #120).
   // Absent on events from direct user/API transitions, which start at depth 0.
@@ -51,15 +54,19 @@ export const EntityCreatedV1Schema = baseEvent.extend({
   instanceId: z.string().uuid(),
   entityTypeId: z.string().uuid(),
   fields: z.record(z.unknown()),
-  createdBy: z.string().uuid().nullable(),
+  // Identity-provider user id, not a Postgres entity UUID - see
+  // WorkflowTransitionedV1Schema.actorId's comment above.
+  createdBy: z.string().min(1).nullable(),
 });
 
 export const EntityAssignedV1Schema = baseEvent.extend({
   eventType: z.literal("entity.assigned"),
   instanceId: z.string().uuid(),
   entityTypeId: z.string().uuid(),
-  assigneeId: z.string().uuid(),
-  assignedBy: z.string().uuid().nullable(),
+  // Identity-provider user ids, not Postgres entity UUIDs - see
+  // WorkflowTransitionedV1Schema.actorId's comment above.
+  assigneeId: z.string().min(1),
+  assignedBy: z.string().min(1).nullable(),
 });
 
 // Notifies the user who LOST the assignment — see
@@ -70,8 +77,10 @@ export const EntityUnassignedV1Schema = baseEvent.extend({
   eventType: z.literal("entity.unassigned"),
   instanceId: z.string().uuid(),
   entityTypeId: z.string().uuid(),
-  previousAssigneeId: z.string().uuid(),
-  actorId: z.string().uuid().nullable(),
+  // Identity-provider user ids, not Postgres entity UUIDs - see
+  // WorkflowTransitionedV1Schema.actorId's comment above.
+  previousAssigneeId: z.string().min(1),
+  actorId: z.string().min(1).nullable(),
 });
 
 export const EntityDueDateOverdueV1Schema = baseEvent.extend({

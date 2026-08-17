@@ -10,6 +10,38 @@ detail (typecheck/lint/test pass state) is only included where a PR's own body r
 
 ---
 
+## 2026-08-17 — live re-verification of ui-feature-checklist-and-rules.md finds 2 more bugs
+
+**Session type:** Full live re-verification (real Postgres/Redis, not mocked unit tests) of
+every notification/history rule, prompted by a user report that 2026-08-14's "✅ Implemented"
+claim for the access-level-change notification (§2.3) was wrong on first live click-through.
+**Found and fixed 2 more real, previously-undetected bugs:**
+
+1. **`notifications_type_check` was also missing `entity.unassigned`** (migration
+   `0061_notifications_entity_unassigned_type.sql`) — same bug class as 0060, one type missed
+   on the first pass.
+2. **`packages/automation-engine/src/event-schemas.ts` required `.uuid()` on identity-provider
+   user-id fields** (`entity.assigned`'s `assigneeId`/`assignedBy`, `entity.unassigned`'s
+   `previousAssigneeId`/`actorId`, `entity.created`'s `createdBy`, `workflow.transitioned`'s
+   `actorId`) — AuthNexus issues numeric-string ids, not UUIDs, so every real event of these
+   types threw `INVALID_EVENT_PAYLOAD` and dead-lettered, meaning any automation rule
+   triggering on assignment/unassignment/creation/transition has silently never fired since
+   this branch's inception. Predates this session; only surfaced once 0060/0061 let the
+   _notification_ path succeed far enough to reveal the automation-side failure underneath.
+   Fixed by relaxing to `z.string().min(1)`, matching the precedent in
+   `entity-engine/src/validation/schema-builder.ts`'s `user_ref` comment. New test file
+   `packages/automation-engine/src/event-schemas.test.ts`.
+   **Verified live, one action at a time, watching `aw-worker`/`aw-backend` logs:** reassignment
+   (`entity.assigned`+`entity.unassigned`), state transition (`workflow.transitioned`), field edit
+   (`entity.updated`), access request submit+approve (`access_request.created`/`.updated` +
+   `access.granted`), file download (`file_downloaded` history event) — all confirmed inserting
+   and delivering, zero new dead-letters after both fixes.
+   **Lesson:** "tests pass" and "verified against a real database" are different claims — a CHECK
+   constraint or an overly strict Zod `.uuid()` on a non-UUID identity provider are both invisible
+   to unit tests that mock the DB/never construct a real cross-service payload.
+
+---
+
 ## 2026-08-14 — fix `notifications_type_check` blocking 6 already-wired notification event types
 
 **Session type:** Bug report → root cause → fix, verified live end-to-end

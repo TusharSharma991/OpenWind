@@ -76,6 +76,7 @@ export const entityInstances = pgTable(
     createdBy: text("created_by"),
     assignedTo: text("assigned_to"),
     dueDate: timestamp("due_date", { withTimezone: true }),
+    remark: text("remark"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

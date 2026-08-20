@@ -702,6 +702,7 @@ function rowToInstance(
     createdBy: row.createdBy,
     assignedTo: row.assignedTo,
     dueDate: row.dueDate,
+    remark: row.remark,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     deletedAt: row.deletedAt,

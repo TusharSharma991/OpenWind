@@ -190,6 +190,17 @@ const FIELD_TYPES = [
   { value: "enum", label: "Enum (select)" },
 ];
 
+// Generic tracking fields collected on every ticket platform-wide (see
+// entity_instances.due_date/assigned_to/remark) — not rows in entity_fields,
+// so they can't be edited or deleted per workflow here; listed for visibility
+// only, matching what apps/admin-ui/src/pages/customer/record-create.tsx
+// always renders as required regardless of this entity type's own fields.
+const SYSTEM_DETAIL_FIELDS = [
+  { name: "due_date", label: "Due Date" },
+  { name: "assigned_to", label: "Assign To" },
+  { name: "remark", label: "Remark" },
+];
+
 type AddStateForm = {
   name: string;
   label: string;
@@ -1848,6 +1859,14 @@ export function WorkflowDetail(): React.ReactElement {
   );
   const stateNames = sortedStates.map((s) => s.name);
   const slaStates = workflow.states.filter((s) => s.slaHours !== null).length;
+  const stateLabelByName = new Map(sortedStates.map((s) => [s.name, s.label]));
+
+  // "title" is a non-negotiable core detail like the generic Due
+  // Date/Assigned To/Remark system fields — pinned at the top of the Details
+  // to Collect table with no edit/delete actions, not part of the editable/
+  // sortable custom-fields list below it.
+  const titleField = fields.find((f) => f.name === "title");
+  const customFields = fields.filter((f) => f.name !== "title");
 
   const TABS = [
     { id: "settings" as const, label: "Settings" },
@@ -2563,9 +2582,6 @@ export function WorkflowDetail(): React.ReactElement {
                   <TableHead>Route</TableHead>
                   <TableHead className="wfd-table-hide-xs">Label</TableHead>
                   <TableHead className="wfd-table-hide-xs">
-                    Who Can Do This
-                  </TableHead>
-                  <TableHead className="wfd-table-hide-xs">
                     Requirements
                   </TableHead>
                   <TableHead style={{ width: "80px" }}></TableHead>
@@ -2591,12 +2607,17 @@ export function WorkflowDetail(): React.ReactElement {
                           flexWrap: "wrap",
                         }}
                       >
-                        <code
-                          className="code-inline"
-                          style={{ fontSize: "11px" }}
-                        >
-                          {t.fromState}
-                        </code>
+                        <div>
+                          <div style={{ fontSize: "13px", fontWeight: 600 }}>
+                            {stateLabelByName.get(t.fromState) ?? t.fromState}
+                          </div>
+                          <code
+                            className="code-inline"
+                            style={{ fontSize: "10px" }}
+                          >
+                            {t.fromState}
+                          </code>
+                        </div>
                         <span
                           style={{
                             color: "var(--accent-primary)",
@@ -2606,12 +2627,17 @@ export function WorkflowDetail(): React.ReactElement {
                         >
                           →
                         </span>
-                        <code
-                          className="code-inline"
-                          style={{ fontSize: "11px" }}
-                        >
-                          {t.toState}
-                        </code>
+                        <div>
+                          <div style={{ fontSize: "13px", fontWeight: 600 }}>
+                            {stateLabelByName.get(t.toState) ?? t.toState}
+                          </div>
+                          <code
+                            className="code-inline"
+                            style={{ fontSize: "10px" }}
+                          >
+                            {t.toState}
+                          </code>
+                        </div>
                       </div>
                     </TableCell>
                     <TableCell
@@ -2619,25 +2645,6 @@ export function WorkflowDetail(): React.ReactElement {
                       style={{ fontWeight: 500, fontSize: "13px" }}
                     >
                       {t.label || <span className="text-muted-sm">—</span>}
-                    </TableCell>
-                    <TableCell className="wfd-table-hide-xs">
-                      {t.allowedRoles.length === 0 ? (
-                        <span className="text-muted-sm">Any</span>
-                      ) : (
-                        <div
-                          style={{
-                            display: "flex",
-                            gap: "4px",
-                            flexWrap: "wrap",
-                          }}
-                        >
-                          {t.allowedRoles.map((r) => (
-                            <span key={r} className="badge badge-primary">
-                              {r}
-                            </span>
-                          ))}
-                        </div>
-                      )}
                     </TableCell>
                     <TableCell className="wfd-table-hide-xs">
                       {!t.requiresComment && t.requiresFields.length === 0 ? (
@@ -2757,7 +2764,7 @@ export function WorkflowDetail(): React.ReactElement {
         >
           <SectionHeader
             label="Details to Collect"
-            count={fields.length}
+            count={fields.length + SYSTEM_DETAIL_FIELDS.length}
             action={
               <Button
                 variant="primary"
@@ -2772,13 +2779,6 @@ export function WorkflowDetail(): React.ReactElement {
             <div style={{ padding: "20px", textAlign: "center" }}>
               <div className="spinner" style={{ margin: "0 auto" }} />
             </div>
-          ) : fields.length === 0 ? (
-            <div
-              className="empty-state-inline"
-              style={{ padding: "28px", fontSize: "13px" }}
-            >
-              No details yet. Add details to capture information on tickets.
-            </div>
           ) : (
             <Table>
               <TableHeader>
@@ -2790,19 +2790,121 @@ export function WorkflowDetail(): React.ReactElement {
                   <TableHead style={{ width: "80px" }}></TableHead>
                 </TableRow>
               </TableHeader>
+              <TableBody>
+                {titleField && (
+                  <TableRow key={titleField.id}>
+                    <TableCell></TableCell>
+                    <TableCell>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: "13px" }}>
+                          {titleField.label}
+                        </div>
+                        <code
+                          className="code-inline"
+                          style={{ fontSize: "11px" }}
+                        >
+                          {titleField.name}
+                        </code>
+                      </div>
+                    </TableCell>
+                    <TableCell className="wfd-table-hide-xs">
+                      <span className="badge badge-muted">
+                        {titleField.fieldType}
+                      </span>
+                    </TableCell>
+                    <TableCell className="wfd-table-hide-xs">
+                      <span className="badge badge-primary">Yes</span>
+                    </TableCell>
+                    <TableCell
+                      style={{ textAlign: "right", whiteSpace: "nowrap" }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "6px",
+                          justifyContent: "flex-end",
+                        }}
+                      >
+                        <IconButton
+                          variant="edit"
+                          onClick={() => {
+                            setEditingField(titleField);
+                            setFieldForm({
+                              name: titleField.name,
+                              label: titleField.label,
+                              fieldType: titleField.fieldType,
+                              isRequired: titleField.isRequired,
+                            });
+                            setFieldError(null);
+                          }}
+                          title="Rename — mandatory and can't be deleted"
+                        >
+                          <svg
+                            width="13"
+                            height="13"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                            <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                          </svg>
+                        </IconButton>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                )}
+                {SYSTEM_DETAIL_FIELDS.map((sf) => (
+                  <TableRow key={sf.name}>
+                    <TableCell></TableCell>
+                    <TableCell>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: "13px" }}>
+                          {sf.label}
+                        </div>
+                        <code
+                          className="code-inline"
+                          style={{ fontSize: "11px" }}
+                        >
+                          {sf.name}
+                        </code>
+                      </div>
+                    </TableCell>
+                    <TableCell className="wfd-table-hide-xs">
+                      <span className="badge badge-muted">system</span>
+                    </TableCell>
+                    <TableCell className="wfd-table-hide-xs">
+                      <span className="badge badge-primary">Yes</span>
+                    </TableCell>
+                    <TableCell
+                      style={{ textAlign: "right", whiteSpace: "nowrap" }}
+                    >
+                      <span
+                        className="text-muted-sm"
+                        title="Collected on every ticket platform-wide — not editable or deletable per workflow"
+                      >
+                        —
+                      </span>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
               <DndContext
                 sensors={fieldSensors}
                 collisionDetection={closestCenter}
                 onDragEnd={(e) => void handleFieldDragEnd(e)}
               >
                 <SortableContext
-                  items={[...fields]
+                  items={[...customFields]
                     .sort((a, b) => a.sortOrder - b.sortOrder)
                     .map((f) => f.id)}
                   strategy={verticalListSortingStrategy}
                 >
                   <TableBody>
-                    {[...fields]
+                    {[...customFields]
                       .sort((a, b) => a.sortOrder - b.sortOrder)
                       .map((f) => (
                         <SortableFieldRow
@@ -2880,7 +2982,9 @@ export function WorkflowDetail(): React.ReactElement {
                               </IconButton>
                               <IconButton
                                 variant="delete"
-                                disabled={deletingFieldId === f.id}
+                                disabled={
+                                  deletingFieldId === f.id || f.isRequired
+                                }
                                 onClick={() =>
                                   setConfirmDelete({
                                     message: `Delete detail "${f.label}"?`,
@@ -2890,7 +2994,11 @@ export function WorkflowDetail(): React.ReactElement {
                                     },
                                   })
                                 }
-                                title="Delete detail"
+                                title={
+                                  f.isRequired
+                                    ? "Mandatory details can't be deleted — edit the label instead"
+                                    : "Delete detail"
+                                }
                               >
                                 {deletingFieldId === f.id ? (
                                   <span style={{ fontSize: "11px" }}>…</span>
@@ -3891,6 +3999,7 @@ export function WorkflowDetail(): React.ReactElement {
                 <input
                   type="checkbox"
                   checked={fieldForm.isRequired}
+                  disabled={editingField?.isRequired}
                   onChange={(e) =>
                     setFieldForm((f) => ({
                       ...f,
@@ -3900,6 +4009,12 @@ export function WorkflowDetail(): React.ReactElement {
                 />
                 <span>Required field</span>
               </label>
+              {editingField?.isRequired && (
+                <p className="text-muted-sm" style={{ marginTop: "-8px" }}>
+                  Mandatory details can't be made optional — you can still
+                  rename the label above.
+                </p>
+              )}
             </div>
             <div className="modal-footer">
               <Button

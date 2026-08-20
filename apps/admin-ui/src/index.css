@@ -4382,6 +4382,11 @@ select.form-input {
 .portal-form { display: flex; flex-direction: column; gap: 16px; max-width: 640px; }
 .portal-form-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
 .portal-field-group { display: flex; flex-direction: column; gap: 4px; }
+.portal-form-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border-primary); margin-bottom: 20px; }
+.portal-form-tab { display: flex; align-items: center; gap: 6px; padding: 10px 16px; border: none; background: none; border-bottom: 2px solid transparent; font: inherit; font-size: 13.5px; font-weight: 500; color: var(--text-tertiary); white-space: nowrap; cursor: pointer; }
+.portal-form-tab:hover { color: var(--text-primary); }
+.portal-form-tab-active { color: var(--accent-primary); border-bottom-color: var(--accent-primary); }
+.portal-form-panel { display: flex; flex-direction: column; gap: 16px; }
 .portal-required { color: var(--danger); margin-left: 3px; }
 .portal-checkbox { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13.5px; }
 .portal-edit-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px 24px; }

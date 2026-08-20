@@ -425,6 +425,8 @@ export function CustomerRecordCreate(): React.ReactElement {
   const [currentState, setCurrentState] = useState("");
   const [assignedTo, setAssignedTo] = useState("");
   const [dueDate, setDueDate] = useState("");
+  const [remark, setRemark] = useState("");
+  const [activeTab, setActiveTab] = useState<"details" | "others">("details");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -491,9 +493,36 @@ export function CustomerRecordCreate(): React.ReactElement {
     };
   }, [entityTypeId]);
 
+  const mandatoryFields = fields.filter((f) => f.isRequired);
+  const otherFields = fields.filter((f) => !f.isRequired);
+
   async function handleSubmit(e: React.FormEvent): Promise<void> {
     e.preventDefault();
     if (!entityTypeId || !typeSlug) return;
+    const missingField = mandatoryFields.find((f) => {
+      const v = fieldValues[f.name];
+      return v === undefined || v === null || v === "";
+    });
+    if (missingField) {
+      setActiveTab("details");
+      setError(`"${missingField.label}" is required.`);
+      return;
+    }
+    if (!dueDate) {
+      setActiveTab("details");
+      setError('"Due Date" is required.');
+      return;
+    }
+    if (!assignedTo) {
+      setActiveTab("details");
+      setError('"Assign To" is required.');
+      return;
+    }
+    if (!remark.trim()) {
+      setActiveTab("details");
+      setError('"Remark" is required.');
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -505,6 +534,7 @@ export function CustomerRecordCreate(): React.ReactElement {
       if (currentState) payload["currentState"] = currentState;
       if (assignedTo) payload["assignedTo"] = assignedTo;
       if (dueDate) payload["dueDate"] = new Date(dueDate).toISOString();
+      payload["remark"] = remark.trim();
       const res = await fetchWithAuth(`${API_URL}/entities`, {
         method: "POST",
         body: JSON.stringify(payload),
@@ -560,82 +590,165 @@ export function CustomerRecordCreate(): React.ReactElement {
         style={{ marginTop: "24px" }}
       >
         {error && <div className="portal-alert-error">{error}</div>}
-        {workflows.length > 0 && (
-          <div className="portal-field-group">
-            <label className="portal-field-label">Workflow</label>
-            <select
-              className="portal-input"
-              value={workflowId}
-              onChange={(e) => setWorkflowId(e.target.value)}
+
+        <div className="portal-form-tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "details"}
+            className={`portal-form-tab ${activeTab === "details" ? "portal-form-tab-active" : ""}`}
+            onClick={() => setActiveTab("details")}
+          >
+            Details
+          </button>
+          {otherFields.length > 0 && (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "others"}
+              className={`portal-form-tab ${activeTab === "others" ? "portal-form-tab-active" : ""}`}
+              onClick={() => setActiveTab("others")}
             >
-              <option value="">No workflow</option>
-              {workflows.map((wf) => (
-                <option key={wf.id} value={wf.id}>
-                  {wf.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-        <div className="portal-field-group">
-          <label className="portal-field-label">Assigned To</label>
-          <UserPicker
-            users={users}
-            value={assignedTo}
-            onChange={setAssignedTo}
-          />
+              Others
+            </button>
+          )}
         </div>
-        <div className="portal-field-group">
-          <label className="portal-field-label">Due Date</label>
-          <input
-            type="datetime-local"
-            className="portal-input"
-            value={dueDate}
-            onChange={(e) => setDueDate(e.target.value)}
-          />
-        </div>
-        {fields.map((field) => (
-          <div key={field.id} className="portal-field-group">
+
+        <div
+          className="portal-form-panel"
+          style={{ display: activeTab === "details" ? "flex" : "none" }}
+        >
+          {workflowId ? (
+            <div className="portal-field-group">
+              <label className="portal-field-label">Workflow</label>
+              <div
+                className="portal-input"
+                style={{ background: "var(--bg-secondary)" }}
+              >
+                {currentWorkflowName ?? "—"}
+              </div>
+            </div>
+          ) : (
+            workflows.length > 1 && (
+              <div className="portal-field-group">
+                <label className="portal-field-label">Workflow</label>
+                <select
+                  className="portal-input"
+                  value={workflowId}
+                  onChange={(e) => setWorkflowId(e.target.value)}
+                >
+                  <option value="">No workflow</option>
+                  {workflows.map((wf) => (
+                    <option key={wf.id} value={wf.id}>
+                      {wf.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )
+          )}
+          {mandatoryFields.map((field) => (
+            <div key={field.id} className="portal-field-group">
+              <label className="portal-field-label">
+                {field.label}
+                <span className="portal-required">*</span>
+              </label>
+              <FieldInput
+                field={field}
+                value={fieldValues[field.name]}
+                classPrefix="portal"
+                required={field.isRequired}
+                moduleSlug={typeSlug ?? "unknown"}
+                entityId={undefined}
+                onChange={(v) =>
+                  setFieldValues((p) => ({ ...p, [field.name]: v }))
+                }
+              />
+            </div>
+          ))}
+          <div className="portal-field-group">
             <label className="portal-field-label">
-              {field.label}
-              {field.isRequired && <span className="portal-required">*</span>}
+              Due Date<span className="portal-required">*</span>
             </label>
-            <FieldInput
-              field={field}
-              value={fieldValues[field.name]}
-              classPrefix="portal"
-              required={field.isRequired}
-              moduleSlug={typeSlug ?? "unknown"}
-              entityId={undefined}
-              onChange={(v) =>
-                setFieldValues((p) => ({ ...p, [field.name]: v }))
-              }
+            <input
+              type="datetime-local"
+              className="portal-input"
+              required
+              value={dueDate}
+              onChange={(e) => setDueDate(e.target.value)}
             />
           </div>
-        ))}
-        {fields.length === 0 && (
-          <p className="portal-text-muted">
-            No fields defined for this entity type.
-          </p>
-        )}
-        <div className="portal-field-group">
-          <label className="portal-field-label">Attachments</label>
-          {stagedFiles.length > 0 && (
-            <div
-              style={{
-                display: "flex",
-                flexWrap: "wrap",
-                gap: "6px",
-                marginBottom: "8px",
-              }}
-            >
-              {stagedFiles.map((f) => (
-                <StagedFileChip key={f.fileId} file={f} onRemove={removeFile} />
-              ))}
-            </div>
-          )}
-          <AttachmentUploadZone onFiles={(files) => addFiles(files)} />
+          <div className="portal-field-group">
+            <label className="portal-field-label">
+              Assign To<span className="portal-required">*</span>
+            </label>
+            <UserPicker
+              users={users}
+              value={assignedTo}
+              onChange={setAssignedTo}
+            />
+          </div>
+          <div className="portal-field-group">
+            <label className="portal-field-label">
+              Remark<span className="portal-required">*</span>
+            </label>
+            <textarea
+              className="portal-input"
+              rows={4}
+              required
+              value={remark}
+              onChange={(e) => setRemark(e.target.value)}
+              placeholder="Add any additional details…"
+            />
+          </div>
+          <div className="portal-field-group">
+            <label className="portal-field-label">Attachments</label>
+            {stagedFiles.length > 0 && (
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: "6px",
+                  marginBottom: "8px",
+                }}
+              >
+                {stagedFiles.map((f) => (
+                  <StagedFileChip
+                    key={f.fileId}
+                    file={f}
+                    onRemove={removeFile}
+                  />
+                ))}
+              </div>
+            )}
+            <AttachmentUploadZone onFiles={(files) => addFiles(files)} />
+          </div>
         </div>
+
+        {otherFields.length > 0 && (
+          <div
+            className="portal-form-panel"
+            style={{ display: activeTab === "others" ? "flex" : "none" }}
+          >
+            {otherFields.map((field) => (
+              <div key={field.id} className="portal-field-group">
+                <label className="portal-field-label">{field.label}</label>
+                <FieldInput
+                  field={field}
+                  value={fieldValues[field.name]}
+                  classPrefix="portal"
+                  required={false}
+                  moduleSlug={typeSlug ?? "unknown"}
+                  entityId={undefined}
+                  onChange={(v) =>
+                    setFieldValues((p) => ({ ...p, [field.name]: v }))
+                  }
+                />
+              </div>
+            ))}
+          </div>
+        )}
+
         <div className="portal-form-actions">
           <button
             type="button"

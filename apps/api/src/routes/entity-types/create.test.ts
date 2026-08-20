@@ -12,6 +12,7 @@ import type * as EntityEngine from "@platform/entity-engine";
 // and "user" roles create org-level entity-type schemas.
 
 const mockCreateEntityType = vi.fn();
+const mockAddEntityField = vi.fn();
 
 let currentRoles: string[] = ["admin"];
 
@@ -44,6 +45,7 @@ vi.mock("@platform/entity-engine", async (importOriginal) => {
   return {
     ...real,
     createEntityType: (...args: unknown[]) => mockCreateEntityType(...args),
+    addEntityField: (...args: unknown[]) => mockAddEntityField(...args),
   };
 });
 
@@ -83,6 +85,28 @@ describe("POST /entity-types", () => {
 
     expect(res.status).toBe(201);
     expect(mockCreateEntityType).toHaveBeenCalled();
+  });
+
+  it("auto-seeds a required 'title' field for the newly created entity type", async () => {
+    mockCreateEntityType.mockResolvedValue(fakeEntityType);
+
+    const res = await makeApp().request("/entity-types", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "ticket", plural: "Tickets" }),
+    });
+
+    expect(res.status).toBe(201);
+    expect(mockAddEntityField).toHaveBeenCalledWith(
+      expect.anything(),
+      "t-aaa",
+      fakeEntityType.id,
+      expect.objectContaining({
+        name: "title",
+        isRequired: true,
+        isSystem: true,
+      }),
+    );
   });
 
   it("returns 403 for an agent caller (admin-only, matches update.ts/delete.ts)", async () => {

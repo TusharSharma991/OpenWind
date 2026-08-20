@@ -316,6 +316,7 @@ export async function createEntity(
       createdBy: input.createdBy ?? null,
       assignedTo: input.assignedTo ?? null,
       dueDate: input.dueDate ? new Date(input.dueDate) : null,
+      remark: input.remark ?? null,
     })
     .returning();
 
@@ -1321,6 +1322,7 @@ function rowToInstance(
     createdBy: row.createdBy ?? null,
     assignedTo: row.assignedTo ?? null,
     dueDate: row.dueDate ?? null,
+    remark: row.remark ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     deletedAt: row.deletedAt ?? null,

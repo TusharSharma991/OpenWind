@@ -43,6 +43,8 @@ export interface EntityInstance {
   assignedTo: string | null;
   /** System field, independent of workflow state/SLA — docs/specs/due-date.md. */
   dueDate: Date | null;
+  /** Free-text remark captured on the create form, alongside assignedTo/dueDate. */
+  remark: string | null;
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
@@ -87,6 +89,8 @@ export type CreateEntityInput = {
   assignedTo?: string | undefined;
   /** ISO datetime string, or null. Independent of workflow state/SLA. */
   dueDate?: string | null | undefined;
+  /** Free-text remark captured on the create form, alongside assignedTo/dueDate. */
+  remark?: string | null | undefined;
   workflowId?: string | undefined;
   currentState?: string | undefined;
   /**

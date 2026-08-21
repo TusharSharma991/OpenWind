@@ -173,6 +173,33 @@ export const files = pgTable(
 );
 
 /**
+ * entityLinks — user-added "title -> URL" reference links attached to a
+ * ticket (e.g. a link to the ERP record, a shared doc), shown in the
+ * record-detail Links tab alongside Attachments. Free-form url text (not
+ * validated as reachable) — this is a reference list, not a link-checker.
+ */
+export const entityLinks = pgTable(
+  "entity_links",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    entityId: uuid("entity_id").notNull(),
+    title: text("title").notNull(),
+    url: text("url").notNull(),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => ({
+    tenantEntityIdx: index("entity_links_tenant_entity_idx").on(
+      t.tenantId,
+      t.entityId,
+    ),
+  }),
+);
+
+/**
  * adminAuditLog — append-only audit log for all entity mutations.
  * GRANT: INSERT + SELECT only for app_user; no UPDATE or DELETE.
  * RLS: USING only policy (app_user cannot read rows outside their tenant).

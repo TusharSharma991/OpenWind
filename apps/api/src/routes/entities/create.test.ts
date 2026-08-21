@@ -42,6 +42,13 @@ vi.mock("../../lib/ensure-user-refs.js", () => ({
 const mockUpdateWhere = vi.fn().mockResolvedValue(undefined);
 const mockUpdateSet = vi.fn(() => ({ where: mockUpdateWhere }));
 const mockUpdate = vi.fn(() => ({ set: mockUpdateSet }));
+const mockInsertValues = vi.fn();
+const mockInsert = vi.fn(() => ({
+  values: (v: unknown) => {
+    mockInsertValues(v);
+    return { returning: () => Promise.resolve([{ id: "event-1" }]) };
+  },
+}));
 
 const mockTx = {
   select: () => mockTx,
@@ -49,11 +56,14 @@ const mockTx = {
   where: () => mockTx,
   limit: () => Promise.resolve([]),
   update: mockUpdate,
+  insert: mockInsert,
 };
 
 vi.mock("@platform/db", () => ({
   db: {},
   tenantUsers: {},
+  workflowEvents: {},
+  outboxEvents: {},
   files: {
     id: "id",
     tenantId: "tenant_id",
@@ -133,6 +143,58 @@ describe("POST /entities", () => {
       "t-aaa",
       expect.objectContaining({ entityTypeId: TYPE_ID }),
     );
+  });
+
+  it("posts the remark as the ticket's first comment when the entity has a workflow", async () => {
+    mockCreateEntity.mockResolvedValue({
+      ...fakeInstance,
+      workflowId: "wf-1",
+    });
+
+    const res = await makeApp().request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: validBody({ remark: "  Please expedite this  " }),
+    });
+
+    expect(res.status).toBe(201);
+    expect(mockInsert).toHaveBeenCalledTimes(2); // workflowEvents + outboxEvents
+    const commentInsertArg = mockInsertValues.mock.calls[0]?.[0] as {
+      metadata: { type: string; text: string };
+    };
+    expect(commentInsertArg.metadata).toMatchObject({
+      type: "comment",
+      text: "Please expedite this",
+    });
+  });
+
+  it("does not post a comment when remark is empty/whitespace-only", async () => {
+    mockCreateEntity.mockResolvedValue({
+      ...fakeInstance,
+      workflowId: "wf-1",
+    });
+
+    const res = await makeApp().request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: validBody({ remark: "   " }),
+    });
+
+    expect(res.status).toBe(201);
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  it("does not post a remark comment when the entity has no workflow", async () => {
+    mockCreateEntity.mockResolvedValue(fakeInstance); // workflowId: null
+
+    const res = await makeApp().request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: validBody({ remark: "Some remark" }),
+    });
+
+    expect(res.status).toBe(201);
+    expect(mockInsert).not.toHaveBeenCalled();
   });
 
   it("returns 400 when entityTypeId is not a valid UUID", async () => {

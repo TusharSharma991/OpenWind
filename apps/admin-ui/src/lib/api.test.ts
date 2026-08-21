@@ -98,6 +98,65 @@ describe("fetchWithAuth 401 error shape", () => {
   });
 });
 
+describe("fetchWithAuth validation error shape", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetUser.mockResolvedValue({ access_token: "initial-token" });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("surfaces the per-field reason from `fields`, not the generic top-level message", async () => {
+    fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(400, {
+        error: "VALIDATION_ERROR",
+        message: "Request validation failed",
+        fields: [
+          { field: "url", code: "invalid_string", message: "Invalid url" },
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchWithAuth("/api/entities/1/links")).rejects.toThrow(
+      "url: Invalid url",
+    );
+  });
+
+  it("joins multiple field errors", async () => {
+    fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(400, {
+        error: "VALIDATION_ERROR",
+        message: "Request validation failed",
+        fields: [
+          { field: "title", code: "too_small", message: "Required" },
+          { field: "url", code: "invalid_string", message: "Invalid url" },
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchWithAuth("/api/entities/1/links")).rejects.toThrow(
+      "title: Required; url: Invalid url",
+    );
+  });
+
+  it("falls back to the top-level message when no `fields` are present", async () => {
+    fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse(404, { message: "Record not found" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchWithAuth("/api/entities/1/links")).rejects.toThrow(
+      "Record not found",
+    );
+  });
+});
+
 describe("cross-origin URL rejection (CodeQL: server-side request forgery)", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 

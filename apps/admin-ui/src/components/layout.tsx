@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useLogout, useGetIdentity } from "@refinedev/core";
 import { Link, useLocation } from "react-router-dom";
 import { TOKENS, useHoverStyle } from "@platform/ui";
@@ -202,7 +203,35 @@ const SETTINGS_NAV = {
 
 // â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-// â”€â”€ Layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Sidebar hover tooltip (collapsed state only) ─────────────────────────────
+// Rendered via a portal to document.body rather than inline: .sidebar-menu
+// has overflow-y:auto (which forces overflow-x to auto too, per spec's
+// overflow-axis-pairing rule) and .sidebar/.app-container both have
+// overflow:hidden, so any tooltip positioned inside that DOM subtree gets
+// clipped at the sidebar's right edge — position:fixed does NOT escape an
+// ancestor's overflow clipping if the element is still a DOM descendant of
+// it. A portal is the only way to actually render outside that box.
+type SidebarTooltipState = { label: string; top: number; left: number } | null;
+
+function SidebarTooltip({
+  tooltip,
+}: {
+  tooltip: SidebarTooltipState;
+}): React.ReactElement | null {
+  if (!tooltip) return null;
+  return createPortal(
+    <div
+      className="sidebar-tooltip"
+      style={{ top: tooltip.top, left: tooltip.left }}
+      role="tooltip"
+    >
+      {tooltip.label}
+    </div>,
+    document.body,
+  );
+}
+
+// ── Layout ────────────────────────────────────────────────────────────────
 
 export function Layout({
   children,
@@ -219,6 +248,26 @@ export function Layout({
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [tooltip, setTooltip] = useState<SidebarTooltipState>(null);
+
+  function showSidebarTooltip(
+    label: string,
+    e: React.SyntheticEvent<HTMLElement>,
+  ): void {
+    // Only meaningful when the sidebar is icon-only — with labels already
+    // visible (expanded, or the mobile drawer) a tooltip would just repeat
+    // text sitting right next to it.
+    if (sidebarOpen || mobileNavOpen) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    setTooltip({
+      label,
+      top: rect.top + rect.height / 2,
+      left: rect.right + 10,
+    });
+  }
+  function hideSidebarTooltip(): void {
+    setTooltip(null);
+  }
   const [roles, setRoles] = useState<string[]>([]);
   const [username, setUsername] = useState("");
   const [profileOpen, setProfileOpen] = useState(false);
@@ -248,6 +297,12 @@ export function Layout({
   useEffect(() => {
     setMobileNavOpen(false);
   }, [location.pathname]);
+
+  // Drop a lingering tooltip if the sidebar expands (manual toggle or the
+  // mobile drawer opening) while the mouse happens to still be over an item.
+  useEffect(() => {
+    if (sidebarOpen || mobileNavOpen) setTooltip(null);
+  }, [sidebarOpen, mobileNavOpen]);
 
   useEffect(() => {
     function close(e: MouseEvent): void {
@@ -582,7 +637,9 @@ export function Layout({
               <Link
                 to="/dashboard"
                 className={`menu-item ${!sidebarOpen && !mobileNavOpen ? "menu-item-icon-only" : ""} ${isActive("/dashboard") ? "active" : ""}`}
-                title={!sidebarOpen ? "Dashboard" : undefined}
+                aria-label="Dashboard"
+                onMouseEnter={(e) => showSidebarTooltip("Dashboard", e)}
+                onMouseLeave={hideSidebarTooltip}
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -604,7 +661,9 @@ export function Layout({
               <Link
                 to="/records"
                 className={`menu-item ${!sidebarOpen && !mobileNavOpen ? "menu-item-icon-only" : ""} ${isActive("/records") ? "active" : ""}`}
-                title={!sidebarOpen ? "Records" : undefined}
+                aria-label="Records"
+                onMouseEnter={(e) => showSidebarTooltip("Records", e)}
+                onMouseLeave={hideSidebarTooltip}
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -628,7 +687,9 @@ export function Layout({
                 <Link
                   to="/modules"
                   className={`menu-item ${!sidebarOpen && !mobileNavOpen ? "menu-item-icon-only" : ""} ${isActive("/modules") ? "active" : ""}`}
-                  title={!sidebarOpen ? "Templates" : undefined}
+                  aria-label="Templates"
+                  onMouseEnter={(e) => showSidebarTooltip("Templates", e)}
+                  onMouseLeave={hideSidebarTooltip}
                 >
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
@@ -654,7 +715,9 @@ export function Layout({
                 <Link
                   to="/workflows"
                   className={`menu-item ${!sidebarOpen && !mobileNavOpen ? "menu-item-icon-only" : ""} ${isActive("/workflows") ? "active" : ""}`}
-                  title={!sidebarOpen ? "Workflows" : undefined}
+                  aria-label="Workflows"
+                  onMouseEnter={(e) => showSidebarTooltip("Workflows", e)}
+                  onMouseLeave={hideSidebarTooltip}
                 >
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
@@ -677,7 +740,9 @@ export function Layout({
               <Link
                 to={USERS_NAV.route}
                 className={`menu-item ${!sidebarOpen && !mobileNavOpen ? "menu-item-icon-only" : ""} ${isActive(USERS_NAV.route) ? "active" : ""}`}
-                title={!sidebarOpen ? USERS_NAV.label : undefined}
+                aria-label={USERS_NAV.label}
+                onMouseEnter={(e) => showSidebarTooltip(USERS_NAV.label, e)}
+                onMouseLeave={hideSidebarTooltip}
               >
                 {USERS_NAV.icon}
                 {(sidebarOpen || mobileNavOpen) && (
@@ -691,7 +756,9 @@ export function Layout({
               <Link
                 to="/settings"
                 className={`menu-item ${!sidebarOpen && !mobileNavOpen ? "menu-item-icon-only" : ""} ${isActive("/settings") ? "active" : ""}`}
-                title={!sidebarOpen ? "Settings" : undefined}
+                aria-label="Settings"
+                onMouseEnter={(e) => showSidebarTooltip("Settings", e)}
+                onMouseLeave={hideSidebarTooltip}
               >
                 {SETTINGS_NAV.icon}
                 {(sidebarOpen || mobileNavOpen) && <span>Settings</span>}
@@ -700,7 +767,9 @@ export function Layout({
                 type="button"
                 onClick={handleLogout}
                 className={`menu-item sidebar-logout ${!sidebarOpen && !mobileNavOpen ? "menu-item-icon-only" : ""}`}
-                title={!sidebarOpen ? "Sign out" : undefined}
+                aria-label="Sign out"
+                onMouseEnter={(e) => showSidebarTooltip("Sign out", e)}
+                onMouseLeave={hideSidebarTooltip}
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -721,6 +790,7 @@ export function Layout({
           </aside>
           <main className="main-content">{children}</main>
         </div>
+        <SidebarTooltip tooltip={tooltip} />
       </div>
     );
   }
@@ -754,7 +824,9 @@ export function Layout({
                 key={item.route}
                 to={item.route}
                 className={`menu-item ${!sidebarOpen && !mobileNavOpen ? "menu-item-icon-only" : ""} ${isActive(item.route) ? "active" : ""}`}
-                title={!sidebarOpen ? item.label : undefined}
+                aria-label={item.label}
+                onMouseEnter={(e) => showSidebarTooltip(item.label, e)}
+                onMouseLeave={hideSidebarTooltip}
               >
                 {item.icon}
                 {(sidebarOpen || mobileNavOpen) && <span>{item.label}</span>}
@@ -768,7 +840,9 @@ export function Layout({
             <Link
               to={SETTINGS_NAV.route}
               className={`menu-item ${!sidebarOpen && !mobileNavOpen ? "menu-item-icon-only" : ""} ${isActive(SETTINGS_NAV.route) ? "active" : ""}`}
-              title={!sidebarOpen ? SETTINGS_NAV.label : undefined}
+              aria-label={SETTINGS_NAV.label}
+              onMouseEnter={(e) => showSidebarTooltip(SETTINGS_NAV.label, e)}
+              onMouseLeave={hideSidebarTooltip}
             >
               {SETTINGS_NAV.icon}
               {sidebarOpen && <span>{SETTINGS_NAV.label}</span>}
@@ -778,7 +852,9 @@ export function Layout({
               type="button"
               onClick={handleLogout}
               className={`menu-item sidebar-logout ${!sidebarOpen && !mobileNavOpen ? "menu-item-icon-only" : ""}`}
-              title={!sidebarOpen ? "Sign out" : undefined}
+              aria-label="Sign out"
+              onMouseEnter={(e) => showSidebarTooltip("Sign out", e)}
+              onMouseLeave={hideSidebarTooltip}
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -799,6 +875,7 @@ export function Layout({
         </aside>
         <main className="main-content">{children}</main>
       </div>
+      <SidebarTooltip tooltip={tooltip} />
     </div>
   );
 }

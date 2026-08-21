@@ -2,8 +2,15 @@ import { zValidator } from "../../lib/validator.js";
 import { z } from "zod";
 import { eq, and, inArray, isNull } from "drizzle-orm";
 import { requireAuth, requireRole } from "@platform/auth";
-import { files, tenantUsers, withTenantContext } from "@platform/db";
+import {
+  files,
+  outboxEvents,
+  tenantUsers,
+  workflowEvents,
+  withTenantContext,
+} from "@platform/db";
 import { createEntity } from "@platform/entity-engine";
+import { logger } from "@platform/logger";
 import { factory } from "./factory.js";
 import { handleEntityError } from "../../lib/handle-entity-error.js";
 import { listUserIdsWithRole } from "../../lib/authnexus-management.js";
@@ -140,6 +147,63 @@ export const createEntityHandler = factory.createHandlers(
               ),
             ),
         );
+      }
+
+      // The create form's Remark field is mandatory and is presented to the
+      // user as "this becomes the first comment" — post it as a real comment
+      // (workflow_events, type "comment") rather than only storing it on the
+      // instance, so it actually shows up in the Comments tab/feed like any
+      // other comment. Best-effort: a failure here must not fail ticket
+      // creation itself, which has already committed by this point.
+      const remark = input.remark?.trim();
+      if (remark && instance.workflowId) {
+        try {
+          const [commentEvent] = await withTenantContext(tenantId, (tx) =>
+            tx
+              .insert(workflowEvents)
+              .values({
+                tenantId,
+                instanceId: instance.id,
+                workflowId: instance.workflowId as string,
+                fromState: instance.currentState,
+                toState: instance.currentState,
+                triggeredBy: "user",
+                actorId: userId,
+                comment: null,
+                metadata: {
+                  type: "comment",
+                  text: remark,
+                  mentions: [],
+                  replyTo: null,
+                  actorName,
+                },
+              })
+              .returning(),
+          );
+
+          if (commentEvent) {
+            await withTenantContext(tenantId, (tx) =>
+              tx.insert(outboxEvents).values({
+                tenantId,
+                eventType: "comment.created",
+                version: 1,
+                payload: {
+                  eventType: "comment.created",
+                  version: 1,
+                  tenantId,
+                  instanceId: instance.id,
+                  actorId: userId,
+                  commentId: commentEvent.id,
+                },
+              }),
+            );
+          }
+        } catch (remarkErr) {
+          logger.error(
+            { remarkErr, tenantId, instanceId: instance.id },
+            "create-entity: failed to post remark as first comment",
+          );
+        }
       }
 
       return c.json({ data: instance }, 201);

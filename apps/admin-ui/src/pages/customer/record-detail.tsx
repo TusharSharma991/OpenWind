@@ -112,6 +112,17 @@ type LinkedTicket = {
   targetCreatedBy: string | null;
   deleted: boolean;
 };
+// A user-added "title -> URL" reference link (e.g. the ERP record, a shared
+// doc) — apps/api/src/routes/entities/{list,create,delete}-link.ts,
+// entity_links table. Distinct from LinkedTicket above, which cross-links
+// two tickets in this platform.
+type TicketLink = {
+  id: string;
+  title: string;
+  url: string;
+  createdBy: string;
+  createdAt: string;
+};
 type LinkCandidate = {
   id: string;
   workflowId: string;
@@ -559,10 +570,14 @@ function CommentComposer({
       <div className="cmt-composer-footer">
         <span className="cmt-hint">@ mention · Ctrl+Enter to post</span>
         <div className="cmt-footer-actions">
-          <label className="cmt-attach-btn" title="Attach files">
+          <label
+            className="cmt-attach-btn cmt-icon-btn"
+            title="Attach files"
+            aria-label="Attach files"
+          >
             <svg
-              width="13"
-              height="13"
+              width="14"
+              height="14"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -572,7 +587,6 @@ function CommentComposer({
             >
               <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
             </svg>
-            <span>Attach</span>
             <input
               type="file"
               multiple
@@ -586,33 +600,30 @@ function CommentComposer({
               }}
             />
           </label>
-          <div className="cmt-footer-sep" />
           <button
             type="button"
-            className="portal-btn-primary cmt-post-btn"
+            className="cmt-icon-btn cmt-post-btn"
             disabled={!text.trim() || submitting || pendingCount > 0}
-            title={pendingCount > 0 ? "Waiting for file scan…" : undefined}
+            title={pendingCount > 0 ? "Waiting for file scan…" : "Post comment"}
+            aria-label="Post comment"
             onClick={() => void handleSubmit()}
           >
             {submitting ? (
-              "Posting…"
+              <span className="cmt-post-spinner" />
             ) : (
-              <>
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <line x1="22" y1="2" x2="11" y2="13" />
-                  <polygon points="22 2 15 22 11 13 2 9 22 2" />
-                </svg>
-                Post
-              </>
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <line x1="22" y1="2" x2="11" y2="13" />
+                <polygon points="22 2 15 22 11 13 2 9 22 2" />
+              </svg>
             )}
           </button>
         </div>
@@ -1203,8 +1214,18 @@ export function CustomerRecordDetail(): React.ReactElement {
   const [currentState, setCurrentState] = useState("");
   const [users, setUsers] = useState<OrgUser[]>([]);
   const [detailsExpanded, setDetailsExpanded] = useState(false);
+  // Access sidebar starts folded to reclaim width for the activity card
+  // (which grew a 5th/6th tab once Attachments/Sub-tasks/Linked moved in) —
+  // folded shows just each person's avatar circle, click anywhere to expand.
+  const [accessCollapsed, setAccessCollapsed] = useState(true);
   const [activeTab, setActiveTab] = useState<
-    "comments" | "history" | "subtasks" | "linked" | "access-requests"
+    | "comments"
+    | "history"
+    | "subtasks"
+    | "linked"
+    | "attachments"
+    | "links"
+    | "access-requests"
   >("comments");
   const [quickAssigning, setQuickAssigning] = useState(false);
   const [quickSettingDueDate, setQuickSettingDueDate] = useState(false);
@@ -1247,6 +1268,16 @@ export function CustomerRecordDetail(): React.ReactElement {
   const [attachmentsLoading, setAttachmentsLoading] = useState(false);
   const [previewFile, setPreviewFile] = useState<AttachmentFile | null>(null);
   const [attachUploading, setAttachUploading] = useState(false);
+  const [links, setLinks] = useState<TicketLink[]>([]);
+  const [linksLoading, setLinksLoading] = useState(false);
+  const [addingLink, setAddingLink] = useState(false);
+  const [newLinkTitle, setNewLinkTitle] = useState("");
+  const [newLinkUrl, setNewLinkUrl] = useState("");
+  // "ref" to distinguish from the pre-existing `linkError` state used by the
+  // cross-ticket Linked tab further down this file — different feature,
+  // same natural name.
+  const [refLinkError, setRefLinkError] = useState<string | null>(null);
+  const [deletingLinkId, setDeletingLinkId] = useState<string | null>(null);
   const [manualRefreshing, setManualRefreshing] = useState(false);
 
   // Child tickets state
@@ -1699,6 +1730,7 @@ export function CustomerRecordDetail(): React.ReactElement {
         loadRecord(),
         refreshComments(),
         refreshAttachments(),
+        refreshLinks(),
         loadChildren(),
         historyLoaded ? refreshHistory() : Promise.resolve(),
       ]);
@@ -1814,6 +1846,71 @@ export function CustomerRecordDetail(): React.ReactElement {
       /* best-effort */
     } finally {
       setAttachmentsLoading(false);
+    }
+  }
+
+  async function refreshLinks(): Promise<void> {
+    if (!id) return;
+    setLinksLoading(true);
+    try {
+      const res = (await fetchWithAuth(`${API_URL}/entities/${id}/links`)) as {
+        data: TicketLink[];
+      };
+      setLinks(res.data);
+    } catch {
+      /* best-effort */
+    } finally {
+      setLinksLoading(false);
+    }
+  }
+
+  async function addLink(): Promise<void> {
+    if (!id) return;
+    const title = newLinkTitle.trim();
+    const url = newLinkUrl.trim();
+    if (!title || !url) {
+      setRefLinkError("Both a title and a URL are required.");
+      return;
+    }
+    setAddingLink(true);
+    setRefLinkError(null);
+    try {
+      await fetchWithAuth(`${API_URL}/entities/${id}/links`, {
+        method: "POST",
+        body: JSON.stringify({ title, url }),
+      });
+      setNewLinkTitle("");
+      setNewLinkUrl("");
+      await Promise.all([
+        refreshLinks(),
+        historyLoaded ? refreshHistory() : Promise.resolve(),
+      ]);
+    } catch (err) {
+      setRefLinkError(
+        err instanceof Error ? err.message : "Failed to add link",
+      );
+    } finally {
+      setAddingLink(false);
+    }
+  }
+
+  async function removeLink(linkId: string): Promise<void> {
+    if (!id) return;
+    setDeletingLinkId(linkId);
+    try {
+      await fetchWithAuth(`${API_URL}/entities/${id}/links/${linkId}`, {
+        method: "DELETE",
+      });
+      await Promise.all([
+        refreshLinks(),
+        historyLoaded ? refreshHistory() : Promise.resolve(),
+      ]);
+    } catch (err) {
+      setRefLinkError(
+        err instanceof Error ? err.message : "Failed to remove link",
+      );
+    } finally {
+      setDeletingLinkId(null);
     }
   }
 
@@ -2418,6 +2515,7 @@ export function CustomerRecordDetail(): React.ReactElement {
     setHistoryEvents([]);
     setHistoryLoaded(false);
     setAttachments([]);
+    setLinks([]);
     setParentRecord(null);
     setAccessDenied(false);
     setError(null);
@@ -2425,6 +2523,7 @@ export function CustomerRecordDetail(): React.ReactElement {
     void loadRecord().then(() => {
       void loadComments();
       void refreshAttachments();
+      void refreshLinks();
     });
   }, [id]);
 
@@ -2979,6 +3078,12 @@ export function CustomerRecordDetail(): React.ReactElement {
       meta?.type === "link_removed" || meta?.type === "reference_removed";
     const isFileDeleted = meta?.type === "file_deleted";
     const isFileDownloaded = meta?.type === "file_downloaded";
+    // Title/URL reference links (Links tab, entity_links table) — distinct
+    // from isLinkCreated/isLinkRemoved above, which cover cross-ticket
+    // relations (a different feature/metadata shape) and already own the
+    // "link_created"/"link_removed" type strings.
+    const isRefLinkAdded = meta?.type === "reference_link_added";
+    const isRefLinkRemoved = meta?.type === "reference_link_removed";
 
     if (isComment) {
       return (
@@ -3126,6 +3231,53 @@ export function CustomerRecordDetail(): React.ReactElement {
           <div className="rcd-feed-event-body">
             <span className="rcd-feed-event-text">
               <strong>{actor}</strong> {fileVerb} <strong>{fileName}</strong>
+            </span>
+            <div className="rcd-feed-event-time">
+              {new Date(event.triggeredAt).toLocaleString(undefined, {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (isRefLinkAdded || isRefLinkRemoved) {
+      const actor = resolveActorName(event.actorDisplayName, event.actorId);
+      const linkTitle = String(
+        (meta as Record<string, unknown>)["title"] ?? "a link",
+      );
+      return (
+        <div key={event.id} className="rcd-feed-event">
+          <div className="rcd-feed-event-icon-wrap">
+            <div
+              className={`rcd-tl-icon ${isRefLinkRemoved ? "rcd-tl-icon-update" : "rcd-tl-icon-create"}`}
+            >
+              <svg
+                width="11"
+                height="11"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
+                <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
+              </svg>
+            </div>
+            <div className="rcd-feed-event-line" />
+          </div>
+          <div className="rcd-feed-event-body">
+            <span className="rcd-feed-event-text">
+              <strong>{actor}</strong>{" "}
+              {isRefLinkRemoved ? "removed the link" : "added a link"}{" "}
+              <strong>{linkTitle}</strong>
             </span>
             <div className="rcd-feed-event-time">
               {new Date(event.triggeredAt).toLocaleString(undefined, {
@@ -3811,182 +3963,6 @@ export function CustomerRecordDetail(): React.ReactElement {
                       </p>
                     )}
                   </div>
-                  {/* ── Attachments ─────────────────────────── */}
-                  <div className="rcd-expand-attachments">
-                    <div className="rcd-expand-attachments-hdr">
-                      <span className="rcd-expand-attachments-title">
-                        Attachments
-                        {attachments.filter((a) => a.scanStatus !== "deleted")
-                          .length > 0 && (
-                          <span className="rcd-sidebar-count">
-                            {
-                              attachments.filter(
-                                (a) => a.scanStatus !== "deleted",
-                              ).length
-                            }
-                          </span>
-                        )}
-                      </span>
-                    </div>
-                    {attachmentsLoading ? (
-                      <p className="rcd-sidebar-hint">Loading…</p>
-                    ) : attachments.filter((a) => a.scanStatus !== "deleted")
-                        .length > 0 ? (
-                      <FileCardRow
-                        files={attachments.filter(
-                          (a) => a.scanStatus !== "deleted",
-                        )}
-                        onPreview={setPreviewFile}
-                        canDelete={(file) =>
-                          !!(
-                            currentUserRoles.includes("admin") ||
-                            currentUserRoles.includes("agent") ||
-                            file.uploadedBy === currentUserId
-                          )
-                        }
-                        onDelete={(fileId) => {
-                          void (async () => {
-                            try {
-                              await fetchWithAuth(
-                                `${API_URL}/entities/${id}/attachments/${fileId}`,
-                                { method: "DELETE" },
-                              );
-                              await Promise.all([
-                                refreshAttachments(),
-                                refreshHistory(),
-                              ]);
-                            } catch (err) {
-                              setTransError(
-                                err instanceof Error
-                                  ? err.message
-                                  : "Delete failed",
-                              );
-                            }
-                          })();
-                        }}
-                      />
-                    ) : null}
-                    {(() => {
-                      const accessMap = (
-                        record.fields as Record<string, unknown>
-                      ).__accessUsers as
-                        | Record<string, { level: string }>
-                        | undefined;
-                      const hasWriteAccess =
-                        currentUserRoles.includes("admin") ||
-                        currentUserRoles.includes("agent") ||
-                        accessMap?.[currentUserId ?? ""]?.level ===
-                          "read_write" ||
-                        record.createdBy === currentUserId ||
-                        record.assignedTo === currentUserId;
-                      return hasWriteAccess;
-                    })() && (
-                      <AttachmentUploadZone
-                        disabled={attachUploading}
-                        onFiles={async (files) => {
-                          setAttachUploading(true);
-                          for (const file of files) {
-                            try {
-                              const ext =
-                                file.name.split(".").pop()?.toLowerCase() ?? "";
-                              const EXT_MIME: Record<string, string> = {
-                                docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                doc: "application/msword",
-                                xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                xls: "application/vnd.ms-excel",
-                                pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                                ppt: "application/vnd.ms-powerpoint",
-                                pdf: "application/pdf",
-                                txt: "text/plain",
-                                csv: "text/csv",
-                                json: "application/json",
-                                png: "image/png",
-                                jpg: "image/jpeg",
-                                jpeg: "image/jpeg",
-                                gif: "image/gif",
-                                webp: "image/webp",
-                                zip: "application/zip",
-                              };
-                              const mimeType =
-                                file.type !== ""
-                                  ? file.type
-                                  : (EXT_MIME[ext] ??
-                                    "application/octet-stream");
-                              const DOC_MIMES_ATTACH = new Set([
-                                "application/pdf",
-                                "application/msword",
-                                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                "application/vnd.ms-excel",
-                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                "application/vnd.ms-powerpoint",
-                                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                                "application/zip",
-                                "application/x-zip-compressed",
-                              ]);
-                              if (
-                                DOC_MIMES_ATTACH.has(mimeType) &&
-                                file.size < 1024
-                              ) {
-                                showAlert(
-                                  `"${file.name}" appears to be a cloud placeholder (${file.size} B) that hasn't been downloaded yet.\n\nIn File Explorer, right-click → "Always keep on this device", wait for it to download, then try again.`,
-                                );
-                                continue;
-                              }
-                              // file.type is often "" for cloud-synced files
-                              // (OneDrive placeholders, some Windows drag-drops)
-                              // — fall back to the extension-derived mimeType
-                              // so the server's MIME allowlist check passes.
-                              const uploadFile =
-                                file.type !== ""
-                                  ? file
-                                  : new File([file], file.name, {
-                                      type: mimeType,
-                                    });
-                              const form = new FormData();
-                              form.set("file", uploadFile, file.name);
-                              form.set("moduleSlug", typeSlug ?? "unknown");
-                              if (id) form.set("entityId", id);
-                              const uploadRes = (await fetchWithAuth(
-                                `${API_URL}/files`,
-                                { method: "POST", body: form },
-                              )) as { data: { fileId: string } };
-
-                              // POST /entities/:id/attachments — which writes
-                              // the "file_attached" history event — requires
-                              // scan_status to be "clean" already, but the AV
-                              // scan runs async right after upload. Without
-                              // waiting for it here, this call 422s immediately
-                              // (FILE_NOT_READY) and the attach/timeline event
-                              // silently never gets written, even though the
-                              // file itself already shows up in the attachment
-                              // list (that list is driven by files.entityId,
-                              // bound at upload time, independent of this call).
-                              const finalStatus = await pollFileScanStatus(
-                                uploadRes.data.fileId,
-                              );
-                              if (finalStatus === "clean") {
-                                await fetchWithAuth(
-                                  `${API_URL}/entities/${id}/attachments`,
-                                  {
-                                    method: "POST",
-                                    body: JSON.stringify({
-                                      fileId: uploadRes.data.fileId,
-                                    }),
-                                  },
-                                );
-                              }
-                            } catch (err) {
-                              setTransError(
-                                `Upload failed: ${err instanceof Error ? err.message : "Unknown error"}`,
-                              );
-                            }
-                          }
-                          setAttachUploading(false);
-                          await refreshAttachments();
-                        }}
-                      />
-                    )}
-                  </div>
                 </>
               )}
             </div>
@@ -4029,6 +4005,56 @@ export function CustomerRecordDetail(): React.ReactElement {
               Comments
               {commentEvents.length > 0 && (
                 <span className="rcd-tab-count">{commentEvents.length}</span>
+              )}
+            </button>
+            <button
+              type="button"
+              className={`rcd-tab ${activeTab === "attachments" ? "rcd-tab-active" : ""}`}
+              onClick={() => setActiveTab("attachments")}
+            >
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
+              </svg>
+              Attachments
+              {attachments.filter((a) => a.scanStatus !== "deleted").length >
+                0 && (
+                <span className="rcd-tab-count">
+                  {attachments.filter((a) => a.scanStatus !== "deleted").length}
+                </span>
+              )}
+            </button>
+            <button
+              type="button"
+              className={`rcd-tab ${activeTab === "links" ? "rcd-tab-active" : ""}`}
+              onClick={() => setActiveTab("links")}
+            >
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
+                <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
+              </svg>
+              Links
+              {links.length > 0 && (
+                <span className="rcd-tab-count">{links.length}</span>
               )}
             </button>
             <button
@@ -4597,6 +4623,287 @@ export function CustomerRecordDetail(): React.ReactElement {
                   </div>
                 )}
               </div>
+            ) : activeTab === "attachments" ? (
+              <div className="rcd-tab-scroll">
+                <div className="rcd-expand-attachments">
+                  {attachmentsLoading ? (
+                    <p className="rcd-sidebar-hint">Loading…</p>
+                  ) : attachments.filter((a) => a.scanStatus !== "deleted")
+                      .length > 0 ? (
+                    <FileCardRow
+                      files={attachments.filter(
+                        (a) => a.scanStatus !== "deleted",
+                      )}
+                      onPreview={setPreviewFile}
+                      canDelete={(file) =>
+                        !!(
+                          currentUserRoles.includes("admin") ||
+                          currentUserRoles.includes("agent") ||
+                          file.uploadedBy === currentUserId
+                        )
+                      }
+                      onDelete={(fileId) => {
+                        void (async () => {
+                          try {
+                            await fetchWithAuth(
+                              `${API_URL}/entities/${id}/attachments/${fileId}`,
+                              { method: "DELETE" },
+                            );
+                            await Promise.all([
+                              refreshAttachments(),
+                              refreshHistory(),
+                            ]);
+                          } catch (err) {
+                            setTransError(
+                              err instanceof Error
+                                ? err.message
+                                : "Delete failed",
+                            );
+                          }
+                        })();
+                      }}
+                    />
+                  ) : (
+                    <p className="rcd-empty-hint rcd-empty-hint-feed">
+                      No attachments yet.
+                    </p>
+                  )}
+                  {(() => {
+                    const accessMap = (record.fields as Record<string, unknown>)
+                      .__accessUsers as
+                      | Record<string, { level: string }>
+                      | undefined;
+                    const hasWriteAccess =
+                      currentUserRoles.includes("admin") ||
+                      currentUserRoles.includes("agent") ||
+                      accessMap?.[currentUserId ?? ""]?.level ===
+                        "read_write" ||
+                      record.createdBy === currentUserId ||
+                      record.assignedTo === currentUserId;
+                    return hasWriteAccess;
+                  })() && (
+                    <AttachmentUploadZone
+                      disabled={attachUploading}
+                      onFiles={async (files) => {
+                        setAttachUploading(true);
+                        for (const file of files) {
+                          try {
+                            const ext =
+                              file.name.split(".").pop()?.toLowerCase() ?? "";
+                            const EXT_MIME: Record<string, string> = {
+                              docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                              doc: "application/msword",
+                              xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                              xls: "application/vnd.ms-excel",
+                              pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                              ppt: "application/vnd.ms-powerpoint",
+                              pdf: "application/pdf",
+                              txt: "text/plain",
+                              csv: "text/csv",
+                              json: "application/json",
+                              png: "image/png",
+                              jpg: "image/jpeg",
+                              jpeg: "image/jpeg",
+                              gif: "image/gif",
+                              webp: "image/webp",
+                              zip: "application/zip",
+                            };
+                            const mimeType =
+                              file.type !== ""
+                                ? file.type
+                                : (EXT_MIME[ext] ?? "application/octet-stream");
+                            const DOC_MIMES_ATTACH = new Set([
+                              "application/pdf",
+                              "application/msword",
+                              "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                              "application/vnd.ms-excel",
+                              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                              "application/vnd.ms-powerpoint",
+                              "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                              "application/zip",
+                              "application/x-zip-compressed",
+                            ]);
+                            if (
+                              DOC_MIMES_ATTACH.has(mimeType) &&
+                              file.size < 1024
+                            ) {
+                              showAlert(
+                                `"${file.name}" appears to be a cloud placeholder (${file.size} B) that hasn't been downloaded yet.\n\nIn File Explorer, right-click → "Always keep on this device", wait for it to download, then try again.`,
+                              );
+                              continue;
+                            }
+                            // file.type is often "" for cloud-synced files
+                            // (OneDrive placeholders, some Windows drag-drops)
+                            // — fall back to the extension-derived mimeType
+                            // so the server's MIME allowlist check passes.
+                            const uploadFile =
+                              file.type !== ""
+                                ? file
+                                : new File([file], file.name, {
+                                    type: mimeType,
+                                  });
+                            const form = new FormData();
+                            form.set("file", uploadFile, file.name);
+                            form.set("moduleSlug", typeSlug ?? "unknown");
+                            if (id) form.set("entityId", id);
+                            const uploadRes = (await fetchWithAuth(
+                              `${API_URL}/files`,
+                              { method: "POST", body: form },
+                            )) as { data: { fileId: string } };
+
+                            // POST /entities/:id/attachments — which writes
+                            // the "file_attached" history event — requires
+                            // scan_status to be "clean" already, but the AV
+                            // scan runs async right after upload. Without
+                            // waiting for it here, this call 422s immediately
+                            // (FILE_NOT_READY) and the attach/timeline event
+                            // silently never gets written, even though the
+                            // file itself already shows up in the attachment
+                            // list (that list is driven by files.entityId,
+                            // bound at upload time, independent of this call).
+                            const finalStatus = await pollFileScanStatus(
+                              uploadRes.data.fileId,
+                            );
+                            if (finalStatus === "clean") {
+                              await fetchWithAuth(
+                                `${API_URL}/entities/${id}/attachments`,
+                                {
+                                  method: "POST",
+                                  body: JSON.stringify({
+                                    fileId: uploadRes.data.fileId,
+                                  }),
+                                },
+                              );
+                            }
+                          } catch (err) {
+                            setTransError(
+                              `Upload failed: ${err instanceof Error ? err.message : "Unknown error"}`,
+                            );
+                          }
+                        }
+                        setAttachUploading(false);
+                        await refreshAttachments();
+                      }}
+                    />
+                  )}
+                </div>
+              </div>
+            ) : activeTab === "links" ? (
+              <div className="rcd-tab-scroll">
+                <div className="rcd-links-list">
+                  {linksLoading ? (
+                    <p className="rcd-sidebar-hint">Loading…</p>
+                  ) : links.length === 0 ? (
+                    <p className="rcd-empty-hint rcd-empty-hint-feed">
+                      No links yet.
+                    </p>
+                  ) : (
+                    links.map((link) => {
+                      // Mirrors delete-link.ts's server-side rule: the
+                      // adder, the ticket's own creator/assignee, or an
+                      // admin/agent (workflow-admin is also allowed
+                      // server-side but isn't checked client-side, same as
+                      // the Attachments tab's equivalent button above).
+                      const canRemoveLink =
+                        currentUserRoles.includes("admin") ||
+                        currentUserRoles.includes("agent") ||
+                        link.createdBy === currentUserId ||
+                        record.createdBy === currentUserId ||
+                        record.assignedTo === currentUserId;
+                      return (
+                        <div key={link.id} className="rcd-link-row">
+                          <span className="rcd-link-icon" aria-hidden="true">
+                            <svg
+                              width="14"
+                              height="14"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
+                              <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
+                            </svg>
+                          </span>
+                          <a
+                            href={link.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="rcd-link-main"
+                            title={link.url}
+                          >
+                            <span className="rcd-link-title">{link.title}</span>
+                            <span className="rcd-link-url">{link.url}</span>
+                          </a>
+                          {canRemoveLink && (
+                            <button
+                              type="button"
+                              className="rcd-link-remove"
+                              disabled={deletingLinkId === link.id}
+                              title="Remove link"
+                              aria-label="Remove link"
+                              onClick={() => void removeLink(link.id)}
+                            >
+                              {deletingLinkId === link.id ? "…" : "×"}
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+                {refLinkError && (
+                  <p
+                    className="portal-alert-error"
+                    style={{ margin: "10px 0 0" }}
+                  >
+                    {refLinkError}
+                  </p>
+                )}
+                {(() => {
+                  const accessMap = (record.fields as Record<string, unknown>)
+                    .__accessUsers as
+                    | Record<string, { level: string }>
+                    | undefined;
+                  const hasWriteAccess =
+                    currentUserRoles.includes("admin") ||
+                    currentUserRoles.includes("agent") ||
+                    accessMap?.[currentUserId ?? ""]?.level === "read_write" ||
+                    record.createdBy === currentUserId ||
+                    record.assignedTo === currentUserId;
+                  return hasWriteAccess;
+                })() && (
+                  <div className="rcd-link-add">
+                    <input
+                      type="text"
+                      className="portal-input"
+                      placeholder="Title (e.g. ERP record)"
+                      value={newLinkTitle}
+                      onChange={(e) => setNewLinkTitle(e.target.value)}
+                    />
+                    <input
+                      type="url"
+                      className="portal-input"
+                      placeholder="https://…"
+                      value={newLinkUrl}
+                      onChange={(e) => setNewLinkUrl(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") void addLink();
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="portal-btn-primary"
+                      disabled={addingLink}
+                      onClick={() => void addLink()}
+                    >
+                      {addingLink ? "Adding…" : "Add link"}
+                    </button>
+                  </div>
+                )}
+              </div>
             ) : (
               <div className="rcd-tab-scroll">
                 {!accessReqLoaded ? (
@@ -4665,49 +4972,148 @@ export function CustomerRecordDetail(): React.ReactElement {
         {/* close rcd-activity-card */}
 
         {/* ── Right sidebar ──────────────────────────────── */}
-        <div className="rcd-sidebar">
-          {/* People with access — always visible */}
-          <div className="rcd-sidebar-section">
-            <div className="rcd-sidebar-hdr">
-              <span className="rcd-sidebar-hdr-title">
-                Access
-                {accessUsers.length > 0 && (
-                  <span className="rcd-sidebar-count">
-                    {accessUsers.length}
+        <div
+          className={`rcd-sidebar ${accessCollapsed ? "rcd-sidebar-collapsed" : ""}`}
+        >
+          {accessCollapsed ? (
+            <button
+              type="button"
+              className="rcd-sidebar-section rcd-access-folded"
+              onClick={() => setAccessCollapsed(false)}
+              title="Expand access list"
+              aria-label="Expand access list"
+              aria-expanded={false}
+            >
+              <span className="rcd-access-folded-icon">
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
+                  <circle cx="9" cy="7" r="4" />
+                  <path d="M23 21v-2a4 4 0 00-3-3.87" />
+                  <path d="M16 3.13a4 4 0 010 7.75" />
+                </svg>
+              </span>
+              <span className="rcd-access-folded-expand-icon">
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <polyline points="15 18 9 12 15 6" />
+                </svg>
+              </span>
+              <div className="rcd-access-folded-avatars">
+                {accessUsers.map((u) => {
+                  const name = u.displayName ?? u.email;
+                  const initials = name
+                    .split(" ")
+                    .slice(0, 2)
+                    .map((p) => p[0] ?? "")
+                    .join("")
+                    .toUpperCase();
+                  return (
+                    <span
+                      key={u.userId}
+                      className="rcd-access-folded-avatar"
+                      style={{
+                        background:
+                          u.tag === "creator"
+                            ? "#7c3aed"
+                            : "var(--accent-color, #6366f1)",
+                      }}
+                      title={name}
+                    >
+                      {initials}
+                    </span>
+                  );
+                })}
+                {accessUsers.length === 0 && (
+                  <span className="rcd-sidebar-hint" style={{ padding: 0 }}>
+                    —
                   </span>
                 )}
-              </span>
-            </div>
-            <div className="rcd-sidebar-body">
-              {accessUsers.length === 0 ? (
-                <p className="rcd-sidebar-hint" style={{ padding: "8px 0" }}>
-                  No one has access yet.
-                </p>
-              ) : (
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "6px",
-                  }}
+              </div>
+            </button>
+          ) : (
+            <div className="rcd-sidebar-section">
+              <div className="rcd-sidebar-hdr">
+                <span className="rcd-sidebar-hdr-title">
+                  Access
+                  {accessUsers.length > 0 && (
+                    <span className="rcd-sidebar-count">
+                      {accessUsers.length}
+                    </span>
+                  )}
+                </span>
+                <button
+                  type="button"
+                  className="rcd-access-collapse-btn"
+                  onClick={() => setAccessCollapsed(true)}
+                  title="Collapse access list"
+                  aria-label="Collapse access list"
+                  aria-expanded={true}
                 >
-                  {accessUsers.map((u) => (
-                    <AccessUserRow
-                      key={u.userId}
-                      user={u}
-                      isAdminOrAgent={isAdminOrAgent}
-                      isRecordDeleted={!!record.deletedAt}
-                      onChangeAccess={(payload) => {
-                        setAccessChangeModal(payload);
-                        setAccessChangeSelection(payload.currentLevel);
-                      }}
-                    />
-                  ))}
-                </div>
-              )}
+                  <svg
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <polyline points="9 18 15 12 9 6" />
+                  </svg>
+                </button>
+              </div>
+              <div className="rcd-sidebar-body">
+                {accessUsers.length === 0 ? (
+                  <p className="rcd-sidebar-hint" style={{ padding: "8px 0" }}>
+                    No one has access yet.
+                  </p>
+                ) : (
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "6px",
+                    }}
+                  >
+                    {accessUsers.map((u) => (
+                      <AccessUserRow
+                        key={u.userId}
+                        user={u}
+                        isAdminOrAgent={isAdminOrAgent}
+                        isRecordDeleted={!!record.deletedAt}
+                        onChangeAccess={(payload) => {
+                          setAccessChangeModal(payload);
+                          setAccessChangeSelection(payload.currentLevel);
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+              {/* close rcd-sidebar-body */}
             </div>
-            {/* close rcd-sidebar-body */}
-          </div>
+          )}
         </div>
         {/* close rcd-sidebar */}
       </div>

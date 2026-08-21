@@ -43,6 +43,9 @@ import { createAlertHandler } from "./create-alert.js";
 import { listAlertsHandler } from "./list-alerts.js";
 import { updateAlertHandler } from "./update-alert.js";
 import { deleteAlertHandler } from "./delete-alert.js";
+import { listLinksHandler } from "./list-links.js";
+import { createLinkHandler } from "./create-link.js";
+import { deleteLinkHandler } from "./delete-link.js";
 
 const router = new Hono<{ Variables: { auth: AuthContext } }>();
 
@@ -96,6 +99,10 @@ router.patch("/:id/access-requests/:reqId", ...resolveAccessRequestHandler);
 router.get("/:id/attachments", ...listAttachmentsHandler);
 router.post("/:id/attachments", ...createAttachmentHandler);
 router.delete("/:id/attachments/:fileId", ...deleteAttachmentHandler);
+
+router.get("/:id/links", ...listLinksHandler);
+router.post("/:id/links", ...createLinkHandler);
+router.delete("/:id/links/:linkId", ...deleteLinkHandler);
 
 router.post("/:id/alerts", ...createAlertHandler);
 router.get("/:id/alerts", ...listAlertsHandler);

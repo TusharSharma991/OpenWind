@@ -204,6 +204,30 @@ h1, h2, h3, h4, h5, h6 {
   justify-content: center;
 }
 
+/* Collapsed-sidebar hover tooltip — rendered via a React portal to
+   document.body (see layout.tsx's SidebarTooltip), so this is positioned
+   with fixed top/left set inline from the hovered icon's bounding rect,
+   not by any ancestor here. */
+@keyframes sidebar-tooltip-in {
+  from { opacity: 0; transform: translateY(-50%) translateX(-4px); }
+  to { opacity: 1; transform: translateY(-50%) translateX(0); }
+}
+.sidebar-tooltip {
+  position: fixed;
+  transform: translateY(-50%);
+  background: var(--text-primary);
+  color: var(--bg-primary, #fff);
+  font-size: 12.5px;
+  font-weight: 500;
+  padding: 6px 11px;
+  border-radius: 7px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: var(--shadow-lg, 0 6px 16px rgba(0, 0, 0, 0.2));
+  z-index: 500;
+  animation: sidebar-tooltip-in 120ms ease-out;
+}
+
 /* Two classes, not one - .menu-item's own `padding: 12px 16px` (below) is
    the same specificity as a bare `.menu-item-icon-only`, so source order
    alone decided the winner and silently dropped this override. Compounding
@@ -3014,7 +3038,11 @@ select.form-input {
   padding: 14px 24px 0;
 }
 .rcd-two-col > .rcd-card.rcd-activity-card {
-  flex: 7;
+  /* flex:1 1 auto (not a fixed ratio like flex:7) so this card just fills
+     whatever width the sidebar isn't using — it never needs its own
+     flex-grow/basis transition, so there's nothing on this side to glitch
+     while the sidebar animates. */
+  flex: 1 1 auto;
   min-width: 0;
   /* Matches the sidebar's floor (3 sections x 160px min-height + 2 x 12px gap)
      so both columns share the same bottom edge when content is short; content
@@ -3024,12 +3052,109 @@ select.form-input {
 
 /* ── Right sidebar ── */
 .rcd-sidebar {
-  flex: 3;
+  /* flex-grow/flex-shrink stay 0 in BOTH the expanded and collapsed state —
+     only flex-basis differs between them (32% vs 56px below) and only
+     flex-basis transitions. Mixing an animated basis with a flex-grow that
+     changes discretely (e.g. 3 -> 0) is what caused the earlier bug: the
+     browser would momentarily resolve grow:0 against the old, still-large
+     basis (or vice versa) and the column would collapse to a few px before
+     snapping to its real target width. Locking grow/shrink at 0 the whole
+     time means basis is the only thing moving, so the transition is smooth
+     and never overshoots below min-width. */
+  flex: 0 0 32%;
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 12px;
   min-height: 504px;
+  transition: flex-basis 320ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Folded state: reclaim width for the activity card, which grew a 5th tab
+   (Attachments) — the sidebar becomes a narrow avatar-only rail. Only
+   flex-basis changes here (see the comment on .rcd-sidebar above) — no
+   flex-grow/shrink override, so the transition stays smooth in both
+   directions. */
+.rcd-sidebar-collapsed {
+  flex-basis: 56px;
+  min-height: 0;
+}
+.rcd-access-folded {
+  width: 100%;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 6px;
+  font: inherit;
+  color: inherit;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+.rcd-access-folded:hover {
+  border-color: var(--accent-primary);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md, var(--shadow-sm));
+}
+.rcd-access-folded:active { transform: translateY(0) scale(0.98); }
+.rcd-access-folded-icon {
+  color: var(--accent-primary);
+  background: var(--accent-light);
+  border-radius: 50%;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.rcd-access-folded-expand-icon {
+  color: var(--text-muted);
+  display: flex;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-color);
+  width: 100%;
+  justify-content: center;
+}
+.rcd-access-folded-avatars {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.rcd-access-folded-avatar {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+}
+.rcd-access-collapse-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.rcd-access-collapse-btn:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--border-color);
+  color: var(--text-primary);
 }
 
 .rcd-sidebar-section {
@@ -3369,20 +3494,21 @@ select.form-input {
 /* Comment composer file attachments */
 .cmt-staged-files { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 12px 0; }
 .cmt-file-chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 0; }
-.cmt-attach-btn {
+/* Shared circular icon-only button for the composer footer (Attach + Post) */
+.cmt-icon-btn {
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 0 12px;
-  height: 34px;
-  border: none;
-  background: transparent;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
   cursor: pointer;
   color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 500;
-  transition: background var(--transition-fast), color var(--transition-fast);
-  white-space: nowrap;
+  flex-shrink: 0;
+  padding: 0;
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
 }
 .cmt-attach-btn:hover { background: var(--bg-tertiary); color: var(--text-primary); }
 
@@ -4199,6 +4325,9 @@ select.form-input {
   .rcd-two-col > .rcd-card.rcd-activity-card { flex: none; height: 520px; }
   .rcd-sidebar { flex: none; height: auto; }
   .rcd-sidebar-section { flex: none; min-height: 200px; max-height: 320px; }
+  .rcd-sidebar.rcd-sidebar-collapsed { height: auto; }
+  .rcd-access-folded { flex-direction: row; padding: 8px 10px; }
+  .rcd-access-folded-avatars { flex-direction: row; flex-wrap: wrap; }
   /* the activity card is a real bounded 520px box here, so cap comments to
      fit inside it rather than the desktop 640px max */
   .rcd-comments-scroll { min-height: 0; max-height: none; }
@@ -4244,6 +4373,7 @@ select.form-input {
 .portal-table-row:hover td { background: var(--surface-2); }
 .portal-cell { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .portal-text-muted { color: var(--text-3); }
+.portal-field-hint { margin: 4px 0 0; font-size: 11.5px; color: var(--text-3); }
 .portal-state-badge { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 20px; font-size: 11.5px; font-weight: 500; background: var(--surface-2); color: var(--text-2); border: 1px solid var(--border); white-space: nowrap; }
 .portal-state-badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); flex-shrink: 0; }
 .portal-state-badge-sm { font-size: 11px; padding: 1px 7px; }
@@ -4321,6 +4451,81 @@ select.form-input {
   cursor: pointer; transition: background .15s, border-color .15s;
 }
 .rcd-areq-action-btn:hover { background: var(--bg-tertiary); border-color: var(--accent-primary); color: var(--accent-primary); }
+
+/* ── Links tab (entity_links — title/URL reference links) ────────────── */
+.rcd-links-list { display: flex; flex-direction: column; padding: 8px 0; }
+.rcd-link-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 18px;
+  border-bottom: 1px solid var(--border-color);
+}
+.rcd-link-row:last-child { border-bottom: none; }
+.rcd-link-icon {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent-light);
+  color: var(--accent-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.rcd-link-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  text-decoration: none;
+}
+.rcd-link-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rcd-link-main:hover .rcd-link-title { color: var(--accent-primary); }
+.rcd-link-url {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rcd-link-remove {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.rcd-link-remove:hover {
+  background: hsla(350, 80%, 55%, 0.1);
+  border-color: hsla(350, 80%, 55%, 0.3);
+  color: hsl(350, 70%, 50%);
+}
+.rcd-link-remove:disabled { opacity: 0.5; cursor: not-allowed; }
+.rcd-link-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border-color);
+}
+.rcd-link-add .portal-input { flex: 1; min-width: 160px; }
+.rcd-link-add .portal-btn-primary { flex-shrink: 0; }
 
 /* Resolve modal access level picker */
 .modal-access-opts { display: flex; flex-direction: column; gap: 8px; }
@@ -4676,29 +4881,25 @@ select.form-input {
 .cmt-footer-actions {
   display: flex;
   align-items: center;
-  gap: 0;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 7px;
-  overflow: hidden;
-  flex-shrink: 0;
-}
-.cmt-footer-sep {
-  width: 1px;
-  height: 20px;
-  background: var(--border-color);
+  gap: 8px;
   flex-shrink: 0;
 }
 .cmt-post-btn {
-  font-size: 12px;
-  padding: 6px 14px;
-  border-radius: 0;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  border: none;
-  height: 34px;
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: #fff;
 }
+.cmt-post-btn:hover:not(:disabled) { background: var(--accent-primary-hover, var(--accent-primary)); }
+.cmt-post-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.cmt-post-spinner {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: #fff;
+  animation: cmt-spin 700ms linear infinite;
+}
+@keyframes cmt-spin { to { transform: rotate(360deg); } }
 .cmt-empty { padding: 20px 16px; color: var(--text-muted); font-size: 13px; }
 
 /* ── Comment thread ─────────────────────────────────────────── */

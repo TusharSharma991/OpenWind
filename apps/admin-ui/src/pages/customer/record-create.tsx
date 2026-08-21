@@ -700,6 +700,9 @@ export function CustomerRecordCreate(): React.ReactElement {
               onChange={(e) => setRemark(e.target.value)}
               placeholder="Add any additional details…"
             />
+            <p className="portal-field-hint">
+              This will be posted as the first comment on the ticket.
+            </p>
           </div>
           <div className="portal-field-group">
             <label className="portal-field-label">Attachments</label>

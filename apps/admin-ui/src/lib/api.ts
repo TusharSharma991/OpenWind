@@ -77,9 +77,16 @@ export async function fetchWithAuth(
       message?: string;
       error?: string;
       meta?: Record<string, unknown>;
+      fields?: Array<{ field: string; code: string; message: string }>;
     };
+    // Zod validation errors (VALIDATION_ERROR) carry the useful detail in
+    // `fields`, not the generic top-level `message` ("Request validation
+    // failed") — surface the actual per-field reason when present so the UI
+    // doesn't show a meaningless "request failed" toast for e.g. a bad URL.
     const message =
-      body.message ?? body.error ?? `Request failed (${response.status})`;
+      body.fields && body.fields.length > 0
+        ? body.fields.map((f) => `${f.field}: ${f.message}`).join("; ")
+        : (body.message ?? body.error ?? `Request failed (${response.status})`);
 
     if (response.status === 401) {
       dispatchApiError(

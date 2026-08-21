@@ -175,3 +175,88 @@ describe("WorkflowRecords — workflow-admin ticket visibility", () => {
     expect(listCalls.every((url) => !url.includes("/my-tickets"))).toBe(true);
   });
 });
+
+// Regression: RecordCard picks its title preview from the first field (with
+// a value) in the fields list fetched from GET /entity-types/:id/fields.
+// That list used to be filtered to !isSystem, so an entity type whose ONLY
+// field is the auto-seeded "title" (isSystem:true — e.g. IT Assets Request)
+// had an empty fields array here and every card fell back to showing the
+// raw ticket id instead of its title. Same root cause as the record-detail
+// page's title-visibility bug.
+describe("WorkflowRecords — card title falls back correctly for isSystem-only fields", () => {
+  afterEach(() => {
+    cleanup();
+    mockFetchWithAuth.mockReset();
+    mockProfileRoles = ["user"];
+    mockUserId = "u-random";
+  });
+
+  it("shows the isSystem title field's value as the card title, not the raw ticket id", async () => {
+    mockProfileRoles = ["admin"];
+    mockUserId = "admin-1";
+    mockFetchWithAuth.mockImplementation((url: string) => {
+      // renderPage() always navigates to /workflows/leave-approval/records,
+      // so the mocked workflow name must slugify to that route param for the
+      // slug lookup to resolve — the scenario under test is about the
+      // fields/entities shape (a system-only field list), not the workflow's
+      // real-world name, so reusing "Leave Approval" here is fine.
+      if (url.endsWith("/workflows/slugs")) {
+        return Promise.resolve({
+          data: [{ id: WORKFLOW_ID, name: "Leave Approval" }],
+        });
+      }
+      if (url.endsWith(`/workflows/${WORKFLOW_ID}`)) {
+        return Promise.resolve({
+          data: {
+            id: WORKFLOW_ID,
+            name: "Leave Approval",
+            entityTypeId: ENTITY_TYPE_ID,
+            createdBy: "someone-else",
+            assignedTo: [],
+            states: [],
+            transitions: [],
+          },
+        });
+      }
+      if (url.includes(`/entity-types/${ENTITY_TYPE_ID}/fields`)) {
+        return Promise.resolve({
+          data: [
+            {
+              id: "f-title",
+              name: "title",
+              label: "Title / Unique ID",
+              fieldType: "text",
+              isSystem: true,
+              isRequired: true,
+              sortOrder: 0,
+              config: {},
+            },
+          ],
+        });
+      }
+      if (url.includes(`/entities?entityTypeId=${ENTITY_TYPE_ID}`)) {
+        return Promise.resolve({
+          data: [
+            {
+              id: "ticket-1",
+              currentState: null,
+              fields: { title: "Replace laptop battery" },
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            },
+          ],
+        });
+      }
+      return Promise.resolve({ data: [] });
+    });
+
+    const container = renderPage();
+
+    await waitFor(() => {
+      expect(container.querySelectorAll(".kb-card").length).toBe(1);
+    });
+    const titleEl = container.querySelector(".kb-card-title");
+    expect(titleEl?.textContent).toBe("Replace laptop battery");
+    expect(titleEl?.textContent).not.toContain("ticket-1".slice(0, 8));
+  });
+});

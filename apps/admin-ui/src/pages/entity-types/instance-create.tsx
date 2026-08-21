@@ -102,11 +102,13 @@ export function EntityInstanceCreate(): React.ReactElement {
     ])
       .then(([etRes, fieldsRes, wfRes, usersRes]) => {
         setEntityType((etRes as { data: EntityTypeMeta }).data);
-        setFields(
-          (fieldsRes as { data: EntityField[] }).data.filter(
-            (f) => !f.isSystem,
-          ),
-        );
+        // Do NOT filter out isSystem fields — same fix as record-create.tsx/
+        // record-detail.tsx/workflow-records.tsx: the auto-seeded "title"
+        // field is isSystem:true, and excluding it here meant this
+        // admin-only create form (a separate flow from /records/:slug/new)
+        // never rendered a title input at all for entity types whose only
+        // field is the seeded title.
+        setFields((fieldsRes as { data: EntityField[] }).data);
         const wfs = (wfRes as { data?: WorkflowDef[] }).data ?? [];
         setWorkflows(wfs);
         if (wfs.length === 1 && wfs[0]) setWorkflowId(wfs[0].id);

@@ -613,11 +613,14 @@ export function WorkflowRecords(): React.ReactElement {
               ),
           fetchWithAuth(`${API_URL}/users`).catch(() => ({ data: [] })),
         ]);
-        setFields(
-          (fieldsRes as { data: EntityField[] }).data.filter(
-            (f) => !f.isSystem,
-          ),
-        );
+        // Do NOT filter out isSystem fields — the auto-seeded "title" field
+        // (apps/api/src/routes/entity-types/create.ts) is isSystem:true.
+        // RecordCard picks its card-title preview from the first field in
+        // this array with a value; excluding title meant an entity type
+        // whose ONLY field is the seeded title (e.g. IT Assets Request) had
+        // an empty preview array and fell back to showing the raw ticket id
+        // instead of its title. Same root cause as the record-detail.tsx fix.
+        setFields((fieldsRes as { data: EntityField[] }).data);
         if (useMyTickets) {
           const myData =
             (

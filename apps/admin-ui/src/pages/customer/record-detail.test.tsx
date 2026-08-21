@@ -417,3 +417,71 @@ describe("CustomerRecordDetail — History tab access-event rendering (ui-featur
     expect(await screen.findByText(/downloaded/)).toBeDefined();
   });
 });
+
+// Regression: the auto-seeded "title" field (apps/api/src/routes/entity-types/
+// create.ts) is isSystem:true. This page used to filter out every isSystem
+// field before rendering, on the theory that "system" meant "not a real
+// user-facing field" — but title IS the ticket's own real, mandatory,
+// user-entered value, not metadata. That filter made the title invisible in
+// both the read-only field grid and the edit form for every entity type
+// created via the wizard (isSystem-seeded title), reported live against a
+// real ticket ("IT Assets Request") whose detail page showed no title
+// anywhere, even after clicking Edit.
+describe("CustomerRecordDetail — system field (title) visibility", () => {
+  afterEach(() => {
+    cleanup();
+    mockFetchWithAuth.mockReset();
+    mockProfileRoles = ["user"];
+    mockUserId = OTHER_USER;
+  });
+
+  it("shows an isSystem field (title) in the read-only field grid and edit form, not just non-system fields", async () => {
+    mockUserId = BASE_RECORD.createdBy as string;
+    const recordWithTitle = {
+      ...BASE_RECORD,
+      fields: { title: "Replace laptop battery" },
+    };
+    mockFetchWithAuth.mockImplementation((url: string) => {
+      if (url === `/api/entities/${RECORD_ID}`) {
+        return Promise.resolve({ data: recordWithTitle });
+      }
+      if (url === `/api/entity-types/${ENTITY_TYPE_ID}/fields`) {
+        return Promise.resolve({
+          data: [
+            {
+              id: "f-title",
+              name: "title",
+              label: "Title / Unique ID",
+              fieldType: "text",
+              isSystem: true,
+              isRequired: true,
+              config: {},
+            },
+          ],
+        });
+      }
+      return Promise.resolve({ data: [] });
+    });
+
+    renderRecordDetail();
+
+    // Read-only grid: both the field's label and its actual value must
+    // render — before the fix, isSystem:true meant this field never made it
+    // into the `fields` state at all, so neither ever appeared anywhere
+    // (including the page's own <h1> heading, which also derives from this
+    // same fields list to pick a title).
+    expect(await screen.findByText("Title / Unique ID")).toBeDefined();
+    expect(
+      (await screen.findAllByText("Replace laptop battery")).length,
+    ).toBeGreaterThan(0);
+
+    // Edit form: the same field must appear as an editable input, not just
+    // in the read-only grid — the earlier bug hid it from both. Edit lives
+    // behind the kebab ("More actions") menu.
+    screen.getByLabelText("More actions").click();
+    (await screen.findByText("Edit")).click();
+    expect(
+      await screen.findByDisplayValue("Replace laptop battery"),
+    ).toBeDefined();
+  });
+});

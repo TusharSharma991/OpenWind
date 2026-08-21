@@ -1687,11 +1687,15 @@ export function CustomerRecordDetail(): React.ReactElement {
         ]);
       })
       .then(([fieldsRes, recRes, usersRes, accessRes]) => {
-        setFields(
-          (fieldsRes as { data: EntityField[] }).data.filter(
-            (f) => !f.isSystem,
-          ),
-        );
+        // Do NOT filter out isSystem fields here — the auto-seeded "title"
+        // field (apps/api/src/routes/entity-types/create.ts) is isSystem:true,
+        // and excluding it made both the field grid and the edit form treat
+        // it as if it didn't exist: the ticket's own title/unique-id value
+        // was invisible everywhere on this page, and unrecoverable via Edit.
+        // This page only reads field defs to render/edit values (it has no
+        // add/delete field-management UI, unlike workflows/detail.tsx), so
+        // there's no protective reason to hide a system field here.
+        setFields((fieldsRes as { data: EntityField[] }).data);
         setRecord((recRes as { data: EntityInstance }).data);
         const apiUsers =
           (

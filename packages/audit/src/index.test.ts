@@ -11,7 +11,12 @@ vi.mock("@platform/logger", () => ({
 }));
 
 vi.mock("@platform/db", () => ({
-  adminAuditLog: "admin_audit_log_mock",
+  adminAuditLog: {
+    tenantId: "admin_audit_log.tenant_id",
+    actorId: "admin_audit_log.actor_id",
+    actorType: "admin_audit_log.actor_type",
+    actingPersonId: "admin_audit_log.acting_person_id",
+  },
 }));
 
 vi.mock("@platform/workflow-engine", () => ({
@@ -47,7 +52,8 @@ mockInsert.mockReturnValue({ values: mockValues });
 
 const mockDb = { insert: mockInsert };
 
-const { writeAuditEntry } = await import("./index.js");
+const { writeAuditEntry, anonymizeAuditLogForTenant } =
+  await import("./index.js");
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -69,7 +75,9 @@ describe("writeAuditEntry", () => {
       afterSnapshot: { subject: "hello" },
     });
 
-    expect(mockInsert).toHaveBeenCalledWith("admin_audit_log_mock");
+    expect(mockInsert).toHaveBeenCalledWith(
+      expect.objectContaining({ tenantId: "admin_audit_log.tenant_id" }),
+    );
     expect(mockValues).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "created",
@@ -165,5 +173,79 @@ describe("writeAuditEntry", () => {
         metadata: { transitionName: "close", triggeredBy: "user" },
       }),
     );
+  });
+});
+
+describe("anonymizeAuditLogForTenant", () => {
+  const mockUpdateSet = vi.fn();
+  const mockUpdateWhere = vi.fn().mockResolvedValue(undefined);
+  const mockUpdate = vi.fn().mockReturnValue({
+    set: (v: unknown) => {
+      mockUpdateSet(v);
+      return { where: mockUpdateWhere };
+    },
+  });
+
+  // The implementation now does batched SELECT → UPDATE. Return one batch
+  // on the first call, empty on the second to terminate the loop.
+  let selectCallCount = 0;
+  const mockSelectLimit = vi.fn().mockImplementation(async () => {
+    selectCallCount++;
+    return selectCallCount === 1 ? [{ id: "row-1" }] : [];
+  });
+  const mockSelect = vi.fn().mockReturnValue({
+    from: () => ({ where: () => ({ limit: mockSelectLimit }) }),
+  });
+
+  // execute() is called first to verify no active RLS context; returning
+  // [{current_setting: null}] means no tenant is set (the normal path).
+  const mockExecute = vi.fn().mockResolvedValue([{ current_setting: null }]);
+
+  const mockPurgeDb = {
+    update: mockUpdate,
+    select: mockSelect,
+    execute: mockExecute,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    selectCallCount = 0;
+    mockExecute.mockResolvedValue([{ current_setting: null }]);
+  });
+
+  it("issues batched UPDATEs scoped to the tenant, replacing both person-identifying fields", async () => {
+    await anonymizeAuditLogForTenant(mockPurgeDb as never, "tenant-a");
+
+    expect(mockSelect).toHaveBeenCalled();
+    expect(mockUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ tenantId: "admin_audit_log.tenant_id" }),
+    );
+    expect(mockUpdateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorId: expect.anything(),
+        actingPersonId: expect.anything(),
+      }),
+    );
+    expect(mockUpdateWhere).toHaveBeenCalledTimes(1);
+  });
+
+  it("throws and does not run the UPDATE when an active tenant RLS context is detected", async () => {
+    mockExecute.mockResolvedValue([{ current_setting: "tenant-x" }]);
+
+    await expect(
+      anonymizeAuditLogForTenant(mockPurgeDb as never, "tenant-a"),
+    ).rejects.toThrow("cannot execute UPDATE under active tenant RLS context");
+
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it("throws and does not run the UPDATE when the RLS context check itself fails — fails closed, not open", async () => {
+    mockExecute.mockRejectedValue(new Error("connection terminated"));
+
+    await expect(
+      anonymizeAuditLogForTenant(mockPurgeDb as never, "tenant-a"),
+    ).rejects.toThrow("failed to verify RLS context before UPDATE");
+
+    expect(mockUpdate).not.toHaveBeenCalled();
   });
 });

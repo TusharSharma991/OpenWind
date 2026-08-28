@@ -23,9 +23,9 @@ function forgedBearer(org: string): string {
   const header = Buffer.from(JSON.stringify({ alg: "none" })).toString(
     "base64url",
   );
-  const payload = Buffer.from(
-    JSON.stringify({ "urn:zitadel:iam:user:resourceowner:id": org }),
-  ).toString("base64url");
+  const payload = Buffer.from(JSON.stringify({ org_id: org })).toString(
+    "base64url",
+  );
   return `${header}.${payload}.`;
 }
 

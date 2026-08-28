@@ -1,5 +1,5 @@
 /**
- * Isolation tests for connector_definitions (migration 0056, issue #363).
+ * Isolation tests for connector_definitions (migration 0057, issue #363).
  *
  * connector_definitions is a platform-wide connector catalog table — no
  * tenant_id, no RLS (ADR-001's "Non-tenant-scoped tables" section names it

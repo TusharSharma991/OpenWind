@@ -6,6 +6,7 @@ vi.mock("@platform/config", () => ({
     AUTHNEXUS_JWKS_URL: "https://auth.rokkalabs.com/api/v1/auth/jwks",
     AUTHNEXUS_AUDIENCE: "platform-api",
     AUTHNEXUS_PROJECT_ID: "project-xyz",
+    JWT_MAX_TOKEN_AGE_SECONDS: 900,
   },
 }));
 
@@ -20,7 +21,8 @@ vi.mock("jose", () => ({
   jwtVerify: (...args: unknown[]) => mockJwtVerify(...args),
 }));
 
-const { extractAuthContext, verifyJwt } = await import("./jwks.js");
+const { extractAuthContext, verifyJwt, verifyJwtWithAudience } =
+  await import("./jwks.js");
 import type { AuthNexusClaims } from "./types.js";
 import type { JWTPayload } from "jose";
 
@@ -120,6 +122,48 @@ describe("verifyJwt", () => {
     mockJwtVerify.mockRejectedValueOnce(new Error("audience mismatch"));
 
     const result = await verifyJwt("some.jwt.token");
+
+    expect(result).toBeNull();
+  });
+
+  // ADR-012 Phase G, spec R6 — the regular human-login JWT path must NOT
+  // gain a new max-age restriction; only the third-party acting-person path
+  // (verifyJwtWithAudience) opts into it.
+  it("does NOT pass maxTokenAge — only verifyJwtWithAudience does", async () => {
+    mockJwtVerify.mockResolvedValueOnce({ payload: BASE_CLAIMS });
+
+    await verifyJwt("some.jwt.token");
+
+    expect(mockJwtVerify).toHaveBeenCalledWith(
+      "some.jwt.token",
+      expect.anything(),
+      expect.not.objectContaining({ maxTokenAge: expect.anything() }),
+    );
+  });
+});
+
+// ADR-012 Phase G, spec R6 — third-party acting-person token freshness,
+// independent of Zitadel's own exp-based expiry.
+describe("verifyJwtWithAudience", () => {
+  it("passes the configured JWT_MAX_TOKEN_AGE_SECONDS as jose's maxTokenAge", async () => {
+    mockJwtVerify.mockResolvedValueOnce({ payload: BASE_CLAIMS });
+
+    await verifyJwtWithAudience("some.jwt.token", "third-party-client-id");
+
+    expect(mockJwtVerify).toHaveBeenCalledWith(
+      "some.jwt.token",
+      expect.anything(),
+      expect.objectContaining({ maxTokenAge: 900 }),
+    );
+  });
+
+  it("returns null when jose rejects for staleness (iat too old)", async () => {
+    mockJwtVerify.mockRejectedValueOnce(new Error("iat too far in the past"));
+
+    const result = await verifyJwtWithAudience(
+      "stale.jwt.token",
+      "third-party-client-id",
+    );
 
     expect(result).toBeNull();
   });

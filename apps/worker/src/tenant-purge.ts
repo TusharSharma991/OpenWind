@@ -9,13 +9,28 @@
  *   → workflows → entityRelations → entityInstances → entityFields → entityTypes
  *   → automationExecutions → automationRules → deadLetterEvents → outboxEvents
  *   → connectorDeliveryAttempts → connectorCredentials → apiKeys → tenantUsers
- *   → viewConfigs
- *   [audit log retained for compliance]
+ *   → viewConfigs → pluginErrors → installedPlugins → idempotencyKeys
+ *   [admin_audit_log rows anonymized in place, not deleted -- spec R9]
  *   → tenant.status = 'purged'
  *   then on-disk files purged (best-effort, outside DB transaction)
  *
+ * Plugin data (3B, docs/specs/plugin-system.md R13): plugin-authored tables live
+ * in per-plugin Postgres schemas (plugin_<slug>), not in this file's own FK
+ * graph — a plugin's schema is shared by every tenant with that plugin
+ * installed, so deleting a tenant must delete only that tenant's rows within
+ * each installed plugin's schema, never drop the schema itself. This runs via
+ * purgeTenantDataFromPluginSchema's own raw connection (same
+ * "compensating design" as runPluginMigration — it does not share this
+ * function's withTenantContext transaction), BEFORE the platform-tracked
+ * installedPlugins/pluginErrors rows are deleted below, since those rows are
+ * what list which plugin schemas to purge in the first place.
+ *
  * Each DB step uses `withTenantContext` so RLS policies pass for the target tenant.
- * Tables without RLS (tenants, admin_audit_log) use plain `db` or the passed transaction.
+ * `tenants` has no RLS and uses plain `db`. `admin_audit_log` has RLS (migration 0011)
+ * granting app_user INSERT+SELECT only (append-only invariant) -- anonymization uses
+ * plain `db` (the worker's privileged connection) because an UPDATE cannot go through
+ * app_user; the RLS policy itself never needs to block this write since only the
+ * privileged worker role ever updates these rows.
  * `workflow_states`/`workflow_transitions` gained RLS and a `tenant_id` column in
  * ADR-007 (migration 0037) — their deletes below now filter by `tenant_id` directly
  * (in addition to the pre-existing `inArray(workflowId, wfIds)` filter), matching every
@@ -27,7 +42,11 @@
 
 import { Worker } from "bullmq";
 import { and, eq, inArray } from "drizzle-orm";
-import { db, withTenantContext } from "@platform/db";
+import {
+  db,
+  withTenantContext,
+  purgeTenantDataFromPluginSchema,
+} from "@platform/db";
 import {
   tenants,
   files,
@@ -35,9 +54,12 @@ import {
   apiKeys,
   tenantUsers,
   connectorCredentials,
+  installedPlugins,
+  pluginErrors,
+  pluginDefinitions,
 } from "@platform/db";
 import { logger } from "@platform/logger";
-import { writeAuditEntry } from "@platform/audit";
+import { writeAuditEntry, anonymizeAuditLogForTenant } from "@platform/audit";
 import { deleteTenantFiles } from "@platform/files";
 import { connection } from "./queues.js";
 
@@ -55,6 +77,7 @@ import {
   outboxEvents,
   deadLetterEvents,
   connectorDeliveryAttempts,
+  idempotencyKeys,
 } from "@platform/db";
 
 const QUEUE_NAME = "tenant-purge";
@@ -87,6 +110,32 @@ export const tenantPurgeWorker = new Worker<PurgeJobData>(
         "tenant-purge: tenant status is not 'deleted' — skipping",
       );
       return;
+    }
+
+    // R13: purge this tenant's rows from every installed plugin's schema
+    // BEFORE deleting the installedPlugins rows that list which schemas to
+    // look at. Uses purgeTenantDataFromPluginSchema's own raw connection —
+    // does not share this function's withTenantContext transaction below.
+    const installedPluginSlugs = await withTenantContext(tenantId, (tx) =>
+      tx
+        .select({ slug: pluginDefinitions.slug })
+        .from(installedPlugins)
+        .innerJoin(
+          pluginDefinitions,
+          eq(installedPlugins.pluginId, pluginDefinitions.id),
+        )
+        .where(eq(installedPlugins.tenantId, tenantId)),
+    );
+
+    for (const { slug } of installedPluginSlugs) {
+      const { tablesPurged } = await purgeTenantDataFromPluginSchema(
+        tenantId,
+        slug,
+      );
+      logger.info(
+        { tenantId, pluginSlug: slug, tablesPurged },
+        "tenant-purge: plugin schema data purged",
+      );
     }
 
     await withTenantContext(tenantId, async (tx) => {
@@ -176,9 +225,32 @@ export const tenantPurgeWorker = new Worker<PurgeJobData>(
       // Users + view config
       await tx.delete(tenantUsers).where(eq(tenantUsers.tenantId, tenantId));
       await tx.delete(viewConfigs).where(eq(viewConfigs.tenantId, tenantId));
+
+      // Plugin tracking rows (R13) — the actual plugin-schema data was already
+      // purged above, before this transaction started.
+      await tx.delete(pluginErrors).where(eq(pluginErrors.tenantId, tenantId));
+      await tx
+        .delete(installedPlugins)
+        .where(eq(installedPlugins.tenantId, tenantId));
+
+      // ADR-012 Phase G, spec R10 -- idempotency_keys.response_body can
+      // contain full ticket/comment content (PII), not just metadata, so
+      // unlike admin_audit_log below, there's no operational-history reason
+      // to keep a placeholder row here: deleted outright, not anonymized.
+      await tx
+        .delete(idempotencyKeys)
+        .where(eq(idempotencyKeys.tenantId, tenantId));
     });
 
-    // Audit log entries are retained for compliance — we do NOT delete them.
+    // ADR-012 Phase G, spec R9 -- admin_audit_log rows are anonymized in
+    // place (person-identifying fields replaced with a placeholder), never
+    // deleted: aggregate operational history (action/resourceType/outcome/
+    // timestamp) must survive a purge the same way it survives the R8 age-
+    // based sweep. Runs via plain `db` (not withTenantContext), same as
+    // every other admin_audit_log write in this file -- see
+    // anonymizeAuditLogForTenant's own doc comment for why.
+    await anonymizeAuditLogForTenant(db, tenantId);
+
     // Mark the tenant row as 'purged' (keeps a tombstone for audit trail).
     await db
       .update(tenants)

@@ -18,8 +18,16 @@ function getJwks(): JwksGetter {
   return _jwks;
 }
 
-export async function verifyJwt(
+// ADR-012 Phase G, spec R6 — independent of `exp`-based expiry: rejects a
+// token whose `iat` is older than this, even if the IdP's own exp says it's
+// still valid. Config-driven (not hardcoded) so it stays reviewable/tunable
+// without a code change; startup warns if ever configured above 30 minutes
+// (see packages/config/src/env.ts).
+
+async function verifyJwtAgainstAudience(
   token: string,
+  audience: string | string[],
+  options?: { enforceMaxTokenAge?: boolean },
 ): Promise<(JWTPayload & AuthNexusClaims) | null> {
   try {
     const { payload } = await jwtVerify(
@@ -27,28 +35,60 @@ export async function verifyJwt(
       getJwks() as unknown as KeyLike,
       {
         issuer: env.AUTHNEXUS_ISSUER,
-        // AuthNexus puts the PROJECT ID in aud, not the OIDC client ID.
-        // AUTHNEXUS_AUDIENCE is required and non-empty (packages/config/src/env.ts),
-        // so audience validation is always enforced here.
-        audience: env.AUTHNEXUS_AUDIENCE,
+        // jose's `audience` option already matches whether the token's own
+        // `aud` claim is a single string or an array — no separate branching
+        // needed for either legal JWT form.
+        audience,
         // 5 s is sufficient to absorb NTP clock skew between containers.
         // A wider tolerance extends the replay window for stolen tokens
         // past their stated expiry for no real benefit. (#255)
         clockTolerance: 5,
+        // Only the third-party acting-person path (verifyJwtWithAudience)
+        // opts into this -- the regular human-login JWT path (verifyJwt)
+        // deliberately does not, so a long-lived legitimate human session
+        // isn't newly broken by a check aimed at third-party token freshness.
+        ...(options?.enforceMaxTokenAge
+          ? { maxTokenAge: env.JWT_MAX_TOKEN_AGE_SECONDS }
+          : {}),
       },
     );
     return payload as JWTPayload & AuthNexusClaims;
   } catch (err) {
     logger.warn(
-      {
-        error: String(err),
-        issuer: env.AUTHNEXUS_ISSUER,
-        audience: env.AUTHNEXUS_AUDIENCE,
-      },
+      { error: String(err), issuer: env.AUTHNEXUS_ISSUER, audience },
       "JWT verification failed",
     );
     return null;
   }
+}
+
+export async function verifyJwt(
+  token: string,
+): Promise<(JWTPayload & AuthNexusClaims) | null> {
+  // AUTHNEXUS_AUDIENCE is required and non-empty (packages/config/src/env.ts),
+  // so audience validation is always enforced here.
+  return verifyJwtAgainstAudience(token, env.AUTHNEXUS_AUDIENCE);
+}
+
+/**
+ * Same signature/issuer/expiry verification as verifyJwt, but against a
+ * caller-supplied audience instead of the platform-wide AUTHNEXUS_AUDIENCE.
+ *
+ * ADR-012 Phase B: the acting-person token presented alongside a third-party
+ * API key is minted for *that third-party application's own AuthNexus login*,
+ * never for OpenWind itself — so it will never carry AUTHNEXUS_AUDIENCE. Its
+ * `aud` must instead be checked against the specific API key's own
+ * registered `oidc_client_id` (Round 5 correction of an earlier,
+ * incorrect Round 4 fix that compared against OpenWind's own client ID — no
+ * legitimate third-party token would ever match that value).
+ */
+export async function verifyJwtWithAudience(
+  token: string,
+  audience: string,
+): Promise<(JWTPayload & AuthNexusClaims) | null> {
+  return verifyJwtAgainstAudience(token, audience, {
+    enforceMaxTokenAge: true,
+  });
 }
 
 export function extractAuthContext(

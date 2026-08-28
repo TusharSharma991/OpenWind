@@ -10,11 +10,27 @@
     "signInTag": "Sign in",
     "signInButton": "Continue with SSO",
     "redirecting": "Redirecting…",
-    "securityNote": "Encrypted session · access is scoped to your organisation"
+    "securityNote": "Encrypted session · access is scoped to your organisation",
+    "helpPrompt": "Need access?",
+    "contactAdmin": "Contact your admin",
+    "footer": {
+      "copyright": "© 2026 JMV Work. All rights reserved.",
+      "github": "GitHub",
+      "docs": "Docs",
+      "privacy": "Privacy"
+    }
   },
   "authCallback": {
     "errorTitle": "Authentication Error",
     "backToLogin": "Back to Login",
     "verifying": "Verifying credentials and synchronizing session..."
+  },
+  "network": {
+    "regionLabel": "Notifications",
+    "logInAgain": "Log in again",
+    "dismiss": "Dismiss",
+    "offline": "You're offline",
+    "reconnecting": "Reconnecting…",
+    "backOnline": "Back online"
   }
 }

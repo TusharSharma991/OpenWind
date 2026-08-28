@@ -1,111 +1,174 @@
 import { describe, it, expect } from "vitest";
 import {
-  TriggerEventSchema,
   WorkflowTransitionedV1Schema,
   EntityCreatedV1Schema,
   EntityAssignedV1Schema,
   EntityUnassignedV1Schema,
 } from "./event-schemas.js";
 
-// AuthNexus issues numeric-string user ids (e.g. "382580897309786115"), not
-// UUIDs. These fields previously required .uuid(), so every real
-// entity.assigned/entity.unassigned/workflow.transitioned/entity.created
-// event dead-lettered with INVALID_EVENT_PAYLOAD in production.
-const AUTHNEXUS_USER_ID = "382580897309786115";
+// docs/specs/port-nexus-ow-fixes.md R2 -- assigneeId/assignedBy/previousAssigneeId/
+// actorId/createdBy previously required z.string().uuid(), which threw
+// INVALID_EVENT_PAYLOAD for non-UUID ids (e.g. AuthNexus's numeric-string ids),
+// silently dead-lettering every assignment/unassignment/creation/transition
+// automation trigger. Relaxed to z.string().min(1).max(255) -- these tests
+// prove the relaxation without opening the field up to unbounded input.
 
-describe("event-schemas — non-UUID identity-provider user ids", () => {
-  it("accepts a non-UUID actorId on workflow.transitioned", () => {
-    const result = WorkflowTransitionedV1Schema.safeParse({
-      version: 1,
-      tenantId: "00000000-0000-0000-0000-000000000001",
-      eventType: "workflow.transitioned",
-      instanceId: "8777e91f-c2ae-4fca-aa74-dd1de68999f2",
-      entityTypeId: "fce99cb9-b81d-41d3-80f6-abf0d5530a26",
-      workflowId: "fce99cb9-b81d-41d3-80f6-abf0d5530a27",
-      fromState: "open",
-      toState: "closed",
-      triggeredBy: "user",
-      actorId: AUTHNEXUS_USER_ID,
-      occurredAt: new Date().toISOString(),
-    });
-    expect(result.success).toBe(true);
+const NON_UUID_ID = "12345";
+const VALID_UUID = "aaaaaaaa-3333-4000-a000-000000000036";
+const OVER_255 = "a".repeat(256);
+
+function baseFields() {
+  return {
+    version: 1 as const,
+    tenantId: VALID_UUID,
+  };
+}
+
+describe("WorkflowTransitionedV1Schema.actorId", () => {
+  const build = (actorId: string | null) => ({
+    ...baseFields(),
+    eventType: "workflow.transitioned" as const,
+    instanceId: VALID_UUID,
+    entityTypeId: VALID_UUID,
+    workflowId: VALID_UUID,
+    fromState: null,
+    toState: "in_progress",
+    triggeredBy: "user" as const,
+    actorId,
+    occurredAt: new Date().toISOString(),
   });
 
-  it("accepts a non-UUID createdBy on entity.created", () => {
-    const result = EntityCreatedV1Schema.safeParse({
-      version: 1,
-      tenantId: "00000000-0000-0000-0000-000000000001",
-      eventType: "entity.created",
-      instanceId: "8777e91f-c2ae-4fca-aa74-dd1de68999f2",
-      entityTypeId: "fce99cb9-b81d-41d3-80f6-abf0d5530a26",
-      fields: {},
-      createdBy: AUTHNEXUS_USER_ID,
-    });
-    expect(result.success).toBe(true);
+  it("accepts a non-UUID id", () => {
+    expect(
+      WorkflowTransitionedV1Schema.safeParse(build(NON_UUID_ID)).success,
+    ).toBe(true);
   });
 
-  it("accepts non-UUID assigneeId/assignedBy on entity.assigned", () => {
-    const result = EntityAssignedV1Schema.safeParse({
-      version: 1,
-      tenantId: "00000000-0000-0000-0000-000000000001",
-      eventType: "entity.assigned",
-      instanceId: "8777e91f-c2ae-4fca-aa74-dd1de68999f2",
-      entityTypeId: "fce99cb9-b81d-41d3-80f6-abf0d5530a26",
-      assigneeId: "374487847148716035",
-      assignedBy: AUTHNEXUS_USER_ID,
-    });
-    expect(result.success).toBe(true);
+  it("still accepts a valid UUID", () => {
+    expect(
+      WorkflowTransitionedV1Schema.safeParse(build(VALID_UUID)).success,
+    ).toBe(true);
   });
 
-  it("accepts non-UUID previousAssigneeId/actorId on entity.unassigned", () => {
-    const result = EntityUnassignedV1Schema.safeParse({
-      version: 1,
-      tenantId: "00000000-0000-0000-0000-000000000001",
-      eventType: "entity.unassigned",
-      instanceId: "8777e91f-c2ae-4fca-aa74-dd1de68999f2",
-      entityTypeId: "fce99cb9-b81d-41d3-80f6-abf0d5530a26",
-      previousAssigneeId: "372447581956997123",
-      actorId: AUTHNEXUS_USER_ID,
-    });
-    expect(result.success).toBe(true);
+  it("accepts null", () => {
+    expect(WorkflowTransitionedV1Schema.safeParse(build(null)).success).toBe(
+      true,
+    );
   });
 
-  it("parses a real dead-lettered entity.assigned payload via the discriminated union", () => {
-    const result = TriggerEventSchema.safeParse({
-      version: 1,
-      tenantId: "00000000-0000-0000-0000-000000000001",
-      eventType: "entity.assigned",
-      assignedBy: "382580897309786115",
-      assigneeId: "374487847148716035",
-      instanceId: "8777e91f-c2ae-4fca-aa74-dd1de68999f2",
-      entityTypeId: "fce99cb9-b81d-41d3-80f6-abf0d5530a26",
-    });
-    expect(result.success).toBe(true);
+  it("rejects an empty string", () => {
+    expect(WorkflowTransitionedV1Schema.safeParse(build("")).success).toBe(
+      false,
+    );
   });
 
-  it("parses a real dead-lettered entity.unassigned payload via the discriminated union", () => {
-    const result = TriggerEventSchema.safeParse({
-      actorId: "382580897309786115",
-      version: 1,
-      tenantId: "00000000-0000-0000-0000-000000000001",
-      eventType: "entity.unassigned",
-      instanceId: "8777e91f-c2ae-4fca-aa74-dd1de68999f2",
-      entityTypeId: "fce99cb9-b81d-41d3-80f6-abf0d5530a26",
-      previousAssigneeId: "372447581956997123",
-    });
-    expect(result.success).toBe(true);
+  it("rejects a string over 255 characters", () => {
+    expect(
+      WorkflowTransitionedV1Schema.safeParse(build(OVER_255)).success,
+    ).toBe(false);
+  });
+});
+
+describe("EntityCreatedV1Schema.createdBy", () => {
+  const build = (createdBy: string | null) => ({
+    ...baseFields(),
+    eventType: "entity.created" as const,
+    instanceId: VALID_UUID,
+    entityTypeId: VALID_UUID,
+    fields: {},
+    createdBy,
   });
 
-  it("still rejects a missing required field", () => {
-    const result = EntityAssignedV1Schema.safeParse({
-      version: 1,
-      tenantId: "00000000-0000-0000-0000-000000000001",
-      eventType: "entity.assigned",
-      instanceId: "8777e91f-c2ae-4fca-aa74-dd1de68999f2",
-      entityTypeId: "fce99cb9-b81d-41d3-80f6-abf0d5530a26",
-      assignedBy: null,
-      // assigneeId missing
-    });
-    expect(result.success).toBe(false);
+  it("accepts a non-UUID id", () => {
+    expect(EntityCreatedV1Schema.safeParse(build(NON_UUID_ID)).success).toBe(
+      true,
+    );
+  });
+
+  it("rejects an empty string", () => {
+    expect(EntityCreatedV1Schema.safeParse(build("")).success).toBe(false);
+  });
+
+  it("rejects a string over 255 characters", () => {
+    expect(EntityCreatedV1Schema.safeParse(build(OVER_255)).success).toBe(
+      false,
+    );
+  });
+});
+
+describe("EntityAssignedV1Schema.assigneeId / assignedBy", () => {
+  const build = (assigneeId: string, assignedBy: string | null) => ({
+    ...baseFields(),
+    eventType: "entity.assigned" as const,
+    instanceId: VALID_UUID,
+    entityTypeId: VALID_UUID,
+    assigneeId,
+    assignedBy,
+  });
+
+  it("accepts non-UUID ids for both fields", () => {
+    expect(
+      EntityAssignedV1Schema.safeParse(build(NON_UUID_ID, NON_UUID_ID)).success,
+    ).toBe(true);
+  });
+
+  it("still accepts valid UUIDs", () => {
+    expect(
+      EntityAssignedV1Schema.safeParse(build(VALID_UUID, VALID_UUID)).success,
+    ).toBe(true);
+  });
+
+  it("rejects an empty assigneeId (required, non-nullable)", () => {
+    expect(
+      EntityAssignedV1Schema.safeParse(build("", VALID_UUID)).success,
+    ).toBe(false);
+  });
+
+  it("rejects an over-255-char assignedBy", () => {
+    expect(
+      EntityAssignedV1Schema.safeParse(build(NON_UUID_ID, OVER_255)).success,
+    ).toBe(false);
+  });
+});
+
+describe("EntityUnassignedV1Schema.previousAssigneeId / actorId", () => {
+  const build = (previousAssigneeId: string, actorId: string | null) => ({
+    ...baseFields(),
+    eventType: "entity.unassigned" as const,
+    instanceId: VALID_UUID,
+    entityTypeId: VALID_UUID,
+    previousAssigneeId,
+    actorId,
+  });
+
+  it("accepts non-UUID ids for both fields", () => {
+    expect(
+      EntityUnassignedV1Schema.safeParse(build(NON_UUID_ID, NON_UUID_ID))
+        .success,
+    ).toBe(true);
+  });
+
+  it("still accepts valid UUIDs", () => {
+    expect(
+      EntityUnassignedV1Schema.safeParse(build(VALID_UUID, VALID_UUID)).success,
+    ).toBe(true);
+  });
+
+  it("accepts null actorId", () => {
+    expect(
+      EntityUnassignedV1Schema.safeParse(build(NON_UUID_ID, null)).success,
+    ).toBe(true);
+  });
+
+  it("rejects an empty previousAssigneeId (required, non-nullable)", () => {
+    expect(
+      EntityUnassignedV1Schema.safeParse(build("", VALID_UUID)).success,
+    ).toBe(false);
+  });
+
+  it("rejects an over-255-char actorId", () => {
+    expect(
+      EntityUnassignedV1Schema.safeParse(build(NON_UUID_ID, OVER_255)).success,
+    ).toBe(false);
   });
 });

@@ -86,9 +86,9 @@ plan-lock all of this as one unit.
 ### Stage 1 — ADR-008 core hardening (independent of connector runtime)
 
 - [x] PR: `api_keys.created_by` + audit-log entry on mint/delete (Decision #2) — done 2026-08-09,
-      migration 0053.
+      migration 0054.
 - [x] PR: `api_keys.expires_at` + rotation flow + `revoked_at`/`revoked_by` soft-revoke
-      (Decisions #3–4) — done 2026-08-09, migration 0053. New keys get a platform-configured
+      (Decisions #3–4) — done 2026-08-09, migration 0054. New keys get a platform-configured
       default TTL (`API_KEY_DEFAULT_TTL_DAYS`, `packages/auth`) and `POST /api-keys/:id/rotate`
       mints a replacement while pulling the original's `expires_at` forward to a short overlap
       window instead of an immediate kill. **Deliberately NOT implemented:** OQ-2/OQ-3's
@@ -215,7 +215,23 @@ connector_id)`. RLS policies and the `app_user` grant (incl. DELETE, which `tena
       needs) were left untouched. Fixed #362's now-stale "doesn't exist yet" doc comment in
       `connector-sdk/src/runtime.ts`/`types.ts`. [#363](../../issues/363)
 - [ ] Polling scheduler (BullMQ repeatable job per connector per tenant). [#366](../../issues/366)
-- [ ] Kill switch (non-destructive disable, not just install/uninstall). [#367](../../issues/367)
+- [x] Polling scheduler (BullMQ repeatable job per connector per tenant) — done 2026-08-18,
+      reconcile-tick design (no install API yet, so this is the only place a `connector-poll`
+      repeatable job is created/removed). See week-log 2026-08-18 entry for the two correctness
+      bugs `/review` caught and fixed pre-merge (BullMQ `job.id` never populated by
+      `getRepeatableJobs()`; cursor-keyed dedup id colliding across cycles when a connector never
+      advances its cursor). [#366](../../issues/366)
+- [x] Kill switch (non-destructive disable, not just install/uninstall) — done 2026-08-18.
+      `disabled_at`/`disabled_by` on `connector_credentials` (mirrors `api_keys.revoked_at`'s
+      shape), checked by the webhook gateway, outbound delivery worker, and polling
+      scheduler/worker. See week-log 2026-08-18 entry for review findings fixed pre-merge
+      (unredacted-dead-letter ordering bug, fail-open on missing installation, a TOCTOU race in
+      the route's audit trail). [#367](../../issues/367)
+
+Full detail for the runtime-track items above (`ConnectorContext`/OpenBao decrypt, inbound
+webhook gateway, outbound delivery queue, `connector_definitions`/`connector_credentials`
+tables): `docs/sup-docs/week-log.md`'s 2026-08-12/13 entries.
+
 - [ ] Build email (SMTP/IMAP) + WhatsApp Business connectors _together with_ the runtime — the
       runtime's shape is sized for exactly these two, not for a five-connector launch.
       [#368](../../issues/368)
@@ -224,7 +240,7 @@ connector_id)`. RLS policies and the `app_user` grant (incl. DELETE, which `tena
 Scopes track (can run in parallel with the runtime track, same stage):
 
 - [x] `api_keys.scopes` dual-format discriminator (Decision #6) — done 2026-08-12, migration
-      0054: `scopes_format text NOT NULL DEFAULT 'role'` (CHECK `IN ('role','action')`), an
+      0056: `scopes_format text NOT NULL DEFAULT 'role'` (CHECK `IN ('role','action')`), an
       explicit column rather than a colon heuristic or date cutoff, since it's the only option
       that doesn't break if a future role-string happens to contain a colon. Existing keys stay
       on legacy role-strings, unmigrated. `packages/auth/src/scopes.ts`'s `detectScopesFormat`
@@ -272,7 +288,9 @@ Scopes track (can run in parallel with the runtime track, same stage):
 
 - [x] Update this primer's ADR references from `docs/specs/` to `docs/decisions/ADR-00N-*.md` —
       done 2026-08-06, all three accepted at their originally-proposed numbers.
-- [ ] Flip `docs/sup-docs/roadmap-tracker.md`'s 3A row from 🔴 Not started as stages land.
+- [x] Flip `docs/sup-docs/roadmap-tracker.md`'s 3A row from 🔴 Not started as stages land — done;
+      currently 🟡 ~30%, kept current there each session, not duplicated here or in `CLAUDE.md`
+      (both of those went stale for this exact reason once before — see 2026-08-13 cleanup).
 
 ---
 

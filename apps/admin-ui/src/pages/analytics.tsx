@@ -958,7 +958,7 @@ export function Analytics(): React.ReactElement {
   useEffect(() => {
     void userManager.getUser().then((u) => {
       // oidc-client-ts types User.profile as a generic claims bag — the
-      // Zitadel-specific roles claim isn't part of its type, so this can't
+      // AuthNexus-specific roles claim isn't part of its type, so this can't
       // be inferred.
       const profile = u?.profile as Record<string, unknown> | undefined;
       const r = getRolesFromProfile(profile);

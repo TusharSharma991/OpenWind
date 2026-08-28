@@ -17,6 +17,7 @@ import { AuthCallback } from "./pages/callback.js";
 import { Dashboard } from "./pages/dashboard.js";
 import { Analytics } from "./pages/analytics.js";
 import { Modules } from "./pages/modules.js";
+import { Plugins } from "./pages/plugins.js";
 import { EntityTypeDetail } from "./pages/entity-types/detail.js";
 import { EntityInstanceCreate } from "./pages/entity-types/instance-create.js";
 import { Workflows } from "./pages/workflows/index.js";
@@ -32,6 +33,7 @@ import { Automations } from "./pages/automations/index.js";
 import { AutomationWizard } from "./pages/automations/wizard/wizard.js";
 import { RequireAdmin } from "./components/require-admin.js";
 import { SystemLogsPage } from "./pages/system-logs.js";
+import { ThirdPartyAccessLogsPage } from "./pages/third-party-access-logs.js";
 import { GlobalErrorBanner } from "./components/global-error-banner.js";
 import { GlobalAlertDialog } from "./components/global-alert-dialog.js";
 import { useIdleLogout } from "./hooks/use-idle-logout.js";
@@ -77,6 +79,7 @@ export function App(): React.ReactElement {
             meta: { label: "Analytics" },
           },
           { name: "modules", list: "/modules", meta: { label: "Templates" } },
+          { name: "plugins", list: "/plugins", meta: { label: "Plugins" } },
           {
             name: "records",
             list: "/records",
@@ -154,6 +157,7 @@ export function App(): React.ReactElement {
             <Route path="/settings" element={<Settings />} />
 
             <Route path="/modules" element={<Modules />} />
+            <Route path="/plugins" element={<Plugins />} />
 
             {/* Workflow detail — access checked inside component (admin or workflow assignee) */}
             <Route
@@ -181,6 +185,10 @@ export function App(): React.ReactElement {
                 element={<EntityInstanceCreate />}
               />
               <Route path="/admin/system-logs" element={<SystemLogsPage />} />
+              <Route
+                path="/admin/third-party-access-logs"
+                element={<ThirdPartyAccessLogsPage />}
+              />
             </Route>
 
             <Route path="/home" element={<Navigate to="/records" replace />} />

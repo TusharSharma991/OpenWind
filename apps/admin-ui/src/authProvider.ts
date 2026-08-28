@@ -143,6 +143,9 @@ export const authProvider: AuthProvider = {
       );
       return { success: true };
     } catch (err) {
+      // AuthNexus unreachable (network timeout, service down) — fall back to
+      // a local-only logout so the user isn't stuck on the current page
+      // with no redirect target.
       console.error("Failed to sign out via AuthNexus:", err);
       await userManager.removeUser();
       await userManager.clearStaleState();

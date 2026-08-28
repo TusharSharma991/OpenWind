@@ -168,9 +168,15 @@ const _assignmentsCache = new Map<
 >();
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
+// bearerToken is optional — an HTTP-handler caller forwards the requesting
+// user's own token; a background worker with no user session (e.g.
+// mention-resolution-worker.ts resolving an @mention with no HTTP request in
+// flight) omits it and this mints its own service-account token instead,
+// same fallback precedent as getUserById above. Returns [] (not a crash) if
+// neither a token is provided nor AUTHNEXUS_SERVICE_ACCOUNT_KEY is configured.
 async function getActiveAssignments(
   orgId: string,
-  bearerToken: string,
+  bearerToken?: string,
 ): Promise<AuthNexusAssignment[]> {
   const now = Date.now();
   const cached = _assignmentsCache.get(orgId);
@@ -178,7 +184,10 @@ async function getActiveAssignments(
     return cached.assignments;
   if (cached instanceof Promise) return cached;
 
-  const pending = _fetchAssignments(orgId, bearerToken, now);
+  const token = bearerToken ?? (await getServiceAccountToken());
+  if (!token) return [];
+
+  const pending = _fetchAssignments(orgId, token, now);
   _assignmentsCache.set(orgId, pending);
   return pending;
 }
@@ -236,7 +245,7 @@ function assignmentToOrgUser(a: AuthNexusAssignment): OrgUser {
 
 export async function listProjectRoles(
   orgId: string,
-  bearerToken: string,
+  bearerToken?: string,
 ): Promise<string[]> {
   if (!orgId) return [];
   const assignments = await getActiveAssignments(orgId, bearerToken);
@@ -251,7 +260,7 @@ export async function listProjectRoles(
 // missing orgId.
 export async function listOrgUsers(
   orgId: string,
-  bearerToken: string,
+  bearerToken?: string,
 ): Promise<OrgUser[]> {
   if (!orgId) {
     logger.warn(
@@ -275,7 +284,7 @@ export async function listOrgUsers(
 
 export async function listUserRolesByUserId(
   orgId: string,
-  bearerToken: string,
+  bearerToken?: string,
 ): Promise<Map<string, string[]>> {
   if (!orgId) return new Map();
   const assignments = await getActiveAssignments(orgId, bearerToken);
@@ -293,7 +302,7 @@ export async function listUserRolesByUserId(
 export async function listUserIdsWithRole(
   orgId: string,
   roleKey: string,
-  bearerToken: string,
+  bearerToken?: string,
 ): Promise<Set<string>> {
   const rolesByUserId = await listUserRolesByUserId(orgId, bearerToken);
   const userIds = new Set<string>();

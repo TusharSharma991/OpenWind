@@ -185,6 +185,11 @@ export function Login(): React.ReactElement {
             </svg>
             {t("login.securityNote")}
           </div>
+
+          {/* Help prompt for users without existing access */}
+          <div className="lp-notebook-help">
+            {t("login.helpPrompt")} {t("login.contactAdmin")}
+          </div>
         </div>
       </main>
     </div>

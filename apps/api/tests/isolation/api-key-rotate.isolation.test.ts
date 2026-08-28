@@ -102,6 +102,9 @@ function makeApp(tenantId: string) {
   return app;
 }
 
+// An sk_-prefixed bearer token routes requireAuth() through the API-key path
+// (packages/auth/src/middleware.ts's resolveApiKey), not the AuthNexus JWT
+// path — avoiding the need for a live AuthNexus/JWKS connection in this test.
 function skHeaders() {
   return { Authorization: "Bearer sk_isolation_test_bypass" };
 }

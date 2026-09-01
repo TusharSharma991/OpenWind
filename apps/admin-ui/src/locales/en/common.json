@@ -11,8 +11,6 @@
     "signInButton": "Continue with SSO",
     "redirecting": "Redirecting…",
     "securityNote": "Encrypted session · access is scoped to your organisation",
-    "helpPrompt": "Need access?",
-    "contactAdmin": "Contact your admin",
     "footer": {
       "copyright": "© 2026 JMV Work. All rights reserved.",
       "github": "GitHub",

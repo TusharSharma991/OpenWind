@@ -33,6 +33,5 @@ describe("Login", () => {
     expect(
       screen.getByRole("button", { name: /Continue with SSO/ }),
     ).toBeDefined();
-    expect(screen.getByText("Contact your admin")).toBeDefined();
   });
 });

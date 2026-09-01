@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { zValidator } from "../../lib/validator.js";
 import { z } from "zod";
+import { env } from "@platform/config";
 import {
   requireAuth,
   requireRole,
@@ -9,6 +10,7 @@ import {
   API_KEY_DEFAULT_TTL_DAYS,
   detectScopesFormat,
   unknownTicketActionScopes,
+  assertExternalIssuerEgressAllowed,
 } from "@platform/auth";
 import {
   db,
@@ -16,6 +18,7 @@ import {
   apiKeys,
   isUniqueViolation,
   isCheckViolation,
+  setOutboxSweeperRole,
 } from "@platform/db";
 import { writeAuditEntry } from "@platform/audit";
 import { and, eq, isNull } from "drizzle-orm";
@@ -36,6 +39,13 @@ const CreateApiKeySchema = z.object({
   // the DB.
   applicationContactEmail: z.string().email().max(320).optional(),
   oidcClientId: z.string().min(1).max(200).optional(),
+  // Ported from upstream/tushar's third-party-key-external-org-mapping.md —
+  // only needed when this key's acting-person tokens come from a different
+  // IdP than the platform's configured primary (AUTHNEXUS_ISSUER).
+  // externalIssuer is always explicit admin input — never derived via a live
+  // discovery-document fetch during this request.
+  externalIssuer: z.string().url().max(500).optional(),
+  externalOrgId: z.string().min(1).max(200).optional(),
 });
 
 const THREE_MONTHS_MS = 90 * 24 * 60 * 60 * 1000;
@@ -52,6 +62,8 @@ export const createApiKeyHandler = factory.createHandlers(
       applicationDescription,
       applicationContactEmail,
       oidcClientId,
+      externalIssuer,
+      externalOrgId,
     } = c.req.valid("json");
     const { tenantId, roles, userId } = c.get("auth");
 
@@ -74,7 +86,20 @@ export const createApiKeyHandler = factory.createHandlers(
 
     if (scopesFormat === "role") {
       // Pre-existing internal-key path — unchanged, per this repo's own
-      // "leave the old one as it is" decision on this feature.
+      // "leave the old one as it is" decision on this feature. A role-format
+      // key never goes through the dual-identity acting-person flow at all,
+      // so an external-org mapping has nothing to attach to here — reject
+      // rather than silently accept-and-drop the fields.
+      if (externalIssuer || externalOrgId) {
+        return c.json(
+          {
+            error: "VALIDATION_ERROR",
+            message:
+              "externalIssuer/externalOrgId only apply to action-scoped (third-party) keys",
+          },
+          422,
+        );
+      }
       const scopeError = scopeCeilingError(roles, scopes);
       if (scopeError) {
         return c.json({ error: "FORBIDDEN", message: scopeError }, 403);
@@ -113,6 +138,78 @@ export const createApiKeyHandler = factory.createHandlers(
           422,
         );
       }
+
+      // Ported from upstream/tushar's third-party-key-external-org-mapping.md
+      // §I's 4-way validation.
+      if (externalOrgId && !externalIssuer) {
+        return c.json(
+          {
+            error: "VALIDATION_ERROR",
+            message: "externalOrgId requires externalIssuer to also be set",
+          },
+          422,
+        );
+      }
+      if (externalIssuer) {
+        // Security-review finding: a same-provider comparison via
+        // string/slash normalization alone let a URL variant (different
+        // case, default port, etc.) of the SAME origin slip through as
+        // "different," and — combined with no egress check at all — meant
+        // an admin-supplied issuer pointed at an internal/metadata address
+        // sailed straight into jwks.ts's discovery fetch. Compare
+        // normalized URL origins (protocol + lowercased host + port), and
+        // separately, unconditionally validate the issuer isn't a
+        // private/reserved/malformed egress target regardless of which
+        // branch below it falls into.
+        let externalIssuerOrigin: string;
+        try {
+          externalIssuerOrigin = new URL(externalIssuer).origin;
+        } catch {
+          return c.json(
+            {
+              error: "VALIDATION_ERROR",
+              message: "externalIssuer must be a valid URL",
+            },
+            422,
+          );
+        }
+        const isPrimaryIdP =
+          externalIssuerOrigin === new URL(env.AUTHNEXUS_ISSUER).origin;
+        if (isPrimaryIdP) {
+          return c.json(
+            {
+              error: "VALIDATION_ERROR",
+              message:
+                "externalIssuer matches this platform's primary identity provider — omit externalIssuer/externalOrgId for a key that uses it",
+            },
+            422,
+          );
+        }
+        if (!externalOrgId) {
+          return c.json(
+            {
+              error: "ORG_MAPPING_REQUIRED",
+              message:
+                "This key's externalIssuer differs from the tenant's primary identity provider — externalOrgId is required so acting-person tokens from that issuer can be matched to this tenant",
+            },
+            422,
+          );
+        }
+        try {
+          await assertExternalIssuerEgressAllowed(externalIssuer);
+        } catch (err) {
+          return c.json(
+            {
+              error: "VALIDATION_ERROR",
+              message:
+                err instanceof Error
+                  ? err.message
+                  : "externalIssuer is not a permitted address",
+            },
+            422,
+          );
+        }
+      }
     }
 
     // Generate a cryptographically random key with a recognisable prefix.
@@ -150,24 +247,42 @@ export const createApiKeyHandler = factory.createHandlers(
     // tenant's rows from the query entirely — an *expired* key belonging to
     // a different tenant would never be found and reclaimed, permanently
     // locking that Client ID out for the platform (review finding, PR #440
-    // by PrabhuVijit). `db` connects as a superuser that bypasses RLS by
-    // design (see client.ts's own comment on this), same precedent already
-    // relied on by isTenantActive() for the same "this must see across
-    // tenants" reason.
+    // by PrabhuVijit). NOTE: `db` does NOT connect as a superuser in this
+    // fork (DATABASE_URL authenticates as app_user, which is RLS-enforced —
+    // confirmed via \du against a live aw-database), unlike what an earlier
+    // version of this comment assumed. api_keys IS RLS-protected, so the
+    // query below explicitly elevates to outbox_sweeper (Bypass RLS) for
+    // just this one cross-tenant read — see its inline comment. isTenantActive()
+    // gets away without doing the same because `tenants` itself has no RLS
+    // policies at all (confirmed via pg_policy) — that precedent does not
+    // generalize to every bare `db` query the way this comment used to imply.
     if (scopesFormat === "action" && oidcClientId) {
-      const [conflict] = await db
-        .select({
-          id: apiKeys.id,
-          expiresAt: apiKeys.expiresAt,
-        })
-        .from(apiKeys)
-        .where(
-          and(
-            eq(apiKeys.oidcClientId, oidcClientId),
-            isNull(apiKeys.revokedAt),
-            eq(apiKeys.oidcClientIdActive, true),
-          ),
-        );
+      // Deliberately cross-tenant (see the comment above), so this can't set
+      // app.tenant_id — same reasoning as setOutboxSweeperRole's other
+      // callers (outbox-poller.ts etc). app_user (this fork's DATABASE_URL
+      // role) does not bypass RLS, so without this, api_keys's tenant_read
+      // policy evaluates current_setting('app.tenant_id', true)::uuid
+      // against an unset session GUC — once any other session in this
+      // Postgres process has ever set that placeholder, it reads back as
+      // '' instead of NULL, and the policy's own ::uuid cast throws instead
+      // of just filtering rows out. Migration 0087 grants outbox_sweeper
+      // the SELECT this needs.
+      const [conflict] = await db.transaction(async (tx) => {
+        await setOutboxSweeperRole(tx);
+        return tx
+          .select({
+            id: apiKeys.id,
+            expiresAt: apiKeys.expiresAt,
+          })
+          .from(apiKeys)
+          .where(
+            and(
+              eq(apiKeys.oidcClientId, oidcClientId),
+              isNull(apiKeys.revokedAt),
+              eq(apiKeys.oidcClientIdActive, true),
+            ),
+          );
+      });
 
       if (conflict) {
         const isExpired =
@@ -213,6 +328,8 @@ export const createApiKeyHandler = factory.createHandlers(
                     applicationDescription,
                     applicationContactEmail,
                     oidcClientId,
+                    externalIssuer,
+                    externalOrgId,
                   }
                 : {}),
             })
@@ -225,6 +342,8 @@ export const createApiKeyHandler = factory.createHandlers(
               expiresAt: apiKeys.expiresAt,
               applicationName: apiKeys.applicationName,
               oidcClientId: apiKeys.oidcClientId,
+              externalIssuer: apiKeys.externalIssuer,
+              externalOrgId: apiKeys.externalOrgId,
             });
         } catch (err) {
           // Defense-in-depth for the race the pre-insert conflict check above

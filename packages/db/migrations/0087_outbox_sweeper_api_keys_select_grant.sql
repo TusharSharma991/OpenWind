@@ -1,0 +1,25 @@
+-- analytics: excluded (no new table — grant fix only)
+-- down:
+--   REVOKE SELECT ON api_keys FROM outbox_sweeper;
+
+-- api-keys/create.ts's cross-tenant OIDC Client ID uniqueness check deliberately
+-- queries api_keys OUTSIDE withTenantContext (a Client ID identifies one external
+-- application, not one tenant's registration of it — the check must see every
+-- tenant's rows, not just the caller's). That code's own comment assumed the `db`
+-- client bypasses RLS entirely, but this fork's DATABASE_URL authenticates as
+-- app_user, which does NOT bypass RLS (only migration_user/analytics_user/
+-- outbox_sweeper/the platform superuser do) — so the query hit api_keys's
+-- tenant_read policy with app.tenant_id never set for that session. Once any
+-- other session in this Postgres process has ever SET app.tenant_id (constant,
+-- via ordinary tenant-scoped traffic), Postgres's placeholder-GUC behavior makes
+-- current_setting('app.tenant_id', true) return '' instead of NULL for a session
+-- that never set it — and the policy's own `::uuid` cast on that value throws
+-- "invalid input syntax for type uuid: ''" instead of just filtering rows out.
+--
+-- outbox_sweeper is the narrowest fix available: app_user is already a member of
+-- it (`SET LOCAL ROLE outbox_sweeper` succeeds without a superuser), and it
+-- already exists specifically as a cannot-login, Bypass-RLS functional role for
+-- exactly this "one query needs to see across tenants" pattern — it just never
+-- had a SELECT grant on api_keys until now. Scoped to SELECT only; the calling
+-- code still does the actual uniqueness comparison, not this grant.
+GRANT SELECT ON api_keys TO outbox_sweeper;

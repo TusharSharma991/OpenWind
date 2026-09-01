@@ -1,7 +1,9 @@
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import type { JWTPayload, KeyLike } from "jose";
+import { z } from "zod";
 import { env } from "@platform/config";
 import { logger } from "@platform/logger";
+import { assertExternalIssuerEgressAllowed } from "./ssrf-guard.js";
 import type { AuthNexusClaims, AuthContext } from "./types.js";
 
 type JwksGetter = ReturnType<typeof createRemoteJWKSet>;
@@ -89,6 +91,113 @@ export async function verifyJwtWithAudience(
   return verifyJwtAgainstAudience(token, audience, {
     enforceMaxTokenAge: true,
   });
+}
+
+// Third-party API key external-org mapping (docs/specs/third-party-key-external-org-mapping.md,
+// ported from upstream/tushar's generalized version) -- a key's acting-person
+// tokens may come from an entirely different IdP than the platform's
+// configured primary (AUTHNEXUS_ISSUER). This resolves JWKS per-issuer via
+// that issuer's own OIDC discovery document, cached per-issuer indefinitely
+// (a provider's jwks_uri does not change in normal operation the way signing
+// keys inside it do -- those are still bounded by createRemoteJWKSet's own
+// cacheMaxAge below).
+//
+// Deliberately NOT a fork/swap of getJwks() above for a second hardcoded
+// provider (that's what this fork's AuthNexus-only swap already did, and is
+// exactly the gap this closes) -- this works for any standard-OIDC issuer,
+// discovered at call time, not hardcoded per provider.
+//
+// Unbounded growth here would become a real DoS surface once an admin-set
+// externalIssuer value is wired into the live verification path (dual-identity.ts)
+// -- a tenant with many third-party keys pointed at many distinct (typo'd or
+// otherwise) issuers could grow this map without limit. Bounded to a small
+// LRU-ish cap: Maps preserve insertion order, and `_touchIssuer` re-inserts
+// an entry on every hit to move it to the end, so eviction below always
+// drops the actual least-recently-used issuer, not just the oldest-inserted
+// one.
+const MAX_CACHED_EXTERNAL_ISSUERS = 50;
+const _jwksByIssuer = new Map<string, JwksGetter>();
+
+function _touchIssuer(issuer: string, jwks: JwksGetter): void {
+  _jwksByIssuer.delete(issuer);
+  _jwksByIssuer.set(issuer, jwks);
+  if (_jwksByIssuer.size > MAX_CACHED_EXTERNAL_ISSUERS) {
+    const oldest = _jwksByIssuer.keys().next().value;
+    if (oldest !== undefined) _jwksByIssuer.delete(oldest);
+  }
+}
+
+const OidcDiscoverySchema = z.object({
+  jwks_uri: z.string().url(),
+});
+
+async function getJwksForIssuer(issuer: string): Promise<JwksGetter> {
+  const cached = _jwksByIssuer.get(issuer);
+  if (cached) {
+    _touchIssuer(issuer, cached);
+    return cached;
+  }
+
+  // Security review finding: `issuer` is admin-supplied at key-creation time
+  // (validated only as `z.string().url()` there, no scheme/host restriction)
+  // -- a tenant admin is not a fully-trusted platform operator, so this is a
+  // real SSRF vector once a key using it is exercised. create.ts already
+  // runs this same check at creation time; it's repeated here as
+  // defense-in-depth (DNS/routing can change between creation and use).
+  await assertExternalIssuerEgressAllowed(issuer);
+
+  const res = await fetch(`${issuer}/.well-known/openid-configuration`);
+  if (!res.ok) {
+    throw new Error(
+      `OIDC discovery failed for issuer ${issuer}: ${res.status}`,
+    );
+  }
+  // External input (security.md: connector/3rd-party responses are always
+  // Zod-validated, never trusted via a bare type assertion) -- a malformed
+  // or malicious discovery document fails closed here instead of producing
+  // a confusing downstream error from new URL(undefined) or similar.
+  const discovery = OidcDiscoverySchema.parse(await res.json());
+  // jwks_uri is issuer-controlled content, not the already-guarded issuer
+  // origin itself -- a compromised/malicious issuer could point it at a
+  // third, unrelated internal target. Guarded the same way before it's ever
+  // handed to createRemoteJWKSet.
+  await assertExternalIssuerEgressAllowed(discovery.jwks_uri);
+
+  const jwks = createRemoteJWKSet(new URL(discovery.jwks_uri), {
+    cacheMaxAge: 60 * 60 * 1000,
+  });
+  _touchIssuer(issuer, jwks);
+  return jwks;
+}
+
+/**
+ * Same verification shape as verifyJwtWithAudience (signature, issuer,
+ * audience, 5s clock tolerance, max-token-age freshness), but against an
+ * explicit, caller-supplied issuer instead of the platform-wide
+ * AUTHNEXUS_ISSUER. Used when a third-party API key has its own registered
+ * external_issuer (wired into dual-identity.ts's requireActingPerson).
+ */
+export async function verifyJwtForIssuer(
+  token: string,
+  issuer: string,
+  audience: string,
+): Promise<(JWTPayload & AuthNexusClaims) | null> {
+  try {
+    const jwks = await getJwksForIssuer(issuer);
+    const { payload } = await jwtVerify(token, jwks as unknown as KeyLike, {
+      issuer,
+      audience,
+      clockTolerance: 5,
+      maxTokenAge: env.JWT_MAX_TOKEN_AGE_SECONDS,
+    });
+    return payload as JWTPayload & AuthNexusClaims;
+  } catch (err) {
+    logger.warn(
+      { error: String(err), issuer, audience },
+      "JWT verification failed (external issuer)",
+    );
+    return null;
+  }
 }
 
 export function extractAuthContext(

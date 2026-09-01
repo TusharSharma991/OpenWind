@@ -7,13 +7,19 @@ import type * as dbType from "@platform/db";
 
 // ── Hoisted mutable auth fixture ──────────────────────────────────────────────
 
-const { mockAuth } = vi.hoisted(() => ({
+const { mockAuth, mockAssertExternalIssuerEgressAllowed } = vi.hoisted(() => ({
   mockAuth: {
     tenantId: "t-aaa",
     userId: "u-bbb",
     roles: ["admin"] as string[],
     email: "test@example.com",
   },
+  // Real DNS/egress checking is exercised by ssrf-guard.test.ts directly —
+  // here it's mocked so external-org-mapping validation tests are
+  // deterministic and don't make real network calls. Defaults to "allowed";
+  // individual tests override with mockRejectedValueOnce to exercise the
+  // blocked path.
+  mockAssertExternalIssuerEgressAllowed: vi.fn(() => Promise.resolve()),
 }));
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
@@ -40,6 +46,7 @@ vi.mock("@platform/auth", async () => {
     API_KEY_DEFAULT_TTL_DAYS: 365,
     detectScopesFormat: actual.detectScopesFormat,
     unknownTicketActionScopes: actual.unknownTicketActionScopes,
+    assertExternalIssuerEgressAllowed: mockAssertExternalIssuerEgressAllowed,
   };
 });
 
@@ -76,10 +83,16 @@ vi.mock("@platform/db", async (importOriginal) => {
       mockUpdateSet(...args);
       return db;
     },
+    // The Client ID conflict check runs inside a transaction (setOutboxSweeperRole
+    // is mocked to a no-op below) — `transaction` just invokes the callback with
+    // `db` itself as `tx`, so the same chainable select()/from()/where() above
+    // still drives the test-controlled mockSelectResult.
+    transaction: (fn: (tx: unknown) => unknown) => fn(db),
   };
   return {
     ...actual,
     db,
+    setOutboxSweeperRole: () => Promise.resolve(undefined),
     withTenantContext: (_tenantId: unknown, fn: (tx: unknown) => unknown) => {
       const tx = {
         insert: () => tx,
@@ -351,6 +364,7 @@ describe("POST /api-keys — third-party (action-scoped) keys (ADR-012 Phase A)"
     mockAuth.roles = ["admin"];
     mockSelectResult.rows = [];
     mockInsertError.error = null;
+    mockAssertExternalIssuerEgressAllowed.mockResolvedValue(undefined);
   });
 
   it("returns 201 for a well-formed third-party key request, bypassing the role ceiling entirely", async () => {
@@ -562,5 +576,106 @@ describe("POST /api-keys — third-party (action-scoped) keys (ADR-012 Phase A)"
       body: thirdPartyBody(),
     });
     expect(res.status).not.toBe(422);
+  });
+});
+
+describe("POST /api-keys — external-org mapping (third-party-key-external-org-mapping.md)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAuth.roles = ["admin"];
+    mockSelectResult.rows = [];
+    mockInsertError.error = null;
+    mockAssertExternalIssuerEgressAllowed.mockResolvedValue(undefined);
+  });
+
+  it("returns 201 and persists externalIssuer/externalOrgId for a well-formed external mapping", async () => {
+    const res = await makeApp().request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: thirdPartyBody({
+        externalIssuer: "https://other-idp.example.com",
+        externalOrgId: "other-org-id",
+      }),
+    });
+    expect(res.status).toBe(201);
+    const insertArg = mockInsertValues.mock.calls[0][0];
+    expect(insertArg.externalIssuer).toBe("https://other-idp.example.com");
+    expect(insertArg.externalOrgId).toBe("other-org-id");
+    expect(mockAssertExternalIssuerEgressAllowed).toHaveBeenCalledWith(
+      "https://other-idp.example.com",
+    );
+  });
+
+  it("returns 422 when externalOrgId is set without externalIssuer", async () => {
+    const res = await makeApp().request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: thirdPartyBody({ externalOrgId: "other-org-id" }),
+    });
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("VALIDATION_ERROR");
+  });
+
+  it("returns 422 when externalIssuer's origin matches the platform's own primary issuer", async () => {
+    const res = await makeApp().request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: thirdPartyBody({
+        // AUTHNEXUS_ISSUER in this test env (apps/api/vitest.config.ts)
+        externalIssuer: "https://auth.rokkalabs.com",
+        externalOrgId: "some-org-id",
+      }),
+    });
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("VALIDATION_ERROR");
+    expect(mockAssertExternalIssuerEgressAllowed).not.toHaveBeenCalled();
+  });
+
+  it("returns ORG_MAPPING_REQUIRED (422) when externalIssuer is set without externalOrgId", async () => {
+    const res = await makeApp().request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: thirdPartyBody({
+        externalIssuer: "https://other-idp.example.com",
+      }),
+    });
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("ORG_MAPPING_REQUIRED");
+  });
+
+  it("returns 422 when the SSRF guard rejects externalIssuer", async () => {
+    mockAssertExternalIssuerEgressAllowed.mockRejectedValueOnce(
+      new Error("Issuer host resolves to a private/reserved address"),
+    );
+    const res = await makeApp().request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: thirdPartyBody({
+        externalIssuer: "https://other-idp.example.com",
+        externalOrgId: "other-org-id",
+      }),
+    });
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("VALIDATION_ERROR");
+    expect(json.message).toMatch(/private\/reserved/);
+  });
+
+  it("returns 422 when externalIssuer/externalOrgId are supplied on a role-format (internal) key", async () => {
+    const res = await makeApp().request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: body({
+        scopes: ["agent"],
+        externalIssuer: "https://other-idp.example.com",
+        externalOrgId: "other-org-id",
+      }),
+    });
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("VALIDATION_ERROR");
   });
 });

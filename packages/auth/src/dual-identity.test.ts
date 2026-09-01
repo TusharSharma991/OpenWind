@@ -9,14 +9,22 @@ vi.mock("@platform/logger", () => ({
 }));
 
 const mockVerifyJwtWithAudience = vi.fn();
+const mockVerifyJwtForIssuer = vi.fn();
 vi.mock("./jwks.js", () => ({
   verifyJwtWithAudience: (...args: unknown[]) =>
     mockVerifyJwtWithAudience(...args),
+  verifyJwtForIssuer: (...args: unknown[]) => mockVerifyJwtForIssuer(...args),
 }));
 
 // Row returned for the tenant-scoped api_keys lookup — undefined means "no
 // row" (key doesn't exist / already revoked, filtered by the WHERE clause).
-let mockKeyRow: { oidcClientId: string | null } | undefined = {
+let mockKeyRow:
+  | {
+      oidcClientId: string | null;
+      externalIssuer?: string | null;
+      externalOrgId?: string | null;
+    }
+  | undefined = {
   oidcClientId: "client-abc",
 };
 
@@ -32,6 +40,8 @@ vi.mock("@platform/db", () => ({
   apiKeys: {
     id: "api_keys.id",
     oidcClientId: "api_keys.oidc_client_id",
+    externalIssuer: "api_keys.external_issuer",
+    externalOrgId: "api_keys.external_org_id",
     revokedAt: "api_keys.revoked_at",
   },
   withTenantContext: vi.fn((_tenantId: string, fn: (tx: unknown) => unknown) =>
@@ -103,6 +113,7 @@ beforeEach(() => {
     iat: nowSeconds(),
     org_id: "org-ccc",
   });
+  mockVerifyJwtForIssuer.mockResolvedValue(null);
 });
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -313,5 +324,75 @@ describe("requireActingPerson", () => {
     expect(noHeader.status).toBe(401);
     expect(noClientId.status).toBe(401);
     expect(badToken.status).toBe(401);
+  });
+});
+
+describe("requireActingPerson — external-org mapping", () => {
+  it("verifies against the key's external issuer, not the platform's primary issuer, when externalIssuer is set", async () => {
+    mockKeyRow = {
+      oidcClientId: "client-abc",
+      externalIssuer: "https://other-idp.example.com",
+      externalOrgId: "other-org-id",
+    };
+    mockVerifyJwtForIssuer.mockResolvedValue({
+      sub: "person-1",
+      email: "person1@example.com",
+      iat: nowSeconds(),
+      org_id: "other-org-id",
+    });
+    const res = await get(makeApp(API_KEY_AUTH), "some-token");
+    expect(res.status).toBe(200);
+    expect(mockVerifyJwtForIssuer).toHaveBeenCalledWith(
+      "some-token",
+      "https://other-idp.example.com",
+      "client-abc",
+    );
+    expect(mockVerifyJwtWithAudience).not.toHaveBeenCalled();
+  });
+
+  it("compares the token's org claim against the key's own externalOrgId, not auth.orgId, when externalIssuer is set", async () => {
+    mockKeyRow = {
+      oidcClientId: "client-abc",
+      externalIssuer: "https://other-idp.example.com",
+      externalOrgId: "other-org-id",
+    };
+    // API_KEY_AUTH.orgId is "org-ccc" — a token whose org_id matches THAT
+    // (not externalOrgId) must still be rejected once a mapping is set.
+    mockVerifyJwtForIssuer.mockResolvedValue({
+      sub: "person-1",
+      email: "person1@example.com",
+      iat: nowSeconds(),
+      org_id: "org-ccc",
+    });
+    const res = await get(makeApp(API_KEY_AUTH), "some-token");
+    expect(res.status).toBe(401);
+  });
+
+  it("accepts a token from the external issuer whose org_id matches externalOrgId", async () => {
+    mockKeyRow = {
+      oidcClientId: "client-abc",
+      externalIssuer: "https://other-idp.example.com",
+      externalOrgId: "other-org-id",
+    };
+    mockVerifyJwtForIssuer.mockResolvedValue({
+      sub: "person-1",
+      email: "person1@example.com",
+      iat: nowSeconds(),
+      org_id: "other-org-id",
+    });
+    const res = await get(makeApp(API_KEY_AUTH), "some-token");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { actingPerson: { orgId: string } };
+    expect(body.actingPerson.orgId).toBe("other-org-id");
+  });
+
+  it("falls back to the platform's primary issuer/audience path when externalIssuer is not set (default behavior unchanged)", async () => {
+    const res = await get(makeApp(API_KEY_AUTH), "some-token");
+    expect(res.status).toBe(200);
+    expect(mockVerifyJwtWithAudience).toHaveBeenCalledWith(
+      "some-token",
+      "client-abc",
+    );
+    expect(mockVerifyJwtForIssuer).not.toHaveBeenCalled();
   });
 });

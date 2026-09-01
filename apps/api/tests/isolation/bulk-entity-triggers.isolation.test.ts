@@ -11,7 +11,7 @@
 
 import { describe, it, expect } from "vitest";
 import { eq, and } from "drizzle-orm";
-import { db, withTenantContext, outboxEvents } from "@platform/db";
+import { withTenantContext, outboxEvents } from "@platform/db";
 import {
   createEntityType,
   addEntityField,
@@ -24,22 +24,26 @@ const ASSIGNEE_ID = "11111111-0000-4000-a000-000000000002";
 
 describe("bulkCreateEntities outbox emission (#126)", () => {
   it("writes one entity.created row per created entity, with pii fields redacted", async () => {
-    const entityType = await createEntityType(db, TENANT, {
-      name: `bulk_create_ticket_${Date.now()}`,
-      plural: "bulk_create_tickets",
-      allowCustomFields: true,
-    });
-    await addEntityField(db, TENANT, entityType.id, {
-      name: "ssn",
-      label: "SSN",
-      fieldType: "text",
-      config: {},
-      isRequired: false,
-      isIndexed: false,
-      isSystem: false,
-      sortOrder: 0,
-      sensitivity: "pii",
-    });
+    const entityType = await withTenantContext(TENANT, (tx) =>
+      createEntityType(tx, TENANT, {
+        name: `bulk_create_ticket_${Date.now()}`,
+        plural: "bulk_create_tickets",
+        allowCustomFields: true,
+      }),
+    );
+    await withTenantContext(TENANT, (tx) =>
+      addEntityField(tx, TENANT, entityType.id, {
+        name: "ssn",
+        label: "SSN",
+        fieldType: "text",
+        config: {},
+        isRequired: false,
+        isIndexed: false,
+        isSystem: false,
+        sortOrder: 0,
+        sensitivity: "pii",
+      }),
+    );
 
     const { created, errors } = await withTenantContext(TENANT, (tx) =>
       bulkCreateEntities(tx, TENANT, [
@@ -85,11 +89,13 @@ describe("bulkCreateEntities outbox emission (#126)", () => {
 
 describe("bulkUpdateEntities outbox emission (#126)", () => {
   it("fires entity.assigned only for items whose assignee actually changed", async () => {
-    const entityType = await createEntityType(db, TENANT, {
-      name: `bulk_update_ticket_${Date.now()}`,
-      plural: "bulk_update_tickets",
-      allowCustomFields: true,
-    });
+    const entityType = await withTenantContext(TENANT, (tx) =>
+      createEntityType(tx, TENANT, {
+        name: `bulk_update_ticket_${Date.now()}`,
+        plural: "bulk_update_tickets",
+        allowCustomFields: true,
+      }),
+    );
 
     const { created } = await withTenantContext(TENANT, (tx) =>
       bulkCreateEntities(tx, TENANT, [

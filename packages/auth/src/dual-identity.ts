@@ -3,7 +3,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import type { Context, Next, MiddlewareHandler } from "hono";
 import { apiKeys, withTenantContext } from "@platform/db";
 import { logger } from "@platform/logger";
-import { verifyJwtWithAudience } from "./jwks.js";
+import { verifyJwtWithAudience, verifyJwtForIssuer } from "./jwks.js";
 import type { AuthContext } from "./types.js";
 
 /**
@@ -33,6 +33,31 @@ const ACTING_PERSON_TOKEN_HEADER = "X-Acting-Person-Token";
 // invariant of the design, not an operationally-tunable knob — same
 // precedent as API_KEY_ROTATION_OVERLAP_HOURS in middleware.ts.
 export const ACTING_PERSON_TOKEN_MAX_AGE_MINUTES = 15;
+
+// Third-party API key external-org mapping (docs/specs/third-party-key-external-org-mapping.md,
+// ported from upstream/tushar): a key with an external_issuer mapping must
+// resolve the org-claim NAME for that SPECIFIC issuer, not assume this
+// fork's own AuthNexus claim name ("org_id") applies -- a malicious/
+// compromised external IdP could otherwise include an AuthNexus-shaped
+// claim in its own token and have it win. There is deliberately no
+// admin-configurable claim-name field yet (same scope decision as upstream)
+// -- unrecognized external issuers default to "org_id" (the common modern-
+// OIDC convention this platform has seen), which is a reasonable default,
+// not a guarantee. An issuer using something else needs an entry added here
+// explicitly.
+const ORG_CLAIM_NAME_BY_EXTERNAL_ISSUER: Record<string, string> = {};
+const DEFAULT_EXTERNAL_ORG_CLAIM_NAME = "org_id";
+
+function extractOrgClaimForExternalIssuer(
+  claims: Record<string, unknown>,
+  issuer: string,
+): string | undefined {
+  const claimName =
+    ORG_CLAIM_NAME_BY_EXTERNAL_ISSUER[issuer] ??
+    DEFAULT_EXTERNAL_ORG_CLAIM_NAME;
+  const value = claims[claimName];
+  return typeof value === "string" && value ? value : undefined;
+}
 
 function unauthorized(c: Context): Response {
   // Deliberately generic across every failure case below (missing header,
@@ -94,7 +119,11 @@ export const requireActingPerson = (): MiddlewareHandler =>
       // revealing which case applied.
       const [keyRow] = await withTenantContext(auth.tenantId, (tx) =>
         tx
-          .select({ oidcClientId: apiKeys.oidcClientId })
+          .select({
+            oidcClientId: apiKeys.oidcClientId,
+            externalIssuer: apiKeys.externalIssuer,
+            externalOrgId: apiKeys.externalOrgId,
+          })
           .from(apiKeys)
           .where(and(eq(apiKeys.id, apiKeyId), isNull(apiKeys.revokedAt)))
           .limit(1),
@@ -103,10 +132,18 @@ export const requireActingPerson = (): MiddlewareHandler =>
         return unauthorized(c);
       }
 
-      const claims = await verifyJwtWithAudience(
-        personToken,
-        keyRow.oidcClientId,
-      );
+      // A key with an external mapping verifies against THAT issuer's JWKS
+      // (via discovery, verifyJwtForIssuer) instead of the platform's single
+      // AUTHNEXUS_ISSUER -- create.ts's validation guarantees
+      // externalIssuer/externalOrgId are set together or not at all, so
+      // checking one implies the other here.
+      const claims = keyRow.externalIssuer
+        ? await verifyJwtForIssuer(
+            personToken,
+            keyRow.externalIssuer,
+            keyRow.oidcClientId,
+          )
+        : await verifyJwtWithAudience(personToken, keyRow.oidcClientId);
       if (!claims) {
         return unauthorized(c);
       }
@@ -130,8 +167,17 @@ export const requireActingPerson = (): MiddlewareHandler =>
       // fresh token from a *different* tenant/org than the presented key's
       // own tenant is still rejected (spec R4). auth.orgId is the tenant's
       // mapped AuthNexus org, already resolved by requireAuth's API-key path.
-      const tokenOrgId = claims.org_id;
-      if (!tokenOrgId || tokenOrgId !== auth.orgId) {
+      // A key with an external mapping compares against ITS OWN
+      // external_org_id instead, using the per-issuer claim-name lookup (not
+      // this fork's own "org_id" field) since a second real issuer is now in
+      // play — see extractOrgClaimForExternalIssuer's own comment.
+      const expectedOrgId = keyRow.externalIssuer
+        ? keyRow.externalOrgId
+        : auth.orgId;
+      const tokenOrgId = keyRow.externalIssuer
+        ? extractOrgClaimForExternalIssuer(claims, keyRow.externalIssuer)
+        : claims.org_id;
+      if (!tokenOrgId || tokenOrgId !== expectedOrgId) {
         // Deliberately omits apiKeyId/tokenOrgId from this log line — the
         // API key's own audit trail (create/rotate/revoke) already records
         // the specific key involved elsewhere; tenantId alone is enough to

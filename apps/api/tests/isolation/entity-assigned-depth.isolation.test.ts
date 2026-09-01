@@ -34,11 +34,13 @@ afterAll(async () => {
 
 describe("entity.assigned outbox depth carries through for MAX_DEPTH enforcement (#120)", () => {
   it("updateEntity stamps depth+1 on the entity.assigned outbox payload when depth is supplied", async () => {
-    const entityType = await createEntityType(db, TENANT, {
-      name: `depth_assignee_${Date.now()}`,
-      plural: "depth_assignees",
-      allowCustomFields: true,
-    });
+    const entityType = await withTenantContext(TENANT, (tx) =>
+      createEntityType(tx, TENANT, {
+        name: `depth_assignee_${Date.now()}`,
+        plural: "depth_assignees",
+        allowCustomFields: true,
+      }),
+    );
 
     const instance = await withTenantContext(TENANT, (tx) =>
       createEntity(tx, TENANT, { entityTypeId: entityType.id, fields: {} }),

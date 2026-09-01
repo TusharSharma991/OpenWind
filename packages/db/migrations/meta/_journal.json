@@ -610,6 +610,20 @@
       "when": 1787834069961,
       "tag": "0086_admin_audit_log_created_at_idx",
       "breakpoints": false
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1787834069969,
+      "tag": "0087_outbox_sweeper_api_keys_select_grant",
+      "breakpoints": false
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1787834069970,
+      "tag": "0088_api_keys_external_org_mapping",
+      "breakpoints": false
     }
   ]
 }

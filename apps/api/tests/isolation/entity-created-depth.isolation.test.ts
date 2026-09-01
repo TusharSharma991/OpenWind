@@ -31,11 +31,13 @@ afterAll(async () => {
 
 describe("entity.created outbox depth carries through for MAX_DEPTH enforcement (#218)", () => {
   it("createEntity stamps depth+1 on the entity.created outbox payload when depth is supplied", async () => {
-    const entityType = await createEntityType(db, TENANT, {
-      name: `depth_creation_${Date.now()}`,
-      plural: "depth_creations",
-      allowCustomFields: true,
-    });
+    const entityType = await withTenantContext(TENANT, (tx) =>
+      createEntityType(tx, TENANT, {
+        name: `depth_creation_${Date.now()}`,
+        plural: "depth_creations",
+        allowCustomFields: true,
+      }),
+    );
 
     // Simulating executeCreateEntityAction (create-entity.ts) driven by an
     // automation rule at recursion depth 9 — this is what a self-triggering
@@ -78,11 +80,13 @@ describe("entity.created outbox depth carries through for MAX_DEPTH enforcement 
   });
 
   it("createEntity with assignedTo stamps depth+1 on both entity.created and entity.assigned outbox payloads", async () => {
-    const entityType = await createEntityType(db, TENANT, {
-      name: `depth_assigned_${Date.now()}`,
-      plural: "depth_assigneds",
-      allowCustomFields: true,
-    });
+    const entityType = await withTenantContext(TENANT, (tx) =>
+      createEntityType(tx, TENANT, {
+        name: `depth_assigned_${Date.now()}`,
+        plural: "depth_assigneds",
+        allowCustomFields: true,
+      }),
+    );
 
     const TEST_USER = "uuuuuuuu-0000-4000-a000-000000000218";
 

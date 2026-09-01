@@ -37,9 +37,13 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 3001,
       host: "0.0.0.0",
-      ...(env["VITE_ALLOWED_HOSTS"]
-        ? { allowedHosts: env["VITE_ALLOWED_HOSTS"].split(",") }
-        : {}),
+      // host.docker.internal is always allowed — it's how a container reaches
+      // this dev server via the host's Docker networking, not an env-specific
+      // hostname a deployment would want to opt into via VITE_ALLOWED_HOSTS.
+      allowedHosts: [
+        "host.docker.internal",
+        ...(env["VITE_ALLOWED_HOSTS"]?.split(",") ?? []),
+      ],
       watch: {
         usePolling: true,
         interval: 300,
@@ -47,6 +51,17 @@ export default defineConfig(({ mode }) => {
       ...(env["VITE_API_PROXY_TARGET"]
         ? {
             proxy: {
+              // Must come before the "/api" rule below — Vite matches proxy
+              // keys in insertion order (first prefix match wins), and the
+              // third-party API is mounted at the literal /api/v1 prefix
+              // (apps/api/src/app.ts's app.route("/api/v1", thirdPartyRouter)),
+              // unlike admin-ui's own internal routes which are unprefixed
+              // (/workflows, not /v1/workflows) and need "/api" stripped.
+              "/api/v1": {
+                target: env["VITE_API_PROXY_TARGET"],
+                changeOrigin: true,
+                // no rewrite — the backend expects the literal /api/v1/... prefix
+              },
               "/api": {
                 target: env["VITE_API_PROXY_TARGET"],
                 changeOrigin: true,

@@ -34,17 +34,21 @@ const ACTING_PERSON_TOKEN_HEADER = "X-Acting-Person-Token";
 // precedent as API_KEY_ROTATION_OVERLAP_HOURS in middleware.ts.
 export const ACTING_PERSON_TOKEN_MAX_AGE_MINUTES = 15;
 
-// Third-party API key external-org mapping (docs/specs/third-party-key-external-org-mapping.md,
-// ported from upstream/tushar): a key with an external_issuer mapping must
-// resolve the org-claim NAME for that SPECIFIC issuer, not assume this
-// fork's own AuthNexus claim name ("org_id") applies -- a malicious/
-// compromised external IdP could otherwise include an AuthNexus-shaped
-// claim in its own token and have it win. There is deliberately no
-// admin-configurable claim-name field yet (same scope decision as upstream)
-// -- unrecognized external issuers default to "org_id" (the common modern-
-// OIDC convention this platform has seen), which is a reasonable default,
-// not a guarantee. An issuer using something else needs an entry added here
-// explicitly.
+// Third-party API key external-org mapping (docs/specs/third-party-key-external-org-mapping.md):
+// a key with an external_issuer mapping must resolve the org-claim NAME for
+// that SPECIFIC issuer, not assume this fork's own AuthNexus claim name
+// ("org_id") applies -- a malicious/compromised external IdP could
+// otherwise include an AuthNexus-shaped claim in its own token and have it
+// win. There is deliberately no admin-configurable claim-name field yet --
+// unrecognized external issuers default to "org_id" (the common modern-OIDC
+// convention this platform has seen), which is a reasonable default, not a
+// guarantee. An issuer using something else (e.g. a Zitadel-backed external
+// IdP, which namespaces this claim as
+// "urn:zitadel:iam:user:resourceowner:id" instead) needs an entry added
+// here explicitly -- no tracking issue filed yet, revisit when such an
+// issuer is actually onboarded. This fork's own primary/default path
+// (below) never needs this lookup: every OpenWind-issued token is
+// AuthNexus's flat "org_id" claim, unconditionally.
 const ORG_CLAIM_NAME_BY_EXTERNAL_ISSUER: Record<string, string> = {};
 const DEFAULT_EXTERNAL_ORG_CLAIM_NAME = "org_id";
 
@@ -132,8 +136,9 @@ export const requireActingPerson = (): MiddlewareHandler =>
         return unauthorized(c);
       }
 
-      // A key with an external mapping verifies against THAT issuer's JWKS
-      // (via discovery, verifyJwtForIssuer) instead of the platform's single
+      // docs/specs/third-party-key-external-org-mapping.md: a key with an
+      // external mapping verifies against THAT issuer's JWKS (via
+      // discovery, verifyJwtForIssuer) instead of the platform's single
       // AUTHNEXUS_ISSUER -- create.ts's validation guarantees
       // externalIssuer/externalOrgId are set together or not at all, so
       // checking one implies the other here.
@@ -142,6 +147,7 @@ export const requireActingPerson = (): MiddlewareHandler =>
             personToken,
             keyRow.externalIssuer,
             keyRow.oidcClientId,
+            auth.tenantId,
           )
         : await verifyJwtWithAudience(personToken, keyRow.oidcClientId);
       if (!claims) {

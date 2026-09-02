@@ -1,147 +1,253 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import React, { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@platform/ui";
 import { fetchWithAuth, API_URL } from "../../lib/api.js";
-import { ConfirmDeleteDialog } from "../../components/confirm-delete-dialog.js";
 import { showAlert } from "../../components/global-alert-dialog.js";
 import { CreateApiKeyModal } from "./create.js";
-import { EditApiKeyModal } from "./edit.js";
-import { KeyRevealModal } from "./key-reveal.js";
-import {
-  useApiKeyActions,
-  API_KEY_ACTION_CONFIRM_COPY,
-  type ApiKeyActionKind,
-} from "../../hooks/use-api-key-actions.js";
 import {
   computeApiKeyStatus,
-  computeExpiryBadge,
-  summarizeScopes,
   type ApiKeyRow,
+  type ApiKeyStatus,
 } from "./status.js";
+import {
+  groupKeysByApplication,
+  type ApplicationGroup,
+} from "./application-grouping.js";
 
-const STATUS_LABEL: Record<string, string> = {
+const STATUS_LABEL: Record<ApiKeyStatus, string> = {
   active: "Active",
   rotating: "Rotating",
   expired: "Expired",
   revoked: "Revoked",
 };
 
-// Date-only formatting hid exactly the detail that matters most on this
-// screen — telling apart two events on the same day (e.g. a rotated key's
-// ~24h grace-window expiry vs. its successor's ~3-month one) requires the
-// time, not just the date.
-function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+// Same palette/order as pages/records/index.tsx's WorkflowCard (CARD_GRADIENTS)
+// — kept as its own small local copy rather than importing across pages/,
+// per this codebase's own "three similar lines beats a premature shared
+// module" convention; the two card designs are visually related but not
+// meant to stay byte-for-byte coupled forever.
+const CARD_GRADIENTS = [
+  "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+  "linear-gradient(135deg, #f093fb 0%, #f5576c 100%)",
+  "linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)",
+  "linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)",
+  "linear-gradient(135deg, #fa709a 0%, #fee140 100%)",
+  "linear-gradient(135deg, #a18cd1 0%, #fbc2eb 100%)",
+  "linear-gradient(135deg, #fccb90 0%, #d57eeb 100%)",
+];
+
+const STATUS_PILL_COLOR: Record<ApiKeyStatus, string> = {
+  active: "#22c55e",
+  rotating: "#f59e0b",
+  expired: "#f97316",
+  revoked: "#94a3b8",
+};
+
+function KeyIcon(): React.ReactElement {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      viewBox="0 0 24 24"
+      strokeWidth="1.5"
+      stroke="#fff"
+      style={{ width: "32px", height: "32px" }}
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"
+      />
+    </svg>
+  );
 }
 
-/**
- * .rcd-kebab-menu is position:absolute inside .rcd-kebab-wrap — fine on a
- * static card, but this table sits in a horizontal-scroll wrapper
- * (overflow-x: auto), which clips any absolutely-positioned descendant that
- * would render outside its bounds regardless of z-index (overflow clipping
- * happens independent of stacking order). Rendered via a portal into
- * document.body instead, with position:fixed computed from the trigger
- * button's own bounding rect, so it's never clipped by an ancestor.
- */
-function RowActionsMenu({
-  disabled,
-  open,
-  onToggle,
-  onRequestClose,
-  children,
+function ApplicationCard({
+  app,
+  gradient,
+  allKeys,
+  onNavigate,
 }: {
-  disabled: boolean;
-  open: boolean;
-  onToggle: () => void;
-  onRequestClose: () => void;
-  children: React.ReactNode;
+  app: ApplicationGroup;
+  gradient: string;
+  allKeys: readonly ApiKeyRow[];
+  onNavigate: (slug: string) => void;
 }): React.ReactElement {
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const [coords, setCoords] = useState<{ top: number; right: number } | null>(
-    null,
+  // Per-key status breakdown, deduplicated and ordered active-first — a
+  // quick "what's going on with this application" read without opening it.
+  const statusOrder: ApiKeyStatus[] = [
+    "active",
+    "rotating",
+    "expired",
+    "revoked",
+  ];
+  const presentStatuses = statusOrder.filter((s) =>
+    app.keys.some((k) => computeApiKeyStatus(k, allKeys) === s),
   );
-
-  useEffect(() => {
-    if (!open || !btnRef.current) return;
-    const rect = btnRef.current.getBoundingClientRect();
-    setCoords({
-      top: rect.bottom + 6,
-      right: window.innerWidth - rect.right,
-    });
-  }, [open]);
+  const mostRecentCreatedAt = app.keys[0]?.createdAt;
 
   return (
-    <div className="rcd-kebab-wrap">
-      <button
-        ref={btnRef}
-        type="button"
-        className="rcd-kebab-btn"
-        aria-label="More actions"
-        aria-expanded={open}
-        disabled={disabled}
-        onClick={onToggle}
+    <div
+      onClick={() => onNavigate(app.slug)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") onNavigate(app.slug);
+      }}
+      style={{
+        height: "280px",
+        display: "flex",
+        flexDirection: "column",
+        borderRadius: "16px",
+        overflow: "hidden",
+        cursor: "pointer",
+        border: "1px solid var(--border-color)",
+        background: "var(--bg-secondary)",
+        boxShadow: "var(--shadow-sm)",
+      }}
+    >
+      {/* Gradient header — fixed height, top portion, same shape as the
+          Records page's WorkflowCard. */}
+      <div
+        style={{
+          height: "140px",
+          flexShrink: 0,
+          background: gradient,
+          padding: "20px 24px 16px",
+          position: "relative",
+          overflow: "hidden",
+        }}
       >
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="currentColor"
-          aria-hidden="true"
+        <div
+          style={{
+            position: "absolute",
+            top: "12px",
+            right: "12px",
+            background: "rgba(255,255,255,.25)",
+            backdropFilter: "blur(4px)",
+            borderRadius: "20px",
+            padding: "2px 10px",
+            fontSize: "11px",
+            fontWeight: 600,
+            color: "#fff",
+          }}
         >
-          <circle cx="12" cy="5" r="2" />
-          <circle cx="12" cy="12" r="2" />
-          <circle cx="12" cy="19" r="2" />
-        </svg>
-      </button>
-      {open &&
-        coords &&
-        createPortal(
-          <>
-            <div className="rcd-kebab-backdrop" onClick={onRequestClose} />
+          {app.keys.length} key{app.keys.length !== 1 ? "s" : ""}
+        </div>
+        <div style={{ marginBottom: "8px" }}>
+          <KeyIcon />
+        </div>
+        <div
+          style={{
+            fontSize: "17px",
+            fontWeight: 700,
+            color: "#fff",
+            lineHeight: 1.25,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            display: "-webkit-box",
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: "vertical",
+          }}
+        >
+          {app.displayName}
+        </div>
+      </div>
+
+      {/* Card body — bottom portion, fills remaining fixed height. */}
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: "flex",
+          flexDirection: "column",
+          padding: "16px 20px 20px",
+          overflow: "hidden",
+        }}
+      >
+        <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
+          <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+            {presentStatuses.map((status) => (
+              <span
+                key={status}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "4px",
+                  padding: "2px 8px",
+                  borderRadius: "20px",
+                  fontSize: "11px",
+                  fontWeight: 500,
+                  background: `${STATUS_PILL_COLOR[status]}22`,
+                  color: STATUS_PILL_COLOR[status],
+                  border: `1px solid ${STATUS_PILL_COLOR[status]}44`,
+                }}
+              >
+                <span
+                  style={{
+                    width: "6px",
+                    height: "6px",
+                    borderRadius: "50%",
+                    background: STATUS_PILL_COLOR[status],
+                    flexShrink: 0,
+                  }}
+                />
+                {STATUS_LABEL[status]}
+              </span>
+            ))}
+          </div>
+          {mostRecentCreatedAt && (
             <div
-              className="rcd-kebab-menu"
-              style={{
-                position: "fixed",
-                top: coords.top,
-                right: coords.right,
-              }}
+              className="page-subtitle"
+              style={{ margin: "10px 0 0", fontSize: "12px" }}
             >
-              {children}
+              Newest key created{" "}
+              {new Date(mostRecentCreatedAt).toLocaleDateString(undefined, {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+              })}
             </div>
-          </>,
-          document.body,
-        )}
+          )}
+        </div>
+
+        <Button
+          variant="primary"
+          style={{
+            width: "100%",
+            justifyContent: "center",
+            marginTop: "16px",
+            flexShrink: 0,
+          }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onNavigate(app.slug);
+          }}
+        >
+          View Application →
+        </Button>
+      </div>
     </div>
   );
 }
 
+/**
+ * ApiKeys — card grid, one card per unique application (grouped by
+ * normalized applicationName, migration 0089's own uniqueness rule). Click
+ * a card to see that application's full key history (created/expired/
+ * revoked/rotated) and its access logs — see detail.tsx. Card design
+ * mirrors pages/records/index.tsx's WorkflowCard (gradient header, fixed
+ * height, status pills, pinned CTA button).
+ */
 export function ApiKeys(): React.ReactElement {
+  const navigate = useNavigate();
   // Refine's dataProvider.getList doesn't forward query params from `meta`,
   // and this screen specifically needs the opt-in `includeRevoked=true` param
   // (see list.ts) to show the full lifecycle per R10 — fetched directly
   // instead, same non-CRUD pattern already used by use-file-upload.ts.
   const [keys, setKeys] = useState<ApiKeyRow[]>([]);
-  const [userNames, setUserNames] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
-  const [editingKey, setEditingKey] = useState<ApiKeyRow | null>(null);
-  const { busyKeyId, revoke, rotate, emergencyRotate } = useApiKeyActions();
-  const [confirmState, setConfirmState] = useState<{
-    id: string;
-    kind: ApiKeyActionKind;
-  } | null>(null);
-
-  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
-  const [revealKey, setRevealKey] = useState<{
-    title: string;
-    rawKey: string;
-  } | null>(null);
 
   const refresh = useCallback((): void => {
     setIsLoading(true);
@@ -159,56 +265,8 @@ export function ApiKeys(): React.ReactElement {
     refresh();
   }, [refresh]);
 
-  // "Created by" stores the raw Zitadel user ID (createdBy on the api_keys
-  // row) — resolved to a display name here via the same /users endpoint
-  // user-ref-picker.tsx already uses for the identical id-vs-name problem.
-  useEffect(() => {
-    fetchWithAuth(`${API_URL}/users`)
-      .then((res) => {
-        const list =
-          (
-            res as {
-              data?: Array<{
-                userId: string;
-                email: string;
-                displayName: string | null;
-              }>;
-            }
-          ).data ?? [];
-        const map: Record<string, string> = {};
-        for (const u of list) map[u.userId] = u.displayName ?? u.email;
-        setUserNames(map);
-      })
-      .catch(() => {
-        /* fall back to showing the raw ID below */
-      });
-  }, []);
-
-  async function handleConfirm(): Promise<void> {
-    if (!confirmState) return;
-    const { id, kind } = confirmState;
-    if (kind === "revoke") {
-      const ok = await revoke(id);
-      if (ok) refresh();
-      else showAlert("Failed to revoke the key.");
-    } else if (kind === "rotate") {
-      const result = await rotate(id);
-      if (result) {
-        refresh();
-        setRevealKey({ title: "Key rotated", rawKey: result.key });
-      } else {
-        showAlert("Failed to rotate the key.");
-      }
-    } else {
-      const result = await emergencyRotate(id);
-      if (result) {
-        refresh();
-        setRevealKey({ title: "Key emergency-rotated", rawKey: result.key });
-      } else {
-        showAlert("Failed to emergency-rotate the key.");
-      }
-    }
-    setConfirmState(null);
+  function goToApplication(slug: string): void {
+    navigate(`/admin/api-keys/${encodeURIComponent(slug)}`);
   }
 
   if (isLoading) {
@@ -220,12 +278,7 @@ export function ApiKeys(): React.ReactElement {
     );
   }
 
-  // Newest first — a rotation's dying predecessor and its new successor both
-  // show near the top together, instead of the predecessor sitting wherever
-  // it was originally created.
-  const sortedKeys = [...keys].sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-  );
+  const applications = groupKeysByApplication(keys);
 
   return (
     <div>
@@ -244,7 +297,7 @@ export function ApiKeys(): React.ReactElement {
         </div>
       </div>
 
-      {keys.length === 0 ? (
+      {applications.length === 0 ? (
         <div className="wfl-empty">
           <h4>No API keys yet</h4>
           <p>Create one to let a third-party application access tickets.</p>
@@ -257,152 +310,24 @@ export function ApiKeys(): React.ReactElement {
           </Button>
         </div>
       ) : (
-        <div className="rcd-table-wrap">
-          <table className="rcd-table" style={{ whiteSpace: "nowrap" }}>
-            <thead>
-              <tr>
-                <th>Application</th>
-                <th>Created by</th>
-                <th>Created</th>
-                <th>Expires</th>
-                <th>Scopes</th>
-                <th>Status</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {sortedKeys.map((key) => {
-                const status = computeApiKeyStatus(key, keys);
-                const badge = computeExpiryBadge(key.expiresAt);
-                const isBusy = busyKeyId === key.id;
-                const isRevoked = status === "revoked";
-                const menuOpen = openMenuId === key.id;
-                return (
-                  <tr key={key.id}>
-                    <td>{key.applicationName ?? key.name}</td>
-                    <td>
-                      {key.createdBy
-                        ? (userNames[key.createdBy] ?? key.createdBy)
-                        : "—"}
-                    </td>
-                    <td>{formatDateTime(key.createdAt)}</td>
-                    <td>
-                      {key.expiresAt ? formatDateTime(key.expiresAt) : "Never"}
-                      {badge.level !== "none" && (
-                        <span
-                          className="stat-pill"
-                          style={{
-                            marginLeft: 8,
-                            color:
-                              badge.level === "red"
-                                ? "var(--danger, hsl(350, 80%, 60%))"
-                                : "var(--warning, hsl(38, 92%, 50%))",
-                          }}
-                        >
-                          {badge.label}
-                        </span>
-                      )}
-                    </td>
-                    <td>{summarizeScopes(key.scopes, key.scopesFormat)}</td>
-                    <td>
-                      <span
-                        className={`wfl-status-badge ${status === "active" ? "wfl-status-active" : "wfl-status-inactive"}`}
-                      >
-                        <span className="wfl-status-dot" />
-                        {STATUS_LABEL[status]}
-                      </span>
-                    </td>
-                    <td>
-                      {!isRevoked && (
-                        <RowActionsMenu
-                          disabled={isBusy}
-                          open={menuOpen}
-                          onToggle={() =>
-                            setOpenMenuId(menuOpen ? null : key.id)
-                          }
-                          onRequestClose={() => setOpenMenuId(null)}
-                        >
-                          <button
-                            type="button"
-                            className="rcd-kebab-menu-item"
-                            onClick={() => {
-                              setOpenMenuId(null);
-                              setEditingKey(key);
-                            }}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            className="rcd-kebab-menu-item"
-                            onClick={() => {
-                              setOpenMenuId(null);
-                              setConfirmState({ id: key.id, kind: "rotate" });
-                            }}
-                          >
-                            Rotate
-                          </button>
-                          <button
-                            type="button"
-                            className="rcd-kebab-menu-item"
-                            onClick={() => {
-                              setOpenMenuId(null);
-                              setConfirmState({
-                                id: key.id,
-                                kind: "emergency-rotate",
-                              });
-                            }}
-                          >
-                            Emergency Rotate
-                          </button>
-                          <button
-                            type="button"
-                            className="rcd-kebab-menu-item"
-                            style={{
-                              color: "var(--danger, hsl(350, 80%, 60%))",
-                            }}
-                            onClick={() => {
-                              setOpenMenuId(null);
-                              setConfirmState({ id: key.id, kind: "revoke" });
-                            }}
-                          >
-                            Revoke
-                          </button>
-                        </RowActionsMenu>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+            gap: "20px",
+          }}
+        >
+          {applications.map((app, i) => (
+            <ApplicationCard
+              key={app.slug}
+              app={app}
+              gradient={CARD_GRADIENTS[i % CARD_GRADIENTS.length] ?? ""}
+              allKeys={keys}
+              onNavigate={goToApplication}
+            />
+          ))}
         </div>
       )}
-
-      <ConfirmDeleteDialog
-        open={confirmState !== null}
-        {...(confirmState
-          ? { title: API_KEY_ACTION_CONFIRM_COPY[confirmState.kind].title }
-          : {})}
-        message={
-          confirmState
-            ? API_KEY_ACTION_CONFIRM_COPY[confirmState.kind].message
-            : ""
-        }
-        confirmLabel={
-          confirmState
-            ? API_KEY_ACTION_CONFIRM_COPY[confirmState.kind].confirmLabel
-            : "Confirm"
-        }
-        busyLabel={
-          confirmState
-            ? API_KEY_ACTION_CONFIRM_COPY[confirmState.kind].busyLabel
-            : "Working…"
-        }
-        busy={confirmState !== null && busyKeyId === confirmState.id}
-        onConfirm={() => void handleConfirm()}
-        onCancel={() => setConfirmState(null)}
-      />
 
       <CreateApiKeyModal
         open={createOpen}
@@ -411,22 +336,6 @@ export function ApiKeys(): React.ReactElement {
           setCreateOpen(false);
           refresh();
         }}
-      />
-
-      <EditApiKeyModal
-        keyRow={editingKey}
-        onClose={() => setEditingKey(null)}
-        onSaved={() => {
-          setEditingKey(null);
-          refresh();
-        }}
-      />
-
-      <KeyRevealModal
-        open={revealKey !== null}
-        title={revealKey?.title ?? ""}
-        rawKey={revealKey?.rawKey ?? null}
-        onClose={() => setRevealKey(null)}
       />
     </div>
   );

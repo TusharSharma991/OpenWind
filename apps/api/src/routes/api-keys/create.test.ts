@@ -46,7 +46,8 @@ vi.mock("@platform/auth", async () => {
     API_KEY_DEFAULT_TTL_DAYS: 365,
     detectScopesFormat: actual.detectScopesFormat,
     unknownTicketActionScopes: actual.unknownTicketActionScopes,
-    assertExternalIssuerEgressAllowed: mockAssertExternalIssuerEgressAllowed,
+    assertExternalIssuerEgressAllowed: (...args: unknown[]) =>
+      mockAssertExternalIssuerEgressAllowed(...args),
   };
 });
 
@@ -58,16 +59,28 @@ const mockWriteAuditEntry = vi.fn();
 // (the `db.select(...).from(apiKeys).where(...)` in create.ts — the bare,
 // RLS-bypassing client, not the tenant-scoped `tx`) returns, without needing
 // a real database.
-const { mockSelectResult, mockInsertError } = vi.hoisted(() => ({
-  mockSelectResult: { rows: [] as unknown[] },
-  // Lets a test simulate the database's own unique-violation on insert —
-  // e.g. two concurrent requests racing for the same Client ID, both passing
-  // the pre-insert check before either has inserted — so it can only ever be
-  // caught here.
-  mockInsertError: {
-    error: null as { code: string; constraint_name: string } | null,
-  },
-}));
+const { mockSelectResult, mockInsertError, mockAppNameCandidates } = vi.hoisted(
+  () => ({
+    mockSelectResult: { rows: [] as unknown[] },
+    // Lets a test simulate the database's own unique-violation on insert —
+    // e.g. two concurrent requests racing for the same Client ID, both passing
+    // the pre-insert check before either has inserted — so it can only ever be
+    // caught here.
+    mockInsertError: {
+      error: null as { code: string; constraint_name: string } | null,
+    },
+    // Tenant-scoped applicationName conflict check's own select — defaults
+    // to "no other active key in this tenant" (empty).
+    mockAppNameCandidates: {
+      rows: [] as Array<{
+        id: string;
+        applicationName: string | null;
+        oidcClientId: string | null;
+        expiresAt: Date | null;
+      }>,
+    },
+  }),
+);
 
 vi.mock("@platform/db", async (importOriginal) => {
   const actual = await importOriginal<typeof dbType>();
@@ -122,6 +135,17 @@ vi.mock("@platform/db", async (importOriginal) => {
               expiresAt: new Date("2027-08-09T00:00:00Z"),
             },
           ]);
+        },
+        // Tenant-scoped applicationName conflict check (create.ts, migration
+        // 0089) — a separate select/update chain on the same tx object,
+        // independent of the insert chain above.
+        select: () => tx,
+        from: () => tx,
+        where: () => Promise.resolve(mockAppNameCandidates.rows),
+        update: () => tx,
+        set: (...args: unknown[]) => {
+          mockUpdateSet(...args);
+          return tx;
         },
       };
       return fn(tx);
@@ -365,6 +389,7 @@ describe("POST /api-keys — third-party (action-scoped) keys (ADR-012 Phase A)"
     mockSelectResult.rows = [];
     mockInsertError.error = null;
     mockAssertExternalIssuerEgressAllowed.mockResolvedValue(undefined);
+    mockAppNameCandidates.rows = [];
   });
 
   it("returns 201 for a well-formed third-party key request, bypassing the role ceiling entirely", async () => {
@@ -579,53 +604,42 @@ describe("POST /api-keys — third-party (action-scoped) keys (ADR-012 Phase A)"
   });
 });
 
-describe("POST /api-keys — external-org mapping (third-party-key-external-org-mapping.md)", () => {
+describe("POST /api-keys — external-org mapping (docs/specs/third-party-key-external-org-mapping.md)", () => {
+  const EXTERNAL_ISSUER = "https://auth.external-idp-test.example";
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.roles = ["admin"];
     mockSelectResult.rows = [];
     mockInsertError.error = null;
+    mockAppNameCandidates.rows = [];
+    mockAssertExternalIssuerEgressAllowed.mockReset();
     mockAssertExternalIssuerEgressAllowed.mockResolvedValue(undefined);
   });
 
-  it("returns 201 and persists externalIssuer/externalOrgId for a well-formed external mapping", async () => {
+  it("stores a valid externalIssuer/externalOrgId pair and runs it through the SSRF guard", async () => {
     const res = await makeApp().request("/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: thirdPartyBody({
-        externalIssuer: "https://other-idp.example.com",
-        externalOrgId: "other-org-id",
+        externalIssuer: EXTERNAL_ISSUER,
+        externalOrgId: "external-org-1",
       }),
     });
     expect(res.status).toBe(201);
     const insertArg = mockInsertValues.mock.calls[0][0];
-    expect(insertArg.externalIssuer).toBe("https://other-idp.example.com");
-    expect(insertArg.externalOrgId).toBe("other-org-id");
+    expect(insertArg.externalIssuer).toBe(EXTERNAL_ISSUER);
+    expect(insertArg.externalOrgId).toBe("external-org-1");
     expect(mockAssertExternalIssuerEgressAllowed).toHaveBeenCalledWith(
-      "https://other-idp.example.com",
+      EXTERNAL_ISSUER,
     );
   });
 
-  it("returns 422 when externalOrgId is set without externalIssuer", async () => {
+  it("returns 422 when externalOrgId is supplied without externalIssuer", async () => {
     const res = await makeApp().request("/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: thirdPartyBody({ externalOrgId: "other-org-id" }),
-    });
-    expect(res.status).toBe(422);
-    const json = await res.json();
-    expect(json.error).toBe("VALIDATION_ERROR");
-  });
-
-  it("returns 422 when externalIssuer's origin matches the platform's own primary issuer", async () => {
-    const res = await makeApp().request("/", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: thirdPartyBody({
-        // AUTHNEXUS_ISSUER in this test env (apps/api/vitest.config.ts)
-        externalIssuer: "https://auth.rokkalabs.com",
-        externalOrgId: "some-org-id",
-      }),
+      body: thirdPartyBody({ externalOrgId: "external-org-orphan" }),
     });
     expect(res.status).toBe(422);
     const json = await res.json();
@@ -633,49 +647,206 @@ describe("POST /api-keys — external-org mapping (third-party-key-external-org-
     expect(mockAssertExternalIssuerEgressAllowed).not.toHaveBeenCalled();
   });
 
-  it("returns ORG_MAPPING_REQUIRED (422) when externalIssuer is set without externalOrgId", async () => {
+  it("returns 422 ORG_MAPPING_REQUIRED when externalIssuer is supplied without externalOrgId", async () => {
     const res = await makeApp().request("/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: thirdPartyBody({
-        externalIssuer: "https://other-idp.example.com",
-      }),
+      body: thirdPartyBody({ externalIssuer: EXTERNAL_ISSUER }),
     });
     expect(res.status).toBe(422);
     const json = await res.json();
     expect(json.error).toBe("ORG_MAPPING_REQUIRED");
   });
 
-  it("returns 422 when the SSRF guard rejects externalIssuer", async () => {
+  it("rejects externalIssuer/externalOrgId on a role-format key", async () => {
+    const res = await makeApp().request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: body({
+        externalIssuer: EXTERNAL_ISSUER,
+        externalOrgId: "external-org-role-format",
+      }),
+    });
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.error).toBe("VALIDATION_ERROR");
+  });
+
+  // Security-review finding (docs/specs/third-party-key-external-org-mapping.md
+  // Phase 2): create.ts must actually invoke the SSRF guard and fail closed
+  // when it rejects, not just import it unused.
+  it("returns 422 (not 201, not an unhandled 500) when the SSRF guard rejects the externalIssuer", async () => {
     mockAssertExternalIssuerEgressAllowed.mockRejectedValueOnce(
-      new Error("Issuer host resolves to a private/reserved address"),
+      new Error(
+        'Issuer host "169.254.169.254" resolves to a private/reserved address',
+      ),
     );
     const res = await makeApp().request("/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: thirdPartyBody({
-        externalIssuer: "https://other-idp.example.com",
-        externalOrgId: "other-org-id",
+        externalIssuer: "https://169.254.169.254",
+        externalOrgId: "external-org-blocked",
       }),
     });
     expect(res.status).toBe(422);
     const json = await res.json();
     expect(json.error).toBe("VALIDATION_ERROR");
-    expect(json.message).toMatch(/private\/reserved/);
+    expect(mockInsertValues).not.toHaveBeenCalled();
   });
 
-  it("returns 422 when externalIssuer/externalOrgId are supplied on a role-format (internal) key", async () => {
+  // PR #545 review (PrabhuVijit, MUST FIX): a trailing-slash externalIssuer
+  // is a valid URL that passed unnoticed through every branch above and was
+  // stored verbatim -- breaking discovery/JWKS-cache-key/jwtVerify at
+  // verification time on an otherwise-correct issuer. Prove-it pattern:
+  // would fail against the pre-fix code (insertArg.externalIssuer would
+  // equal the raw, slash-suffixed input).
+  it("normalizes a trailing-slash externalIssuer before storage", async () => {
     const res = await makeApp().request("/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: body({
-        scopes: ["agent"],
-        externalIssuer: "https://other-idp.example.com",
-        externalOrgId: "other-org-id",
+      body: thirdPartyBody({
+        externalIssuer: `${EXTERNAL_ISSUER}/`,
+        externalOrgId: "external-org-trailing-slash",
       }),
     });
-    expect(res.status).toBe(422);
+    expect(res.status).toBe(201);
+    const insertArg = mockInsertValues.mock.calls[0][0];
+    expect(insertArg.externalIssuer).toBe(EXTERNAL_ISSUER);
+  });
+
+  // PR #545 review (PrabhuVijit, MUST FIX): a direct API caller (bypassing
+  // the admin UI's own trim) could previously store a whitespace-padded
+  // externalOrgId that would never match a real OIDC org claim value.
+  it("trims whitespace from externalOrgId before storage", async () => {
+    const res = await makeApp().request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: thirdPartyBody({
+        externalIssuer: EXTERNAL_ISSUER,
+        externalOrgId: "  external-org-padded  ",
+      }),
+    });
+    expect(res.status).toBe(201);
+    const insertArg = mockInsertValues.mock.calls[0][0];
+    expect(insertArg.externalOrgId).toBe("external-org-padded");
+  });
+
+  it("rejects a malformed externalIssuer with a clean 400 (schema-level url() validation), never reaching the SSRF guard", async () => {
+    const res = await makeApp().request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: thirdPartyBody({
+        externalIssuer: "not-a-url",
+        externalOrgId: "external-org-malformed",
+      }),
+    });
+    expect(res.status).toBe(400);
+    expect(mockAssertExternalIssuerEgressAllowed).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api-keys — applicationName uniqueness (migration 0089, admin-ui card-view grouping)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAuth.roles = ["admin"];
+    mockSelectResult.rows = [];
+    mockInsertError.error = null;
+    mockAppNameCandidates.rows = [];
+  });
+
+  it("returns 409 APPLICATION_NAME_IN_USE when another active key in this tenant already uses the same normalized name (different Client ID)", async () => {
+    mockAppNameCandidates.rows = [
+      {
+        id: "other-key-1",
+        applicationName: "  Acme Helpdesk Sync ",
+        oidcClientId: "some-other-client-id",
+        expiresAt: new Date(Date.now() + 60_000),
+      },
+    ];
+    const res = await makeApp().request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: thirdPartyBody({ applicationName: "acme helpdesk sync" }),
+    });
+    expect(res.status).toBe(409);
     const json = await res.json();
-    expect(json.error).toBe("VALIDATION_ERROR");
+    expect(json.error).toBe("APPLICATION_NAME_IN_USE");
+    expect(mockInsertValues).not.toHaveBeenCalled();
+  });
+
+  it("does not conflict with itself when the matching row shares the same Client ID (e.g. a stale read of the same registration)", async () => {
+    mockAppNameCandidates.rows = [
+      {
+        id: "other-key-1",
+        applicationName: "Acme Helpdesk Sync",
+        oidcClientId: "acme-helpdesk-sync-client",
+        expiresAt: new Date(Date.now() + 60_000),
+      },
+    ];
+    const res = await makeApp().request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: thirdPartyBody({ applicationName: "Acme Helpdesk Sync" }),
+    });
+    expect(res.status).toBe(201);
+  });
+
+  it("reclaims (auto-revokes) an expired-but-not-yet-revoked name conflict, then succeeds", async () => {
+    mockAppNameCandidates.rows = [
+      {
+        id: "stale-expired-key",
+        applicationName: "Acme Helpdesk Sync",
+        oidcClientId: "some-other-client-id",
+        expiresAt: new Date(Date.now() - 60_000),
+      },
+    ];
+    const res = await makeApp().request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: thirdPartyBody({ applicationName: "Acme Helpdesk Sync" }),
+    });
+    expect(res.status).toBe(201);
+    expect(mockUpdateSet).toHaveBeenCalledOnce();
+    const updateArg = mockUpdateSet.mock.calls[0][0] as {
+      revokedAt: Date;
+      revokedBy: string;
+    };
+    expect(updateArg.revokedAt).toBeInstanceOf(Date);
+    expect(updateArg.revokedBy).toBe("system:expiry-reclaim");
+  });
+
+  it("returns 409 (not an unhandled 500) when the pre-insert check finds no conflict but the insert itself hits the applicationName unique index — e.g. two concurrent requests racing for the same normalized name", async () => {
+    mockAppNameCandidates.rows = [];
+    mockInsertError.error = {
+      code: "23505",
+      constraint_name: "api_keys_tenant_application_name_active_unique",
+    };
+    const res = await makeApp().request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: thirdPartyBody(),
+    });
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error).toBe("APPLICATION_NAME_IN_USE");
+  });
+
+  it("proceeds with no conflict when no other key shares the normalized name", async () => {
+    mockAppNameCandidates.rows = [
+      {
+        id: "unrelated-key",
+        applicationName: "Totally Different App",
+        oidcClientId: "different-client-id",
+        expiresAt: new Date(Date.now() + 60_000),
+      },
+    ];
+    const res = await makeApp().request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: thirdPartyBody(),
+    });
+    expect(res.status).toBe(201);
+    expect(mockUpdateSet).not.toHaveBeenCalled();
   });
 });

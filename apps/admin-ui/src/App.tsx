@@ -34,6 +34,8 @@ import { AutomationWizard } from "./pages/automations/wizard/wizard.js";
 import { RequireAdmin } from "./components/require-admin.js";
 import { SystemLogsPage } from "./pages/system-logs.js";
 import { ThirdPartyAccessLogsPage } from "./pages/third-party-access-logs.js";
+import { ApiKeysPage } from "./pages/api-keys/page.js";
+import { ApiKeyApplicationDetail } from "./pages/api-keys/detail.js";
 import { GlobalErrorBanner } from "./components/global-error-banner.js";
 import { GlobalAlertDialog } from "./components/global-alert-dialog.js";
 import { useIdleLogout } from "./hooks/use-idle-logout.js";
@@ -129,19 +131,10 @@ export function App(): React.ReactElement {
                 request by GET /dashboard/team-member-view/:userId — never
                 trust the route param alone. */}
             <Route path="/dashboard/team/:userId" element={<Dashboard />} />
-            <Route path="/analytics" element={<Analytics />} />
             <Route path="/records" element={<AdminRecords />} />
             <Route
               path="/workflows/:workflowSlug/records"
               element={<WorkflowRecords />}
-            />
-
-            {/* Automation rules */}
-            <Route path="/automations" element={<Automations />} />
-            <Route path="/automations/new" element={<AutomationWizard />} />
-            <Route
-              path="/automations/:id/edit"
-              element={<AutomationWizard />}
             />
 
             {/* Customer routes */}
@@ -156,6 +149,10 @@ export function App(): React.ReactElement {
 
             <Route path="/settings" element={<Settings />} />
 
+            {/* Also reachable from the CUSTOMER nav (layout.tsx's
+                isCustomer branch, "browse/fork workflow templates") — must
+                stay outside RequireAdmin even though the admin/agent
+                sidebar's own Templates link is now admin-only. */}
             <Route path="/modules" element={<Modules />} />
             <Route path="/plugins" element={<Plugins />} />
 
@@ -188,6 +185,24 @@ export function App(): React.ReactElement {
               <Route
                 path="/admin/third-party-access-logs"
                 element={<ThirdPartyAccessLogsPage />}
+              />
+              <Route path="/admin/api-keys" element={<ApiKeysPage />} />
+              <Route
+                path="/admin/api-keys/:slug"
+                element={<ApiKeyApplicationDetail />}
+              />
+              {/* Moved here (from the "all authenticated users" block above)
+                  to match their sidebar nav now being admin-only — a
+                  direct-URL visit from an agent redirects to /dashboard
+                  instead of the page silently rendering with no nav link
+                  pointing at it. Templates (/modules) stays OUT of this
+                  block — see its own route above; customers also use it. */}
+              <Route path="/analytics" element={<Analytics />} />
+              <Route path="/automations" element={<Automations />} />
+              <Route path="/automations/new" element={<AutomationWizard />} />
+              <Route
+                path="/automations/:id/edit"
+                element={<AutomationWizard />}
               />
             </Route>
 

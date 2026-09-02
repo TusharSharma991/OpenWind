@@ -1,14 +1,20 @@
+import { z } from "zod";
 import { requireAuth, requireActingPerson } from "@platform/auth";
 import { withTenantContext, db } from "@platform/db";
 import { getWorkflow, WorkflowError } from "@platform/workflow-engine";
 import { listEntityFields } from "@platform/entity-engine";
+import { writeAuditEntry } from "@platform/audit";
+import { logger } from "@platform/logger";
 import { factory } from "./factory.js";
 import { requireTicketScope } from "./require-ticket-scope.js";
 import { notFound } from "./not-found.js";
+import { applicationActorIdFromUserId } from "../../lib/application-actor-id.js";
 
 function isWorkflowNotFound(err: unknown): boolean {
   return err instanceof WorkflowError && err.code === "WORKFLOW_NOT_FOUND";
 }
+
+const WorkflowIdSchema = z.string().uuid();
 
 /**
  * GET /api/v1/workflows/:workflowId/fields — third-party API schema/describe
@@ -31,9 +37,21 @@ export const getThirdPartyWorkflowFieldsHandler = factory.createHandlers(
   requireActingPerson(),
   requireTicketScope("read"),
   async (c) => {
-    const workflowId = c.req.param("workflowId") ?? "";
-    const { tenantId } = c.get("auth");
+    const rawWorkflowId = c.req.param("workflowId");
+    const { tenantId, userId: authUserId } = c.get("auth");
     const { userId: actingPersonId } = c.get("actingPerson");
+    const applicationActorId = applicationActorIdFromUserId(authUserId);
+
+    // A non-UUID path segment can never resolve to a real workflow row --
+    // treat it the same as a genuinely nonexistent one (404, not a 500 from
+    // Postgres rejecting the cast, and not a 422/400 that would distinguish
+    // "malformed" from "doesn't exist" -- existence-oracle convention,
+    // security.md).
+    const parsed = WorkflowIdSchema.safeParse(rawWorkflowId);
+    if (!parsed.success) {
+      return notFound(c);
+    }
+    const workflowId = parsed.data;
 
     try {
       const { workflow, fields } = await withTenantContext(
@@ -51,6 +69,27 @@ export const getThirdPartyWorkflowFieldsHandler = factory.createHandlers(
           return { workflow, fields };
         },
       );
+
+      // Best-effort -- a logging hiccup must never turn a successful describe
+      // call into a 500.
+      try {
+        await withTenantContext(tenantId, (tx) =>
+          writeAuditEntry(tx, {
+            tenantId,
+            actorId: applicationActorId,
+            actorType: "api_key",
+            actingPersonId,
+            resourceType: "workflow",
+            resourceId: workflow.id,
+            action: "workflow_fields.listed",
+          }),
+        );
+      } catch (auditErr) {
+        logger.warn(
+          { auditErr, tenantId, workflowId: workflow.id },
+          "third-party workflow fields: audit write failed",
+        );
+      }
 
       return c.json({
         data: {

@@ -23,6 +23,7 @@ import {
   workflowStates,
   workflows,
   adminAuditLog,
+  notifications,
 } from "@platform/db";
 import { createEntityType, createEntity } from "@platform/entity-engine";
 import {
@@ -327,6 +328,11 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  // Transition routes can send real notifications (mentions/assignments) —
+  // notifications_tenant_id_fkey blocks the tenants delete below without this.
+  await db
+    .delete(notifications)
+    .where(inArray(notifications.tenantId, [TENANT, OTHER_TENANT]));
   await db.delete(tenants).where(inArray(tenants.id, [TENANT, OTHER_TENANT]));
 });
 

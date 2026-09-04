@@ -307,6 +307,9 @@ export async function createEntity(
       assignedTo: input.assignedTo ?? null,
       dueDate: input.dueDate ? new Date(input.dueDate) : null,
       remark: input.remark ?? null,
+      originMechanism: input.originMechanism ?? null,
+      originOidcClientId: input.originOidcClientId ?? null,
+      originPerformerUserId: input.originPerformerUserId ?? null,
     })
     .returning();
 
@@ -1335,6 +1338,9 @@ function rowToInstance(
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     deletedAt: row.deletedAt ?? null,
+    originMechanism: row.originMechanism as "api" | "handoff" | null,
+    originOidcClientId: row.originOidcClientId ?? null,
+    originPerformerUserId: row.originPerformerUserId ?? null,
   };
 }
 

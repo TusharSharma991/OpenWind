@@ -8,7 +8,7 @@
  * Postgres (no mocks):
  *
  * - creation-time validation (T5): externalOrgId without externalIssuer,
- *   externalIssuer matching the platform's own ZITADEL_ISSUER, externalIssuer
+ *   externalIssuer matching the platform's own AUTHNEXUS_ISSUER, externalIssuer
  *   set without externalOrgId, and the happy path — all via the real
  *   createApiKeyHandler route, not a unit-mocked one.
  * - dual-identity verification (T6): requireActingPerson resolves an
@@ -180,7 +180,7 @@ describe("POST /api-keys — external-org mapping creation validation (T5, real 
       method: "POST",
       headers: skHeaders(),
       body: mintBody("ext-org-mint-primary-idp-1", {
-        externalIssuer: env.ZITADEL_ISSUER,
+        externalIssuer: env.AUTHNEXUS_ISSUER,
         externalOrgId: "external-org-primary-1",
       }),
     });
@@ -194,7 +194,7 @@ describe("POST /api-keys — external-org mapping creation validation (T5, real 
       method: "POST",
       headers: skHeaders(),
       body: mintBody("ext-org-mint-primary-idp-slash-1", {
-        externalIssuer: `${env.ZITADEL_ISSUER}/`,
+        externalIssuer: `${env.AUTHNEXUS_ISSUER}/`,
         externalOrgId: "external-org-primary-2",
       }),
     });

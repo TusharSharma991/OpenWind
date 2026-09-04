@@ -145,7 +145,7 @@ describe("migration 0075 DO block branches (rename / no-op)", () => {
   const migration0075Sql = readFileSync(
     path.resolve(
       path.dirname(fileURLToPath(import.meta.url)),
-      "../../../../packages/db/migrations/0075_api_keys_oidc_client_id_length_limit.sql",
+      "../../../../packages/db/migrations/0077_api_keys_oidc_client_id_length_limit.sql",
     ),
     "utf8",
   );

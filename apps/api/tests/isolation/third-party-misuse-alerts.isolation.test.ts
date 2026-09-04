@@ -91,6 +91,13 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  // alertCount() (below) reads these back by tenant+trigger+applicationActorId
+  // with no other scoping — deleting tenants doesn't cascade to outbox_events,
+  // so without this a re-run against a long-lived local Postgres instance
+  // inflates every count check with the previous run's fired alerts.
+  await db
+    .delete(outboxEvents)
+    .where(inArray(outboxEvents.tenantId, [TENANT, OTHER_TENANT]));
   await db.delete(tenants).where(inArray(tenants.id, [TENANT, OTHER_TENANT]));
   const redis = getRedis();
   const keys = await redis.keys(`misuse:*`);

@@ -175,8 +175,8 @@ services:
     # it, unauthenticated, to the whole network on a server deployment. Pick a
     # REDIS_HOST_PORT outside this fork's 10406-10412 range to avoid colliding
     # with the OSS stack (issue #450):
-    #   ports:
-    #     - "127.0.0.1:${REDIS_HOST_PORT:-6379}:6379"
+    ports:
+      - "127.0.0.1:${REDIS_HOST_PORT:-10414}:6379"
     command: >
       redis-server
         --maxmemory 512mb

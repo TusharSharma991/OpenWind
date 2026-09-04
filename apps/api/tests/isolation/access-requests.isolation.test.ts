@@ -28,6 +28,7 @@ import {
   entityTypes,
   entityInstances,
   accessRequests,
+  notifications,
 } from "@platform/db";
 import { createEntityType, createEntity } from "@platform/entity-engine";
 import type { AuthContext } from "@platform/auth";
@@ -67,6 +68,10 @@ afterAll(async () => {
   // fix only adds SELECT/INSERT/UPDATE, matching the reviewer's exact
   // request) — clean up via the superuser db connection instead.
   await db.delete(accessRequests).where(eq(accessRequests.tenantId, TENANT));
+  // resolveAccessRequestHandler now sends a real notification on
+  // approve/reject — without this, notifications_tenant_id_fkey blocks the
+  // tenants delete below.
+  await db.delete(notifications).where(eq(notifications.tenantId, TENANT));
   await db.delete(entityInstances).where(eq(entityInstances.tenantId, TENANT));
   await db.delete(entityTypes).where(eq(entityTypes.tenantId, TENANT));
   await db.delete(tenants).where(eq(tenants.id, TENANT));

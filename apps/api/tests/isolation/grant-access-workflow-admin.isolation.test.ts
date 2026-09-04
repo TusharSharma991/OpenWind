@@ -22,6 +22,7 @@ import {
   workflows,
   workflowStates,
   workflowEvents,
+  notifications,
 } from "@platform/db";
 import { createEntity } from "@platform/entity-engine";
 import { createWorkflow } from "@platform/workflow-engine";
@@ -108,6 +109,9 @@ afterAll(async () => {
   await db.delete(workflows).where(eq(workflows.tenantId, TENANT));
   await db.delete(entityTypes).where(eq(entityTypes.tenantId, TENANT));
   await db.delete(tenantUsers).where(eq(tenantUsers.tenantId, TENANT));
+  // grantAccessHandler sends a real notification to the grantee —
+  // notifications_tenant_id_fkey blocks the tenants delete below without this.
+  await db.delete(notifications).where(eq(notifications.tenantId, TENANT));
   await db.delete(tenants).where(eq(tenants.id, TENANT));
 });
 

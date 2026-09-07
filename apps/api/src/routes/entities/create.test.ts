@@ -110,10 +110,22 @@ const fakeInstance = {
   deletedAt: null,
 };
 
+// Mandatory-baseline-fields policy (2026-09-07): assignedTo/dueDate/remark
+// are required on every create request now (CreateEntitySchema) -- every
+// fixture below must include valid values for all three, same as a real
+// caller now has to. DEFAULT_ASSIGNED_TO is pre-registered as a real
+// tenant "user"-role member in the top-level beforeEach below so tests that
+// don't care about assignedTo validation specifically don't need to repeat
+// that setup themselves.
+const DEFAULT_ASSIGNED_TO = "u-default-assignee";
+
 function validBody(overrides: Record<string, unknown> = {}) {
   return JSON.stringify({
     entityTypeId: TYPE_ID,
     fields: { subject: "hello" },
+    assignedTo: DEFAULT_ASSIGNED_TO,
+    dueDate: "2026-12-01T00:00:00.000Z",
+    remark: "Default remark",
     ...overrides,
   });
 }
@@ -123,7 +135,52 @@ function validBody(overrides: Record<string, unknown> = {}) {
 describe("POST /entities", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockListUserIdsWithRole.mockResolvedValue(new Set());
+    mockListUserIdsWithRole.mockResolvedValue(new Set([DEFAULT_ASSIGNED_TO]));
+  });
+
+  it("returns 400 when assignedTo is missing", async () => {
+    const res = await makeApp().request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        entityTypeId: TYPE_ID,
+        fields: { subject: "hello" },
+        dueDate: "2026-12-01T00:00:00.000Z",
+        remark: "Default remark",
+      }),
+    });
+    expect(res.status).toBe(400);
+    expect(mockCreateEntity).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when dueDate is missing", async () => {
+    const res = await makeApp().request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        entityTypeId: TYPE_ID,
+        fields: { subject: "hello" },
+        assignedTo: DEFAULT_ASSIGNED_TO,
+        remark: "Default remark",
+      }),
+    });
+    expect(res.status).toBe(400);
+    expect(mockCreateEntity).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when remark is missing", async () => {
+    const res = await makeApp().request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        entityTypeId: TYPE_ID,
+        fields: { subject: "hello" },
+        assignedTo: DEFAULT_ASSIGNED_TO,
+        dueDate: "2026-12-01T00:00:00.000Z",
+      }),
+    });
+    expect(res.status).toBe(400);
+    expect(mockCreateEntity).not.toHaveBeenCalled();
   });
 
   it("returns 201 with the created instance on success", async () => {
@@ -351,16 +408,21 @@ describe("POST /entities — assignedTo validation (R3)", () => {
     expect(mockCreateEntity).not.toHaveBeenCalled();
   });
 
-  it("does not call listUserIdsWithRole when assignedTo is omitted", async () => {
+  it("returns 400 when assignedTo is omitted — it is mandatory, not optional", async () => {
     mockCreateEntity.mockResolvedValue(fakeInstance);
 
     const res = await makeApp().request("/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: validBody(),
+      body: JSON.stringify({
+        entityTypeId: TYPE_ID,
+        fields: { subject: "hello" },
+        dueDate: "2026-12-01T00:00:00.000Z",
+        remark: "Default remark",
+      }),
     });
 
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(400);
     expect(mockListUserIdsWithRole).not.toHaveBeenCalled();
   });
 });
@@ -370,7 +432,7 @@ describe("POST /entities — linking file/files custom-field values (#289 follow
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockListUserIdsWithRole.mockResolvedValue(new Set());
+    mockListUserIdsWithRole.mockResolvedValue(new Set([DEFAULT_ASSIGNED_TO]));
     mockCreateEntity.mockResolvedValue(fakeInstance);
   });
 

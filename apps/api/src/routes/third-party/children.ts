@@ -18,10 +18,16 @@ import { resolveOriginOidcClientId } from "../../lib/resolve-origin-oidc-client-
 import { redactEntityFieldsForThirdParty } from "../../lib/redact-entity-fields.js";
 import { stripInternalFields } from "../../lib/strip-internal-fields.js";
 
+// Mandatory-baseline-fields policy (2026-09-07) -- see tickets.ts's own
+// CreateThirdPartyTicketSchema comment for the full rationale. Sub-tickets
+// follow the identical rule: assignedTo/dueDate/remark are required, no
+// exceptions, same as any top-level ticket.
 const CreateThirdPartyChildSchema = z.object({
   entityTypeId: z.string().uuid(),
   fields: z.record(z.unknown()).default({}),
-  assignedTo: z.string().optional(),
+  assignedTo: z.string().min(1),
+  dueDate: z.string().datetime(),
+  remark: z.string().max(4000),
   // No state/currentState field, same rationale as Phase B's ticket-create
   // schema (spec R6 pattern) — a sub-ticket is always created into its own
   // "open" child_status, never a caller-supplied value.
@@ -153,7 +159,9 @@ export const createThirdPartyChildHandler = factory.createHandlers(
         parentId,
         entityTypeId: input.entityTypeId,
         fields: input.fields,
-        assignedTo: input.assignedTo ?? null,
+        assignedTo: input.assignedTo,
+        dueDate: input.dueDate,
+        remark: input.remark,
       },
       async () => {
         try {
@@ -163,6 +171,8 @@ export const createThirdPartyChildHandler = factory.createHandlers(
               entityTypeId: input.entityTypeId,
               childFields: input.fields,
               assignedTo: input.assignedTo,
+              dueDate: input.dueDate,
+              remark: input.remark,
               createdBy: actingPersonId,
               actorType: "api_key",
               actingPersonId,

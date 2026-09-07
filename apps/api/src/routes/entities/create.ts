@@ -18,12 +18,19 @@ import { handleEntityError } from "../../lib/handle-entity-error.js";
 import { listUserIdsWithRole } from "../../lib/authnexus-management.js";
 import { ensureUserRefsKnown } from "../../lib/ensure-user-refs.js";
 
+// Mandatory-baseline-fields policy (2026-09-07): assignedTo/dueDate/remark
+// are required on every create, matching what record-create.tsx (the only
+// human-facing create form) already unconditionally enforces client-side --
+// this route previously left all three optional server-side, so the rule
+// only actually held as long as nobody bypassed the form (devtools, a direct
+// API call). See tickets.ts's CreateThirdPartyTicketSchema for the matching
+// third-party-API-side change.
 const CreateEntitySchema = z.object({
   entityTypeId: z.string().uuid(),
   fields: z.record(z.unknown()),
-  assignedTo: z.string().optional(),
-  dueDate: z.string().datetime().nullable().optional(),
-  remark: z.string().max(4000).nullable().optional(),
+  assignedTo: z.string().min(1),
+  dueDate: z.string().datetime(),
+  remark: z.string().max(4000),
   workflowId: z.string().uuid().optional(),
   currentState: z.string().optional(),
   // docs/specs/hosted-ticket-create-handoff.md R7 / third-party-api-origin-
@@ -101,7 +108,8 @@ export const createEntityHandler = factory.createHandlers(
     // (tenant_users has no role column), scoped by orgId, so this also rejects a
     // cross-tenant user id (they simply won't appear in this org's role set).
     // Fail closed (no orgId → reject) rather than silently skipping the check.
-    if (input.assignedTo !== undefined) {
+    // assignedTo is mandatory (CreateEntitySchema) so this always runs.
+    {
       const usersWithRole = orgId
         ? await listUserIdsWithRole(orgId, "user", bearerToken)
         : new Set<string>();
@@ -225,7 +233,7 @@ export const createEntityHandler = factory.createHandlers(
       // instance, so it actually shows up in the Comments tab/feed like any
       // other comment. Best-effort: a failure here must not fail ticket
       // creation itself, which has already committed by this point.
-      const remark = input.remark?.trim();
+      const remark = input.remark.trim();
       if (remark && instance.workflowId) {
         try {
           const [commentEvent] = await withTenantContext(tenantId, (tx) =>

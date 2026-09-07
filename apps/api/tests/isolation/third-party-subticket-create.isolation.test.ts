@@ -242,7 +242,16 @@ async function postChild(
   return app.request(`/${parentId}/children`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ entityTypeId, fields }),
+    // Mandatory-baseline-fields policy (2026-09-07) -- assignedTo/dueDate/
+    // remark are required on every third-party sub-ticket create now
+    // (CreateThirdPartyChildSchema); see tickets.ts's own comment.
+    body: JSON.stringify({
+      entityTypeId,
+      fields,
+      assignedTo: "some-assignee",
+      dueDate: "2026-12-01T00:00:00.000Z",
+      remark: "test remark",
+    }),
   });
 }
 
@@ -336,5 +345,41 @@ describe("POST /api/v1/tickets/:id/children", () => {
     expect(secondLevel.status).toBe(400);
     const body = (await secondLevel.json()) as { error: string };
     expect(body.error).toBe("SUBTICKET_NESTING_EXCEEDED");
+  });
+});
+
+// Mandatory-baseline-fields policy (2026-09-07) -- see tickets.ts's own
+// comment for the full rationale. Sub-tickets follow the identical rule.
+describe("POST /api/v1/tickets/:id/children — mandatory baseline fields", () => {
+  it("returns 400 when assignedTo/dueDate/remark are all missing", async () => {
+    const app = makeApp(apiKeyAuth(), actingAs(CREATOR));
+    const res = await app.request(`/${creatorTicketId}/children`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ entityTypeId, fields: { title: "no baseline" } }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("creates successfully and persists dueDate/remark when all baseline fields are present", async () => {
+    const app = makeApp(apiKeyAuth(), actingAs(CREATOR));
+    const res = await app.request(`/${creatorTicketId}/children`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        entityTypeId,
+        fields: { title: "all baseline present" },
+        assignedTo: "some-assignee",
+        dueDate: "2026-12-01T00:00:00.000Z",
+        remark: "sub-ticket remark",
+      }),
+    });
+    expect(res.status).toBe(201);
+    const { data } = (await res.json()) as {
+      data: { assignedTo: string; dueDate: string; remark: string };
+    };
+    expect(data.assignedTo).toBe("some-assignee");
+    expect(data.dueDate).toContain("2026-12-01");
+    expect(data.remark).toBe("sub-ticket remark");
   });
 });

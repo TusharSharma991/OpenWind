@@ -7,7 +7,7 @@
  *
  * Real Postgres connection, RLS + app_user enforced (not mocked).
  */
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { Hono } from "hono";
 import type { Context, Next } from "hono";
 import { eq } from "drizzle-orm";
@@ -16,6 +16,22 @@ import { createEntityType } from "@platform/entity-engine";
 import { hashApiKey } from "@platform/auth";
 import type { AuthContext } from "@platform/auth";
 import { createEntityHandler } from "../../src/routes/entities/create.js";
+import type * as AuthnexusManagement from "../../src/lib/authnexus-management.js";
+
+// Mandatory-baseline-fields policy (2026-09-07): assignedTo is now required
+// on every create, and create.ts validates it resolves to a real tenant
+// member with the "user" role via AuthNexus's admin API (an external
+// service call, not the database -- mocking it here follows
+// testing-conventions.md's "mock at service boundaries, never the DB"
+// rule; this is still a real-Postgres isolation test otherwise).
+const ASSIGNED_TO = "handoff-origin-test-assignee";
+vi.mock("../../src/lib/authnexus-management.js", async (importOriginal) => {
+  const real = await importOriginal<typeof AuthnexusManagement>();
+  return {
+    ...real,
+    listUserIdsWithRole: async () => new Set([ASSIGNED_TO]),
+  };
+});
 
 const TENANT = "aabbccdd-0000-4000-a000-000000000090";
 const ACTIVE_KEY_ID = "90000000-9000-4000-9000-000000000001";
@@ -100,6 +116,9 @@ describe("POST /entities appClientId validation (docs/specs/hosted-ticket-create
         entityTypeId,
         fields: {},
         appClientId: ACTIVE_CLIENT_ID,
+        assignedTo: ASSIGNED_TO,
+        dueDate: "2026-12-01T00:00:00.000Z",
+        remark: "test remark",
       }),
     });
     expect(res.status).toBe(201);
@@ -124,7 +143,13 @@ describe("POST /entities appClientId validation (docs/specs/hosted-ticket-create
     const res = await makeApp().request("/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ entityTypeId, fields: {} }),
+      body: JSON.stringify({
+        entityTypeId,
+        fields: {},
+        assignedTo: ASSIGNED_TO,
+        dueDate: "2026-12-01T00:00:00.000Z",
+        remark: "test remark",
+      }),
     });
     expect(res.status).toBe(201);
     const body = (await res.json()) as { data: { id: string } };
@@ -151,6 +176,9 @@ describe("POST /entities appClientId validation (docs/specs/hosted-ticket-create
         entityTypeId,
         fields: {},
         appClientId: "not-a-real-registered-client-id",
+        assignedTo: ASSIGNED_TO,
+        dueDate: "2026-12-01T00:00:00.000Z",
+        remark: "test remark",
       }),
     });
     expect(res.status).toBe(422);
@@ -170,6 +198,9 @@ describe("POST /entities appClientId validation (docs/specs/hosted-ticket-create
         entityTypeId,
         fields: {},
         appClientId: REVOKED_CLIENT_ID,
+        assignedTo: ASSIGNED_TO,
+        dueDate: "2026-12-01T00:00:00.000Z",
+        remark: "test remark",
       }),
     });
     expect(res.status).toBe(422);

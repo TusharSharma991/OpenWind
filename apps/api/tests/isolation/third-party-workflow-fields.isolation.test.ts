@@ -283,7 +283,13 @@ describe("GET /api/v1/workflows/:workflowId/fields", () => {
     const createRes = await app.request("/tickets", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ workflowId, fields: {} }),
+      body: JSON.stringify({
+        workflowId,
+        fields: {},
+        assignedTo: "some-assignee",
+        dueDate: "2026-12-01T00:00:00.000Z",
+        remark: "test remark",
+      }),
     });
     expect(createRes.status).toBe(422);
     const createBody = (await createRes.json()) as {

@@ -148,6 +148,16 @@ function apiKeyAuth(overrides: Partial<AuthContext> = {}): AuthContext {
   };
 }
 
+// Mandatory-baseline-fields policy (2026-09-07): assignedTo/dueDate/remark
+// are required on every third-party ticket-create request now
+// (CreateThirdPartyTicketSchema) -- every request body below needs valid
+// values for all three, same as a real integration now has to send.
+const REQUIRED_BASELINE_FIELDS = {
+  assignedTo: "some-assignee",
+  dueDate: "2026-12-01T00:00:00.000Z",
+  remark: "test remark",
+};
+
 const ACTING_PERSON: ActingPersonContext = {
   userId: "third-party-ticket-creator",
   email: "creator@example.com",
@@ -166,6 +176,7 @@ describe("POST /api/v1/tickets", () => {
         fields: { title: "Test ticket" },
         state: "closed",
         currentState: "closed",
+        ...REQUIRED_BASELINE_FIELDS,
       }),
     });
     expect(res.status).toBe(201);
@@ -185,6 +196,7 @@ describe("POST /api/v1/tickets", () => {
       body: JSON.stringify({
         workflowId,
         fields: {},
+        ...REQUIRED_BASELINE_FIELDS,
         assignedTo: "some-assignee",
       }),
     });
@@ -201,7 +213,11 @@ describe("POST /api/v1/tickets", () => {
     const res = await app.request("/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workflowId, fields: {} }),
+      body: JSON.stringify({
+        workflowId,
+        fields: {},
+        ...REQUIRED_BASELINE_FIELDS,
+      }),
     });
     const body = (await res.json()) as { data: { id: string } };
     createdInstanceIds.push(body.data.id);
@@ -243,7 +259,11 @@ describe("POST /api/v1/tickets", () => {
     const res = await app.request("/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workflowId, fields: {} }),
+      body: JSON.stringify({
+        workflowId,
+        fields: {},
+        ...REQUIRED_BASELINE_FIELDS,
+      }),
     });
     expect(res.status).toBe(403);
   });
@@ -256,6 +276,7 @@ describe("POST /api/v1/tickets", () => {
       body: JSON.stringify({
         workflowId,
         fields: { title: `bad${String.fromCharCode(0)}value` },
+        ...REQUIRED_BASELINE_FIELDS,
       }),
     });
     expect(res.status).toBe(422);
@@ -271,6 +292,7 @@ describe("POST /api/v1/tickets", () => {
       body: JSON.stringify({
         workflowId,
         fields: { blob: "x".repeat(200_000) },
+        ...REQUIRED_BASELINE_FIELDS,
       }),
     });
     expect(res.status).toBe(422);
@@ -285,7 +307,11 @@ describe("POST /api/v1/tickets", () => {
     const res = await app.request("/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workflowId, fields: { deep: deeplyNested } }),
+      body: JSON.stringify({
+        workflowId,
+        fields: { deep: deeplyNested },
+        ...REQUIRED_BASELINE_FIELDS,
+      }),
     });
     expect(res.status).toBe(422);
   });
@@ -298,8 +324,85 @@ describe("POST /api/v1/tickets", () => {
       body: JSON.stringify({
         workflowId: "00000000-0000-4000-a000-000000000000",
         fields: {},
+        ...REQUIRED_BASELINE_FIELDS,
       }),
     });
     expect(res.status).toBe(404);
+  });
+});
+
+// Mandatory-baseline-fields policy (2026-09-07): assignedTo/dueDate/remark
+// are required on every ticket, on every workflow, no exceptions -- a
+// platform-wide invariant, not a per-workflow toggle. Previously these were
+// either optional or (dueDate/remark) not even accepted by this endpoint at
+// all, so the only enforcement was admin-ui's client-side form check
+// (record-create.tsx), trivially bypassed by a direct API call like this one.
+describe("POST /api/v1/tickets — mandatory baseline fields", () => {
+  it("returns 400 when assignedTo is missing", async () => {
+    const app = makeApp(apiKeyAuth(), ACTING_PERSON);
+    const res = await app.request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workflowId,
+        fields: { title: "Missing assignedTo" },
+        dueDate: "2026-12-01T00:00:00.000Z",
+        remark: "test remark",
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when dueDate is missing", async () => {
+    const app = makeApp(apiKeyAuth(), ACTING_PERSON);
+    const res = await app.request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workflowId,
+        fields: { title: "Missing dueDate" },
+        assignedTo: "some-assignee",
+        remark: "test remark",
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when remark is missing", async () => {
+    const app = makeApp(apiKeyAuth(), ACTING_PERSON);
+    const res = await app.request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workflowId,
+        fields: { title: "Missing remark" },
+        assignedTo: "some-assignee",
+        dueDate: "2026-12-01T00:00:00.000Z",
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("creates successfully and persists dueDate/remark when all baseline fields are present", async () => {
+    const app = makeApp(apiKeyAuth(), ACTING_PERSON);
+    const res = await app.request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workflowId,
+        fields: { title: "All baseline fields present" },
+        assignedTo: "some-assignee",
+        dueDate: "2026-12-01T00:00:00.000Z",
+        remark: "Please expedite",
+      }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as {
+      data: { id: string; assignedTo: string; dueDate: string; remark: string };
+    };
+    createdInstanceIds.push(body.data.id);
+    expect(body.data.assignedTo).toBe("some-assignee");
+    expect(body.data.dueDate).toContain("2026-12-01");
+    expect(body.data.remark).toBe("Please expedite");
   });
 });

@@ -148,6 +148,67 @@ describe("buildZodSchema", () => {
     });
   });
 
+  // Regression coverage for the bug found via manual testing of the
+  // helpdesk module's real seed data (modules/helpdesk/seed/001_entity_types.sql):
+  // "select" is a real, on-disk field_type (also used by apps/admin-ui's own
+  // field-type UI), but was previously unrecognized by buildFieldSchema's
+  // switch statement, falling through to z.unknown() -- which silently
+  // accepted ANY value, including a missing one, defeating is_required
+  // entirely for every "select" field. Before this fix, a required "select"
+  // field with no options config validated successfully even with the field
+  // completely absent from the input.
+  describe("select field (alias for enum)", () => {
+    it("is required when isRequired is true, same as any other type", () => {
+      const schema = buildZodSchema(
+        [
+          makeField({
+            name: "priority",
+            fieldType: "select",
+            isRequired: true,
+            config: { options: ["low", "medium", "high", "urgent"] },
+          }),
+        ],
+        "create",
+      );
+      expect(schema.safeParse({}).success).toBe(false);
+      expect(schema.safeParse({ priority: "low" }).success).toBe(true);
+    });
+
+    it("accepts the plain string[] options shape (as seeded by modules/helpdesk)", () => {
+      const schema = buildZodSchema(
+        [
+          makeField({
+            name: "category",
+            fieldType: "select",
+            config: { options: ["technical", "billing", "general"] },
+          }),
+        ],
+        "create",
+      );
+      expect(schema.safeParse({ category: "technical" }).success).toBe(true);
+      expect(schema.safeParse({ category: "not-an-option" }).success).toBe(
+        false,
+      );
+    });
+
+    it("also accepts the {value,label}[] options shape (as used by every other module)", () => {
+      const schema = buildZodSchema(
+        [
+          makeField({
+            name: "priority",
+            fieldType: "select",
+            config: {
+              options: [{ value: "low" }, { value: "high" }],
+            },
+          }),
+        ],
+        "create",
+      );
+      expect(schema.safeParse({ priority: "low" }).success).toBe(true);
+      expect(schema.safeParse({ priority: "medium" }).success).toBe(false);
+    });
+  });
+
   describe("multi_enum field", () => {
     const field = makeField({
       name: "tags",

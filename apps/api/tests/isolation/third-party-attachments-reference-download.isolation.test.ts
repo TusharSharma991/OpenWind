@@ -543,6 +543,9 @@ describe("attachment references on ticket-create", () => {
         workflowId,
         fields: {},
         attachmentIds: [attachmentId],
+        assignedTo: "some-assignee",
+        dueDate: "2026-12-01T00:00:00.000Z",
+        remark: "test remark",
       }),
     });
     expect(res.status).toBe(201);
@@ -564,6 +567,9 @@ describe("attachment references on ticket-create", () => {
         workflowId,
         fields: {},
         attachmentIds: ["00000000-0000-4000-8000-000000000000"],
+        assignedTo: "some-assignee",
+        dueDate: "2026-12-01T00:00:00.000Z",
+        remark: "test remark",
       }),
     });
     expect(res.status).toBe(404);

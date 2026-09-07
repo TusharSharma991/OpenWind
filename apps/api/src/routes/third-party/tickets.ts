@@ -141,10 +141,23 @@ export const getThirdPartyTicketHandler = factory.createHandlers(
   },
 );
 
+// Mandatory-baseline-fields policy (2026-09-07): title (an entity_fields row,
+// already required on every real workflow), assignedTo, dueDate, and remark
+// are required on every ticket, on every workflow, no exceptions -- this is a
+// platform-wide invariant, not a per-workflow toggle (unlike a workflow's own
+// custom entity_fields, which remain individually configurable). Previously
+// assignedTo/dueDate/remark were either optional or entirely absent from this
+// schema, so the only place this was ever enforced was admin-ui's own
+// client-side form check (record-create.tsx) -- trivially bypassed by any
+// direct API call, including this one. This is a breaking change to the
+// documented third-party API contract (third-party-api-reference.md) --
+// every existing integration must now send all three.
 const CreateThirdPartyTicketSchema = z.object({
   workflowId: z.string().uuid(),
   fields: z.record(z.unknown()).default({}),
-  assignedTo: z.string().optional(),
+  assignedTo: z.string().min(1),
+  dueDate: z.string().datetime(),
+  remark: z.string().max(4000),
   // Any `state`/`currentState` field the caller sends is intentionally NOT
   // part of this schema — Zod's default "strip unknown keys" behavior drops
   // it silently, with no rejection (spec R6: force-to-initial-state
@@ -226,7 +239,9 @@ export const createThirdPartyTicketHandler = factory.createHandlers(
       {
         workflowId: input.workflowId,
         fields: input.fields,
-        assignedTo: input.assignedTo ?? null,
+        assignedTo: input.assignedTo,
+        dueDate: input.dueDate,
+        remark: input.remark,
         attachmentIds: input.attachmentIds,
       },
       async () => {
@@ -241,6 +256,8 @@ export const createThirdPartyTicketHandler = factory.createHandlers(
               workflowId: workflow.id,
               fields: input.fields,
               assignedTo: input.assignedTo,
+              dueDate: input.dueDate,
+              remark: input.remark,
               createdBy: actingPersonId,
               actorId: applicationActorId,
               actorType: "api_key",

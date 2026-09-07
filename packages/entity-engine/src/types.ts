@@ -76,6 +76,8 @@ export type CreateChildRelationInput = {
   createdBy?: string | undefined;
   /** ISO datetime string, or null. Independent of workflow state/SLA. */
   dueDate?: string | null | undefined;
+  /** Free-text remark captured on the create form, alongside assignedTo/dueDate. */
+  remark?: string | null | undefined;
   /**
    * ADR-012 Phase C, spec R10 — dual-identity attribution for a third-party
    * sub-ticket creation, mirroring createEntity's actorType/actingPersonId

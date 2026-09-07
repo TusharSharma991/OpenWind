@@ -246,6 +246,43 @@ describe("GET /api/v1/workflows/:workflowId/fields", () => {
     });
   });
 
+  // Mandatory-baseline-fields policy (2026-09-07): assignedTo/dueDate/remark
+  // are required on POST /tickets but are NOT entity_fields rows, so
+  // `fields` above never mentions them -- without this, an integration
+  // building its create form purely from this endpoint's response would
+  // never discover they exist, and would 400 unexplained on every submit
+  // (found via OWTesterUI's own dynamic create-form screen doing exactly
+  // that). `baselineFields` is deliberately separate from `fields` since
+  // these are top-level POST /tickets body keys, not entries inside the
+  // `fields` object.
+  it("includes baselineFields describing the mandatory assignedTo/dueDate/remark top-level params", async () => {
+    const app = makeApp();
+    const res = await getFields(app, workflowId);
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as {
+      data: {
+        baselineFields: Array<{
+          name: string;
+          label: string;
+          type: string;
+          required: boolean;
+        }>;
+      };
+    };
+
+    expect(body.data.baselineFields).toEqual([
+      {
+        name: "assignedTo",
+        label: "Assigned To",
+        type: "user_ref",
+        required: true,
+      },
+      { name: "dueDate", label: "Due Date", type: "datetime", required: true },
+      { name: "remark", label: "Remark", type: "longtext", required: true },
+    ]);
+  });
+
   it("includes an isSystem field identically to a non-system field (isSystem has no bearing on inclusion)", async () => {
     const app = makeApp();
     const res = await getFields(app, workflowId);

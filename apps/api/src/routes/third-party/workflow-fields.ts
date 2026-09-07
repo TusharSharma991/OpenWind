@@ -107,6 +107,38 @@ export const getThirdPartyWorkflowFieldsHandler = factory.createHandlers(
             sensitivity: field.sensitivity,
             config: field.config,
           })),
+          // Mandatory-baseline-fields policy (2026-09-07): assignedTo/
+          // dueDate/remark are required on every ticket create (tickets.ts's
+          // CreateThirdPartyTicketSchema), but they are NOT entity_fields
+          // rows -- they're fixed columns every entity_instances row has,
+          // so `fields` above (sourced from listEntityFields) never mentions
+          // them. Without this, an integration following this endpoint's own
+          // documented purpose (build your create form from this response)
+          // would have no way to discover these three exist at all, and
+          // every create would 400 unexplained. Listed separately from
+          // `fields` -- unlike those, these are TOP-LEVEL request body keys
+          // (POST /tickets's `assignedTo`/`dueDate`/`remark`, sibling to
+          // `fields`), never nested inside the `fields` object.
+          baselineFields: [
+            {
+              name: "assignedTo",
+              label: "Assigned To",
+              type: "user_ref",
+              required: true,
+            },
+            {
+              name: "dueDate",
+              label: "Due Date",
+              type: "datetime",
+              required: true,
+            },
+            {
+              name: "remark",
+              label: "Remark",
+              type: "longtext",
+              required: true,
+            },
+          ],
         },
       });
     } catch (err) {

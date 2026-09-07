@@ -93,3 +93,23 @@ all 10 new tests fail against the old code.
   create both correctly `400` when `assignedTo`/`dueDate`/`remark` are missing and `201` with them
   present; confirmed `remark` now actually persists on a sub-ticket (previously impossible at the
   engine level for any caller)
+
+### Follow-up (same day) — discoverability gap in GET /workflows/:id/fields
+
+After the above shipped, testing OWTesterUI's own dynamic create-ticket screen (which builds its
+form purely from `GET /workflows/:id/fields`, exactly the pattern §5.1a/§6.1 of
+`third-party-api-reference.md` documents) surfaced a real gap: that endpoint only ever returns
+`entity_fields` rows (via `listEntityFields`), and `assignedTo`/`dueDate`/`remark` aren't
+`entity_fields` rows at all — they're fixed columns on `entity_instances`. So an integration
+following the documented discovery pattern had no way to learn these three now-mandatory fields
+exist, and would 400 with no explanation.
+
+Fixed by adding a `baselineFields` array to the response — deliberately separate from `fields`
+since these are sibling top-level `POST /tickets` body keys, never nested inside the `fields`
+object a caller submits. Updated `third-party-api-reference.md` (§5.1a) and OWTesterUI's
+`app.js` (its guided create-ticket screen now renders and correctly submits `baselineFields` at
+the top level, not inside `fields`).
+
+Verification: `pnpm --filter @platform/api typecheck/lint` clean; new isolation test
+(`includes baselineFields describing the mandatory assignedTo/dueDate/remark top-level params`)
+confirmed failing without the fix, passing with it; live-verified via OWTesterUI's browser UI.

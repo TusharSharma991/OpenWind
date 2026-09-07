@@ -254,9 +254,10 @@ export const myTicketsHandler = factory.createHandlers(
 
       // docs/specs/third-party-api-origin-tagging.md R1/R2/R4 -- one batch
       // lookup for the whole page, same pattern as list.ts/list-children.ts.
+      const bearerToken = c.req.header("Authorization")?.slice(7) ?? "";
       const [nameByClientId, performerNameByUserId] = await Promise.all([
-        batchLookupApplicationNames(accessibleRows),
-        batchLookupPerformerNames(accessibleRows),
+        batchLookupApplicationNames(tenantId, accessibleRows),
+        batchLookupPerformerNames(accessibleRows, bearerToken),
       ]);
 
       // ── Step 5: split into parents and children, compute access reasons ────

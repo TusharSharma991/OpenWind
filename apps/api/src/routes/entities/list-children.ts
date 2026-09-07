@@ -55,9 +55,10 @@ export const listChildrenHandler = factory.createHandlers(
       );
       // docs/specs/third-party-api-origin-tagging.md R4 -- sub-tickets get
       // their own independent tag, same live-resolution as the parent list.
+      const bearerToken = c.req.header("Authorization")?.slice(7) ?? "";
       const [nameByClientId, performerNameByUserId] = await Promise.all([
-        batchLookupApplicationNames(page.data),
-        batchLookupPerformerNames(page.data),
+        batchLookupApplicationNames(tenantId, page.data),
+        batchLookupPerformerNames(page.data, bearerToken),
       ]);
       const data = page.data.map((row) => ({
         ...row,

@@ -1,5 +1,5 @@
 import { inArray, eq, desc, sql } from "drizzle-orm";
-import { db, apiKeys } from "@platform/db";
+import { apiKeys, withTenantContext } from "@platform/db";
 import { getUserById } from "./authnexus-management.js";
 
 export type OriginDisplay = {
@@ -29,13 +29,15 @@ type OriginColumns = {
  * provenance data on an old row.
  */
 export async function resolveOriginDisplay(
+  tenantId: string,
   row: OriginColumns,
+  bearerToken?: string,
 ): Promise<OriginDisplay> {
   if (!row.originMechanism || !row.originOidcClientId) return null;
 
   const [appName, performerDisplayName] = await Promise.all([
-    lookupApplicationName(row.originOidcClientId),
-    lookupPerformerDisplayName(row.originPerformerUserId),
+    lookupApplicationName(tenantId, row.originOidcClientId),
+    lookupPerformerDisplayName(row.originPerformerUserId, bearerToken),
   ]);
   return {
     mechanism: row.originMechanism as "api" | "handoff",
@@ -52,28 +54,37 @@ export async function resolveOriginDisplay(
 // deactivated/deleted AuthNexus user never 500s a read endpoint.
 async function lookupPerformerDisplayName(
   performerUserId: string | null,
+  bearerToken?: string,
 ): Promise<string> {
   if (!performerUserId) return "";
-  const user = await getUserById(performerUserId);
+  const user = await getUserById(performerUserId, bearerToken);
   if (!user) return performerUserId;
   const name = user.displayName !== user.userId ? user.displayName : null;
   return (name ?? user.loginName) || performerUserId;
 }
 
-async function lookupApplicationName(oidcClientId: string): Promise<string> {
+async function lookupApplicationName(
+  tenantId: string,
+  oidcClientId: string,
+): Promise<string> {
   // Prefer the currently-active (non-revoked) row sharing this client id --
   // a rotation lineage can have several historical rows, and only the
   // active one reflects the application's current name (a rename updates
   // the active row, not its now-revoked predecessors). Falls back to the
   // most recently created row if every one has since been revoked (edge
   // case: the whole lineage was decommissioned but old tickets still
-  // reference it).
-  const [key] = await db
-    .select({ applicationName: apiKeys.applicationName })
-    .from(apiKeys)
-    .where(eq(apiKeys.oidcClientId, oidcClientId))
-    .orderBy(sql`${apiKeys.revokedAt} IS NULL DESC`, desc(apiKeys.createdAt))
-    .limit(1);
+  // reference it). Scoped by tenantId (via withTenantContext, RLS-enforced)
+  // -- api_keys.oidc_client_id is only unique among ACTIVE keys, so a
+  // revoked lineage could otherwise resolve against a different tenant's
+  // reclaimed client id (see api-key-mint-client-id-reclaim.isolation.test.ts).
+  const [key] = await withTenantContext(tenantId, (tx) =>
+    tx
+      .select({ applicationName: apiKeys.applicationName })
+      .from(apiKeys)
+      .where(eq(apiKeys.oidcClientId, oidcClientId))
+      .orderBy(sql`${apiKeys.revokedAt} IS NULL DESC`, desc(apiKeys.createdAt))
+      .limit(1),
+  );
   return key?.applicationName ?? "Unknown application";
 }
 
@@ -84,6 +95,7 @@ async function lookupApplicationName(oidcClientId: string): Promise<string> {
  * into this map, so no fragile composite key is needed.
  */
 export async function batchLookupApplicationNames(
+  tenantId: string,
   rows: OriginColumns[],
 ): Promise<Map<string, string>> {
   const clientIds = [
@@ -98,14 +110,18 @@ export async function batchLookupApplicationNames(
   // Same active-row-first, most-recent-fallback ordering as
   // lookupApplicationName above — first-wins below only picks the "best"
   // row per client id because this order guarantees it arrives first.
-  const keys = await db
-    .select({
-      oidcClientId: apiKeys.oidcClientId,
-      applicationName: apiKeys.applicationName,
-    })
-    .from(apiKeys)
-    .where(inArray(apiKeys.oidcClientId, clientIds))
-    .orderBy(sql`${apiKeys.revokedAt} IS NULL DESC`, desc(apiKeys.createdAt));
+  // Scoped by tenantId (via withTenantContext) for the same reason as
+  // lookupApplicationName above.
+  const keys = await withTenantContext(tenantId, (tx) =>
+    tx
+      .select({
+        oidcClientId: apiKeys.oidcClientId,
+        applicationName: apiKeys.applicationName,
+      })
+      .from(apiKeys)
+      .where(inArray(apiKeys.oidcClientId, clientIds))
+      .orderBy(sql`${apiKeys.revokedAt} IS NULL DESC`, desc(apiKeys.createdAt)),
+  );
 
   const nameByClientId = new Map<string, string>();
   for (const k of keys) {
@@ -123,6 +139,7 @@ export async function batchLookupApplicationNames(
  */
 export async function batchLookupPerformerNames(
   rows: OriginColumns[],
+  bearerToken?: string,
 ): Promise<Map<string, string>> {
   const performerIds = [
     ...new Set(
@@ -136,7 +153,7 @@ export async function batchLookupPerformerNames(
   const nameByUserId = new Map<string, string>();
   await Promise.all(
     performerIds.map(async (uid) => {
-      const name = await lookupPerformerDisplayName(uid);
+      const name = await lookupPerformerDisplayName(uid, bearerToken);
       if (name) nameByUserId.set(uid, name);
     }),
   );

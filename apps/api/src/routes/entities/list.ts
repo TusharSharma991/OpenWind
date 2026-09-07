@@ -100,9 +100,10 @@ export const listEntitiesHandler = factory.createHandlers(
       // docs/specs/third-party-api-origin-tagging.md §C — one batch lookup
       // for the whole page instead of N per-row lookups, resolving live
       // application names for R1/R2/R4's records-list badge.
+      const bearerToken = c.req.header("Authorization")?.slice(7) ?? "";
       const [nameByClientId, performerNameByUserId] = await Promise.all([
-        batchLookupApplicationNames(page.data),
-        batchLookupPerformerNames(page.data),
+        batchLookupApplicationNames(tenantId, page.data),
+        batchLookupPerformerNames(page.data, bearerToken),
       ]);
       const data = page.data.map((row) => ({
         ...row,

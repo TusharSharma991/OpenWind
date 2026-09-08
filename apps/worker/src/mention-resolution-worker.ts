@@ -80,10 +80,18 @@ async function resolveIdentifier(
       : Promise.resolve(new Map<string, string[]>()),
   ]);
 
+  // Accepts userId, email, or username (loginName) -- widened 2026-09-08
+  // (found via manual testing) since a real person composing an @mention
+  // through the platform's own UI, or through any third-party client mimicking
+  // that UX, naturally has a username/name on hand, never an opaque userId or
+  // necessarily an email. Matches resolveOrgMemberUserId's identical
+  // three-way match used for assignedTo resolution.
   const lowerIdentifier = identifier.toLowerCase();
   const match = zitadelUsers.find(
     (u: OrgUser) =>
-      u.userId === identifier || u.email.toLowerCase() === lowerIdentifier,
+      u.userId === identifier ||
+      u.email.toLowerCase() === lowerIdentifier ||
+      u.loginName === identifier,
   );
   if (!match) return null;
 

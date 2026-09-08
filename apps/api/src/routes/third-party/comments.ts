@@ -34,8 +34,14 @@ const CreateThirdPartyCommentSchema = z.object({
     .refine((v) => !FORBIDDEN_CHAR_PATTERN.test(v), {
       message: "text contains a null byte or control character",
     }),
-  // Stable identifiers only (email or Zitadel org user ID) — never a display
-  // name (spec R4). Resolution happens fully async, after this response is
+  // Accepts a userId, email, or username (loginName) -- widened from the
+  // original spec R4 wording ("email or Zitadel org user ID") on 2026-09-08:
+  // a real person composing an @mention naturally has a username on hand,
+  // never an opaque userId, matching how the platform's own admin-ui
+  // @mention picker already works. Never a free-text display name, though
+  // (still no fuzzy/display-name matching -- see resolveIdentifier in
+  // mention-resolution-worker.ts for the exact three-way match). Resolution
+  // happens fully async, after this response is
   // already sent (spec R5/R6) — see mention-resolution-worker.ts. An
   // identifier that fails to resolve never blocks or changes this response
   // (a same-day 422-on-failure design was tried and reverted, 2026-09-08,

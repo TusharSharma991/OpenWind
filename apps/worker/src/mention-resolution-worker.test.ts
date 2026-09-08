@@ -206,6 +206,7 @@ const ACTING_PERSON_ID = "acting-person-1";
 const COMMENT_ID = "comment-1";
 const MENTIONED_USER_ID = "mentioned-user-1";
 const MENTIONED_EMAIL = "mentioned@example.com";
+const MENTIONED_USERNAME = "mentioned-username";
 
 const instanceRow = {
   id: TICKET_ID,
@@ -249,7 +250,7 @@ beforeEach(() => {
       userId: MENTIONED_USER_ID,
       email: MENTIONED_EMAIL,
       displayName: "Mentioned Person",
-      loginName: MENTIONED_EMAIL,
+      loginName: MENTIONED_USERNAME,
       phone: undefined,
     },
   ];
@@ -271,6 +272,22 @@ describe("mention-resolution-worker", () => {
     ]);
     expect(insertCalls).toHaveLength(0);
     expect(updateCalls).toHaveLength(0);
+  });
+
+  // Found via manual testing (2026-09-08): a real person composing an
+  // @mention naturally has a username on hand, never an opaque userId --
+  // resolveIdentifier now matches loginName too, not just userId/email.
+  it("resolves a mention by username (loginName), not just userId or email", async () => {
+    selectQueue = [() => [instanceRow]];
+    mockHasEntityAccess = true;
+
+    await capturedProcessor!(
+      baseJob({ mentionIdentifier: MENTIONED_USERNAME }),
+    );
+
+    expect(auditEntries).toEqual([
+      expect.objectContaining({ action: "tag.resolved_existing_access" }),
+    ]);
   });
 
   it("outcome 3: identifier doesn't resolve to any org user — logs tag.fallback, posts a System Agent reply notifying the original commenter", async () => {

@@ -232,7 +232,12 @@ export const mentionResolutionWorker = new Worker<MentionResolutionJob>(
               metadata: {
                 type: "comment",
                 text: `The mention "${mentionIdentifier}" could not be resolved to an org member.`,
-                actorName: "System Agent",
+                // "System" not "System Agent"/"system" -- ported from the
+                // sibling AuthNexus fork's same-day fix: list-workflow-events.ts's
+                // dedup guard discards metadata.actorName whenever it exactly
+                // equals actorId ("system" here), which would otherwise render
+                // this as a truncated "system…".
+                actorName: "System",
                 replyTo: commentId,
               },
             })

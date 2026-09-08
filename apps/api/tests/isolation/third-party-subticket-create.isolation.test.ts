@@ -18,6 +18,9 @@ import {
   workflowStates,
   entityInstances,
   apiKeys,
+  workflowEvents,
+  outboxEvents,
+  withTenantContext,
 } from "@platform/db";
 import { createEntityType, createEntity } from "@platform/entity-engine";
 import { hashApiKey } from "@platform/auth";
@@ -419,5 +422,74 @@ describe("POST /api/v1/tickets/:id/children — mandatory baseline fields", () =
       }),
     });
     expect(res.status).toBe(400);
+  });
+
+  // Security review (2026-09-08): an unresolved assignedTo is now echoed
+  // verbatim into a system-generated comment's text -- same sink, same
+  // guard needed as remark's.
+  it("returns 400 when assignedTo contains a null byte or control character", async () => {
+    const app = makeApp(apiKeyAuth(), actingAs(CREATOR));
+    const res = await app.request(`/${creatorTicketId}/children`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        entityTypeId,
+        fields: { title: "control char in assignedTo" },
+        assignedTo: "bad\x00assignee",
+        dueDate: "2026-12-01T00:00:00.000Z",
+        remark: "test remark",
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  // Policy (2026-09-08, revised from an earlier 422-on-failure design):
+  // an unresolvable assignedTo no longer blocks sub-ticket creation --
+  // see third-party-ticket-create.isolation.test.ts's identical test for
+  // the full rationale.
+  it("creates the sub-ticket unassigned (never 422s) when assignedTo matches no real org member, and posts a System Agent reply notifying the creator", async () => {
+    const app = makeApp(apiKeyAuth(), actingAs(CREATOR));
+    const res = await app.request(`/${creatorTicketId}/children`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        entityTypeId,
+        fields: { title: "assignedTo unresolvable" },
+        assignedTo: "nobody-with-this-username",
+        dueDate: "2026-12-01T00:00:00.000Z",
+        remark: "sub-ticket remark",
+      }),
+    });
+    expect(res.status).toBe(201);
+    const { data } = (await res.json()) as {
+      data: { id: string; assignedTo: string | null };
+    };
+    expect(data.assignedTo).toBeNull();
+
+    const events = await withTenantContext(TENANT, (tx) =>
+      tx
+        .select({
+          actorId: workflowEvents.actorId,
+          metadata: workflowEvents.metadata,
+        })
+        .from(workflowEvents)
+        .where(eq(workflowEvents.instanceId, data.id)),
+    );
+    const systemReply = events.find((e) => e.actorId === "system");
+    expect(systemReply).toBeTruthy();
+    expect(
+      (systemReply?.metadata as { actorName?: string } | null)?.actorName,
+    ).toBe("System Agent");
+
+    const [replyOutbox] = await withTenantContext(TENANT, (tx) =>
+      tx
+        .select({ payload: outboxEvents.payload })
+        .from(outboxEvents)
+        .where(eq(outboxEvents.eventType, "comment.replied")),
+    );
+    expect(
+      (replyOutbox?.payload as { targetUserId?: string } | undefined)
+        ?.targetUserId,
+    ).toBe(CREATOR);
   });
 });

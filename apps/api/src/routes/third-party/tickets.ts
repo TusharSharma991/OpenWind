@@ -29,6 +29,7 @@ import { withIdempotency } from "../../lib/idempotency.js";
 import { applicationActorIdFromUserId } from "../../lib/application-actor-id.js";
 import { resolveOriginOidcClientId } from "../../lib/resolve-origin-oidc-client-id.js";
 import { resolveOrgMemberUserId } from "../../lib/resolve-org-member.js";
+import { postSystemComment } from "../../lib/post-system-comment.js";
 import { writeAuditEntry } from "@platform/audit";
 import { logger } from "@platform/logger";
 
@@ -164,7 +165,17 @@ export const getThirdPartyTicketHandler = factory.createHandlers(
 const CreateThirdPartyTicketSchema = z.object({
   workflowId: z.string().uuid(),
   fields: z.record(z.unknown()).default({}),
-  assignedTo: z.string().min(1),
+  // Control-character guard required here too (security review, 2026-09-08):
+  // an unresolved assignedTo is now echoed verbatim into a system-generated
+  // comment's text (postSystemComment, see the assignedTo-resolution block
+  // below) -- the exact same workflow_events.metadata.text sink remark's
+  // own guard protects.
+  assignedTo: z
+    .string()
+    .min(1)
+    .refine((v) => !FORBIDDEN_CHAR_PATTERN.test(v), {
+      message: "assignedTo contains a null byte or control character",
+    }),
   dueDate: z.string().datetime(),
   // remark is inserted verbatim as the ticket's first comment (see the
   // remark-as-comment block below), landing in the exact same
@@ -246,33 +257,33 @@ export const createThirdPartyTicketHandler = factory.createHandlers(
       return c.json({ error: "UNAUTHORIZED", message: "Invalid API key" }, 401);
     }
 
-    // assignedTo must resolve to a real org member -- accepts either their
-    // raw AuthNexus user id or their username (loginName), since a caller
-    // integrating against this API is far more likely to have a person's
-    // username on hand than their opaque numeric id. Previously this field
-    // was stored verbatim with zero validation, so a username silently
-    // landed in assigned_to and never matched any real user in the UI's own
-    // lookup (which keys strictly on userId) -- the ticket just looked
-    // unassigned, with no error anywhere (found via manual testing against
-    // a real client org).
+    // assignedTo resolution -- accepts either the caller's raw AuthNexus
+    // user id or their username (loginName), since a caller integrating
+    // against this API is far more likely to have a person's username on
+    // hand than their opaque numeric id. Previously this field was stored
+    // verbatim with zero validation, so a username silently landed in
+    // assigned_to and never matched any real user in the UI's own lookup
+    // (which keys strictly on userId) -- the ticket just looked unassigned,
+    // with no error anywhere (found via manual testing against a real
+    // client org).
+    //
+    // Policy (2026-09-08, revised from an earlier 422-on-failure design):
+    // an unresolvable assignedTo no longer blocks ticket creation. The
+    // ticket is always created (unassigned if resolution failed), and the
+    // caller learns about the failure only via a system-generated comment
+    // notification (posted below, after the remark comment), never via a
+    // synchronous 422 -- see post-system-comment.ts for the full rationale
+    // (this was a deliberate, discussed reversal of the original 422
+    // design, which the same day's security review had already flagged as
+    // exposing a fast, scriptable "does this identifier exist" oracle).
     const assignedToResolution = await resolveOrgMemberUserId(
       orgId,
       actingPersonToken,
       input.assignedTo,
     );
-    if (!assignedToResolution.ok) {
-      return c.json(
-        {
-          error: "VALIDATION_ERROR",
-          message: "Validation failed",
-          fields: {
-            assignedTo: "Must be an existing org member's user id or username",
-          },
-        },
-        422,
-      );
-    }
-    const resolvedAssignedTo = assignedToResolution.userId;
+    const resolvedAssignedTo = assignedToResolution.ok
+      ? assignedToResolution.userId
+      : undefined;
 
     // ADR-012 Phase G, spec R3/R4/R5 -- idempotency wraps only the actual
     // mutating operation, not upstream validation, so a caller retrying a
@@ -337,6 +348,7 @@ export const createThirdPartyTicketHandler = factory.createHandlers(
             // never fail ticket creation itself, which has already
             // committed by this point.
             const remark = input.remark.trim();
+            let remarkCommentEventId: string | undefined;
             if (remark) {
               try {
                 const [commentEvent] = await tx
@@ -362,6 +374,7 @@ export const createThirdPartyTicketHandler = factory.createHandlers(
                   })
                   .returning();
                 if (commentEvent) {
+                  remarkCommentEventId = commentEvent.id;
                   await tx.insert(outboxEvents).values({
                     tenantId,
                     eventType: "comment.created",
@@ -380,6 +393,32 @@ export const createThirdPartyTicketHandler = factory.createHandlers(
                 logger.error(
                   { remarkErr, tenantId, instanceId: created.id },
                   "third-party ticket create: failed to post remark as first comment",
+                );
+              }
+            }
+
+            // See resolveOrgMemberUserId call above and post-system-comment.ts
+            // -- notify the creator that assignedTo didn't resolve via a
+            // system comment (reply to the remark comment when one exists,
+            // otherwise a top-level comment), never via the API response
+            // itself. Best-effort: must never fail ticket creation, which
+            // has already committed by this point.
+            if (!assignedToResolution.ok) {
+              try {
+                await postSystemComment(tx, {
+                  tenantId,
+                  instanceId: created.id,
+                  workflowId: workflow.id,
+                  currentState: created.currentState,
+                  text: `assignedTo "${input.assignedTo}" could not be resolved to an org member -- this ticket was created unassigned.`,
+                  replyToEventId: remarkCommentEventId,
+                  notifyUserId: actingPersonId,
+                  originOidcClientId,
+                });
+              } catch (systemCommentErr) {
+                logger.error(
+                  { systemCommentErr, tenantId, instanceId: created.id },
+                  "third-party ticket create: failed to post assignedTo-unresolved system comment",
                 );
               }
             }

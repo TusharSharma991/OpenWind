@@ -56,6 +56,7 @@ function nextSelect() {
 
 const insertCalls: Array<{ table: unknown; values: unknown }> = [];
 let onConflictReturning: unknown[] = [{ id: "req-1" }];
+let mockInsertReturning: unknown[] = [{ id: "event-1" }];
 let mockUpdateReturning: unknown[] = [{ id: "instance-1" }];
 const updateCalls: Array<{ table: unknown; setVals: unknown }> = [];
 
@@ -68,6 +69,9 @@ const mockTx = {
         onConflictDoNothing: () => ({
           returning: () => Promise.resolve(onConflictReturning),
         }),
+        // Plain (non-conflict) inserts -- used by the outcome-3 system-reply
+        // comment insert (workflow_events), which never conflicts.
+        returning: () => Promise.resolve(mockInsertReturning),
       };
     },
   }),
@@ -88,6 +92,7 @@ vi.mock("@platform/db", () => ({
   workflows: "workflows_mock",
   accessRequests: { id: "access_requests.id" },
   outboxEvents: "outbox_events_mock",
+  workflowEvents: "workflow_events_mock",
   withTenantContext: (_tenantId: unknown, fn: (tx: unknown) => unknown) =>
     fn(mockTx),
   isTenantActive: vi.fn().mockResolvedValue(true),
@@ -205,6 +210,7 @@ const MENTIONED_EMAIL = "mentioned@example.com";
 const instanceRow = {
   id: TICKET_ID,
   workflowId: WORKFLOW_ID,
+  currentState: "open",
   createdBy: "creator-1",
   assignedTo: null,
   fields: {},
@@ -237,6 +243,7 @@ beforeEach(() => {
   emitAccessEventCalls.length = 0;
   misuseAlertCalls.length = 0;
   onConflictReturning = [{ id: "req-1" }];
+  mockInsertReturning = [{ id: "event-1" }];
   mockOrgUsers = [
     {
       userId: MENTIONED_USER_ID,
@@ -266,7 +273,7 @@ describe("mention-resolution-worker", () => {
     expect(updateCalls).toHaveLength(0);
   });
 
-  it("outcome 3: identifier doesn't resolve to any org user — logs tag.fallback", async () => {
+  it("outcome 3: identifier doesn't resolve to any org user — logs tag.fallback, posts a System Agent reply notifying the original commenter", async () => {
     selectQueue = [() => [instanceRow]];
     mockOrgUsers = [];
 
@@ -277,9 +284,37 @@ describe("mention-resolution-worker", () => {
     expect(auditEntries).toEqual([
       expect.objectContaining({ action: "tag.fallback" }),
     ]);
+
+    // Policy (2026-09-08): the caller's HTTP response was already uniform
+    // (201) regardless of this outcome -- this system reply is the only
+    // place the failure is ever surfaced, and only to actingPersonId.
+    const commentInsert = insertCalls.find(
+      (c) =>
+        c.table === "workflow_events_mock" &&
+        (c.values as { actorId?: string }).actorId === "system",
+    );
+    expect(commentInsert).toBeTruthy();
+    const commentMeta = (
+      commentInsert!.values as {
+        metadata: { text: string; actorName: string; replyTo: string };
+      }
+    ).metadata;
+    expect(commentMeta.actorName).toBe("System Agent");
+    expect(commentMeta.text).toContain("nobody@example.com");
+    expect(commentMeta.replyTo).toBe(COMMENT_ID);
+
+    const replyOutbox = insertCalls.find(
+      (c) =>
+        c.table === "outbox_events_mock" &&
+        (c.values as { eventType?: string }).eventType === "comment.replied",
+    );
+    expect(
+      (replyOutbox!.values as { payload: { targetUserId: string } }).payload
+        .targetUserId,
+    ).toBe(ACTING_PERSON_ID);
   });
 
-  it("outcome 3: identifier resolves but the person doesn't hold the 'user' role — logs tag.fallback", async () => {
+  it("outcome 3: identifier resolves but the person doesn't hold the 'user' role — logs tag.fallback, posts the same generic System Agent reply (no wording difference from the unknown-identifier case, to avoid re-opening the enumeration oracle)", async () => {
     selectQueue = [() => [instanceRow]];
     mockRolesByUserId = new Map([[MENTIONED_USER_ID, ["agent"]]]);
 
@@ -288,6 +323,12 @@ describe("mention-resolution-worker", () => {
     expect(auditEntries).toEqual([
       expect.objectContaining({ action: "tag.fallback" }),
     ]);
+    const commentInsert = insertCalls.find(
+      (c) =>
+        c.table === "workflow_events_mock" &&
+        (c.values as { actorId?: string }).actorId === "system",
+    );
+    expect(commentInsert).toBeTruthy();
   });
 
   it("outcome 2, toggle OFF (default): creates an access-request + notification outbox event, logs tag.access_request_created", async () => {

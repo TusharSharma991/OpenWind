@@ -12,7 +12,6 @@ import { logger } from "@platform/logger";
 import { writeAuditEntry } from "@platform/audit";
 import { applicationActorIdFromUserId } from "../../lib/application-actor-id.js";
 import { resolveOriginOidcClientId } from "../../lib/resolve-origin-oidc-client-id.js";
-import { resolveOrgMemberUserId } from "../../lib/resolve-org-member.js";
 import { zValidator } from "../../lib/validator.js";
 import { factory } from "./factory.js";
 import { requireTicketScope } from "./require-ticket-scope.js";
@@ -37,8 +36,30 @@ const CreateThirdPartyCommentSchema = z.object({
     }),
   // Stable identifiers only (email or Zitadel org user ID) — never a display
   // name (spec R4). Resolution happens fully async, after this response is
-  // already sent (spec R5/R6) — see mention-resolution-worker.ts.
-  mentions: z.array(z.string().min(1)).max(20).default([]),
+  // already sent (spec R5/R6) — see mention-resolution-worker.ts. An
+  // identifier that fails to resolve never blocks or changes this response
+  // (a same-day 422-on-failure design was tried and reverted, 2026-09-08,
+  // once security review flagged it as a fast, scriptable "does this
+  // identifier exist" oracle) -- instead the worker's outcome-3 branch
+  // posts a "System Agent" reply comment notifying the original commenter,
+  // so the failure is only ever visible to the one person who submitted it,
+  // through a real notification, never through the API response itself.
+  // Control-character guard required here too (security review, 2026-09-08):
+  // an unresolved mention identifier is now echoed verbatim into a
+  // system-generated reply's text (mention-resolution-worker.ts's outcome-3
+  // branch) -- the same workflow_events.metadata.text sink `text` above
+  // guards.
+  mentions: z
+    .array(
+      z
+        .string()
+        .min(1)
+        .refine((v) => !FORBIDDEN_CHAR_PATTERN.test(v), {
+          message: "mentions entry contains a null byte or control character",
+        }),
+    )
+    .max(20)
+    .default([]),
   // ADR-012 Phase D, spec R3 -- references completed attachment uploads;
   // never file content itself (spec R2, see attachments-presign.ts).
   attachmentIds: z
@@ -73,7 +94,6 @@ export const createThirdPartyCommentHandler = factory.createHandlers(
     const { text, mentions, attachmentIds } = c.req.valid("json");
     const applicationActorId = applicationActorIdFromUserId(authUserId);
     const idempotencyKey = c.req.header("Idempotency-Key");
-    const actingPersonToken = c.req.header("X-Acting-Person-Token") ?? "";
 
     const [instance] = await withTenantContext(tenantId, (tx) =>
       tx
@@ -149,44 +169,6 @@ export const createThirdPartyCommentHandler = factory.createHandlers(
         );
       }
       return notFound(c);
-    }
-
-    // Mandatory-mention-validation policy (2026-09-08): every mentioned
-    // identifier must resolve to a real org member, or the comment is
-    // rejected outright -- a conscious, deliberate reversal of this route's
-    // original design (mention resolution was async-only and never
-    // reported back, specifically to prevent using the mentions list as an
-    // org-member enumeration probe -- see resolve-org-member.ts's own
-    // comment for the full history). The error deliberately reports ONLY
-    // that an identifier didn't resolve, never a user list or suggestions,
-    // so the failure signal itself doesn't reopen the leak this design
-    // originally existed to close. Runs only after the access check above
-    // (moved here in security review, 2026-09-08) so this org-lookup --
-    // and the accepted real-org-member oracle it exposes -- can't be
-    // probed via a nonexistent or inaccessible ticket id.
-    if (mentions.length > 0) {
-      const unresolved: string[] = [];
-      for (const identifier of mentions) {
-        const resolution = await resolveOrgMemberUserId(
-          orgId,
-          actingPersonToken,
-          identifier,
-          { matchEmail: true },
-        );
-        if (!resolution.ok) unresolved.push(identifier);
-      }
-      if (unresolved.length > 0) {
-        return c.json(
-          {
-            error: "VALIDATION_ERROR",
-            message: "Validation failed",
-            fields: {
-              mentions: `Not found: ${unresolved.join(", ")}`,
-            },
-          },
-          422,
-        );
-      }
     }
 
     // ADR-012 Phase G, spec R3/R4/R5 -- everything from here down (attachment

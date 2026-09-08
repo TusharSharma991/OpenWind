@@ -344,6 +344,24 @@ describe("POST /api/v1/tickets/:id/comments", () => {
     expect(res.status).toBe(400);
   });
 
+  // Security review (2026-09-08): an unresolved mention identifier is now
+  // echoed verbatim into a system-generated reply's text
+  // (mention-resolution-worker.ts's outcome-3 branch) -- the same sink
+  // `text` above guards, so each mentions[] entry needs the identical
+  // control-character rejection.
+  it("rejects a comment whose mentions entry contains a null byte at ingress", async () => {
+    const app = makeApp(apiKeyAuth(), actingAs(CREATOR));
+    const res = await app.request(`/${creatorTicketId}/comments`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        text: "hello",
+        mentions: [`bad${String.fromCharCode(0)}mention`],
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
+
   it("returns the same identical 404 when the workflow is deleted out from under the access check, not a distinguishable error", async () => {
     // A workflow-admin-only person (not creator/assignee/on any access list)
     // forces hasEntityCommentAccessFull down its getWorkflow path -- deleting

@@ -18,6 +18,7 @@ import {
   workflows,
   workflowStates,
   workflowEvents,
+  outboxEvents,
   adminAuditLog,
   apiKeys,
   withTenantContext,
@@ -458,6 +459,26 @@ describe("POST /api/v1/tickets — mandatory baseline fields", () => {
     });
     expect(res.status).toBe(400);
   });
+
+  // Security review (2026-09-08): an unresolved assignedTo is now echoed
+  // verbatim into a system-generated comment's text (postSystemComment) --
+  // the same workflow_events.metadata.text sink remark's own guard
+  // protects, so assignedTo needs the identical control-character guard.
+  it("returns 400 when assignedTo contains a null byte or control character", async () => {
+    const app = makeApp(apiKeyAuth(), ACTING_PERSON);
+    const res = await app.request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workflowId,
+        fields: { title: "Control char in assignedTo" },
+        assignedTo: "bad\x00assignee",
+        dueDate: "2026-12-01T00:00:00.000Z",
+        remark: "test remark",
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
 });
 
 // Found via manual testing against a real client org's production instance:
@@ -511,7 +532,15 @@ describe("POST /api/v1/tickets — assignedTo resolves username or userId to the
     expect(body.data.assignedTo).toBe("real-user-id-999");
   });
 
-  it("returns 422 when assignedTo matches no real org member", async () => {
+  // Policy (2026-09-08, revised from an earlier 422-on-failure design):
+  // an unresolvable assignedTo no longer blocks creation or shows up as a
+  // synchronous error -- the ticket is always created (unassigned here),
+  // and the caller learns about the failure only via a system-generated
+  // reply comment notifying the acting person who created the ticket. See
+  // post-system-comment.ts for the full rationale (this closes the fast,
+  // scriptable "does this identifier exist" oracle a 422 response here
+  // would otherwise be).
+  it("creates the ticket unassigned (never 422s) when assignedTo matches no real org member, and posts a System Agent reply notifying the creator", async () => {
     const app = makeApp(apiKeyAuth(), ACTING_PERSON);
     const res = await app.request("/", {
       method: "POST",
@@ -524,9 +553,50 @@ describe("POST /api/v1/tickets — assignedTo resolves username or userId to the
         remark: "test remark",
       }),
     });
-    expect(res.status).toBe(422);
-    const body = (await res.json()) as { fields: { assignedTo: string } };
-    expect(body.fields.assignedTo).toBeTruthy();
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as {
+      data: { id: string; assignedTo: string | null };
+    };
+    createdInstanceIds.push(body.data.id);
+    expect(body.data.assignedTo).toBeNull();
+
+    const events = await withTenantContext(TENANT, (tx) =>
+      tx
+        .select({
+          actorId: workflowEvents.actorId,
+          metadata: workflowEvents.metadata,
+        })
+        .from(workflowEvents)
+        .where(eq(workflowEvents.instanceId, body.data.id)),
+    );
+    const systemReply = events.find(
+      (e) =>
+        e.actorId === "system" &&
+        (e.metadata as { text?: string } | null)?.text?.includes(
+          "nobody-with-this-username",
+        ),
+    );
+    expect(systemReply).toBeTruthy();
+    expect(
+      (systemReply?.metadata as { actorName?: string } | null)?.actorName,
+    ).toBe("System Agent");
+    // Replies to the remark comment (this test's request included a
+    // remark), which is what makes the existing comment.replied
+    // notification path fire for the ticket's own creator.
+    expect(
+      (systemReply?.metadata as { replyTo?: string } | null)?.replyTo,
+    ).toBeTruthy();
+
+    const [replyOutbox] = await withTenantContext(TENANT, (tx) =>
+      tx
+        .select({ payload: outboxEvents.payload })
+        .from(outboxEvents)
+        .where(eq(outboxEvents.eventType, "comment.replied")),
+    );
+    expect(
+      (replyOutbox?.payload as { targetUserId?: string } | undefined)
+        ?.targetUserId,
+    ).toBe(ACTING_PERSON.userId);
   });
 });
 

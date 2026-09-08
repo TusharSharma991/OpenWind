@@ -76,7 +76,7 @@ export async function ensureUserRefsKnown(
       .values({
         tenantId,
         userId,
-        email: profile.email || null,
+        email: profile.email ?? null,
         displayName: profile.displayName || null,
       })
       .onConflictDoNothing();

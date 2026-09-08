@@ -290,6 +290,42 @@ describe("mention-resolution-worker", () => {
     ]);
   });
 
+  // Found via live prod testing (2026-09-08): a real org member with no
+  // email set at all (e.g. a machine/service account) crashed this job on
+  // every retry attempt -- `u.email.toLowerCase()` threw
+  // "Cannot read properties of undefined" for ANY mention identifier, as
+  // long as such an account existed anywhere in the org's user list, since
+  // Array.find evaluates the predicate against every entry until a match.
+  // The job never reached outcome 3, so the System Agent reply never
+  // posted either. Proves resolution still works (by username here) when
+  // an emailless account is present ahead of the real match.
+  it("does not crash when the org's user list contains a member with no email set, and still resolves a later match", async () => {
+    selectQueue = [() => [instanceRow]];
+    mockHasEntityAccess = true;
+    mockOrgUsers = [
+      {
+        userId: "machine-account-1",
+        email: undefined as unknown as string,
+        displayName: "Machine Account",
+        loginName: "machine-account",
+        phone: undefined,
+      },
+      {
+        userId: MENTIONED_USER_ID,
+        email: MENTIONED_EMAIL,
+        displayName: "Mentioned Person",
+        loginName: MENTIONED_USERNAME,
+        phone: undefined,
+      },
+    ];
+
+    await capturedProcessor!(baseJob({ mentionIdentifier: MENTIONED_EMAIL }));
+
+    expect(auditEntries).toEqual([
+      expect.objectContaining({ action: "tag.resolved_existing_access" }),
+    ]);
+  });
+
   it("outcome 3: identifier doesn't resolve to any org user — logs tag.fallback, posts a System Agent reply notifying the original commenter", async () => {
     selectQueue = [() => [instanceRow]];
     mockOrgUsers = [];

@@ -86,11 +86,17 @@ async function resolveIdentifier(
   // that UX, naturally has a username/name on hand, never an opaque userId or
   // necessarily an email. Matches resolveOrgMemberUserId's identical
   // three-way match used for assignedTo resolution.
+  // email is guarded with `?.` -- found via live prod testing (2026-09-08):
+  // some real org members (e.g. machine/service accounts) have no email set
+  // at all, and `u.email.toLowerCase()` unguarded crashed this job on every
+  // retry attempt for any mention identifier once such an account existed
+  // anywhere in the org's user list, regardless of what was actually
+  // mentioned -- outcome 3's System Agent reply never got a chance to post.
   const lowerIdentifier = identifier.toLowerCase();
   const match = zitadelUsers.find(
     (u: OrgUser) =>
       u.userId === identifier ||
-      u.email.toLowerCase() === lowerIdentifier ||
+      u.email?.toLowerCase() === lowerIdentifier ||
       u.loginName === identifier,
   );
   if (!match) return null;

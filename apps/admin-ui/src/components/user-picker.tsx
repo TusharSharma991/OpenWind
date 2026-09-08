@@ -5,7 +5,9 @@ import { TOKENS, useHoverStyle } from "@platform/ui";
 export interface UserOption {
   userId: string;
   displayName: string;
-  email: string;
+  // Optional -- some real org members (e.g. machine/service accounts) have
+  // no email set (found via live testing, 2026-09-08).
+  email?: string;
   loginName?: string;
 }
 
@@ -103,7 +105,7 @@ function UserOptionRow({
             whiteSpace: "nowrap",
           }}
         >
-          {user.email || user.loginName}
+          {user.email ?? user.loginName}
         </div>
       </div>
       {isSelected && (
@@ -147,7 +149,7 @@ export function UserPicker({
     ? users.filter(
         (u) =>
           u.displayName.toLowerCase().includes(query.toLowerCase()) ||
-          u.email.toLowerCase().includes(query.toLowerCase()) ||
+          (u.email ?? "").toLowerCase().includes(query.toLowerCase()) ||
           (u.loginName ?? "").toLowerCase().includes(query.toLowerCase()),
       )
     : users;
@@ -502,7 +504,7 @@ function MultiUserOptionRow({
             whiteSpace: "nowrap",
           }}
         >
-          {user.email || user.loginName}
+          {user.email ?? user.loginName}
         </div>
       </div>
       {isChecked && (
@@ -550,7 +552,7 @@ export function MultiUserPicker({
     ? users.filter(
         (u) =>
           u.displayName.toLowerCase().includes(query.toLowerCase()) ||
-          u.email.toLowerCase().includes(query.toLowerCase()) ||
+          (u.email ?? "").toLowerCase().includes(query.toLowerCase()) ||
           (u.loginName ?? "").toLowerCase().includes(query.toLowerCase()),
       )
     : users;

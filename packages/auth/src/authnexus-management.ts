@@ -13,7 +13,10 @@ import { logger } from "@platform/logger";
 
 export interface OrgUser {
   userId: string;
-  email: string;
+  // Optional -- see AuthNexusAssignment's identical field comment. Every
+  // call site matching against this must not assume it's present (e.g.
+  // `u.email?.toLowerCase()`, never `u.email.toLowerCase()`).
+  email?: string;
   displayName: string;
   loginName: string;
 }
@@ -23,7 +26,10 @@ interface AuthNexusAssignment {
   userName: string;
   firstName?: string;
   lastName?: string;
-  email: string;
+  // Optional, not guaranteed -- found via live prod testing (2026-09-08):
+  // real org members (e.g. machine/service accounts) can have no email set
+  // at all, despite this field previously being typed as always-present.
+  email?: string;
   displayName?: string;
   preferredLoginName?: string;
   roleKeys: string[];
@@ -232,7 +238,7 @@ function assignmentToOrgUser(a: AuthNexusAssignment): OrgUser {
   const fullName = nameParts.length > 0 ? nameParts.join(" ") : undefined;
   return {
     userId: a.userId,
-    email: a.email,
+    ...(a.email !== undefined && { email: a.email }),
     displayName: a.displayName ?? fullName ?? a.userName,
     loginName: a.preferredLoginName ?? a.userName,
   };

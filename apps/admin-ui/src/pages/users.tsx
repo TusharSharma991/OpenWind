@@ -27,7 +27,9 @@ function authNexusUserUrl(_userId: string): string {
 interface User {
   userId: string;
   displayName: string;
-  email: string;
+  // Optional -- some real org members (e.g. machine/service accounts) have
+  // no email set (found via live testing, 2026-09-08).
+  email?: string;
   loginName: string;
   roles?: string[];
 }
@@ -258,7 +260,7 @@ export function UsersPage(): React.ReactElement {
     ? users.filter(
         (u) =>
           u.displayName.toLowerCase().includes(query.toLowerCase()) ||
-          u.email.toLowerCase().includes(query.toLowerCase()) ||
+          (u.email ?? "").toLowerCase().includes(query.toLowerCase()) ||
           u.loginName.toLowerCase().includes(query.toLowerCase()),
       )
     : users;

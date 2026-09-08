@@ -7,7 +7,7 @@
  * (the bug fix in createChildRelation), and the 1-level API nesting cap.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { Hono } from "hono";
 import type { Context, Next } from "hono";
 import { inArray, eq, sql } from "drizzle-orm";
@@ -23,6 +23,33 @@ import { createEntityType, createEntity } from "@platform/entity-engine";
 import { hashApiKey } from "@platform/auth";
 import type { AuthContext, ActingPersonContext } from "@platform/auth";
 import { createThirdPartyChildHandler } from "../../src/routes/third-party/children.js";
+
+// assignedTo now resolves against a real Zitadel org-users lookup (an
+// external service call, not the database -- mocking it here follows
+// testing-conventions.md's "mock at service boundaries, never the DB" rule).
+import type * as ZitadelManagement from "../../src/lib/zitadel-management.js";
+vi.mock("../../src/lib/zitadel-management.js", async (importOriginal) => {
+  const real = await importOriginal<typeof ZitadelManagement>();
+  return {
+    ...real,
+    listOrgUsers: async () => [
+      {
+        userId: "some-assignee",
+        email: "some-assignee@example.com",
+        displayName: "some-assignee",
+        loginName: "some-assignee",
+        phone: undefined,
+      },
+      {
+        userId: "real-user-id-999",
+        email: "bob@example.com",
+        displayName: "Bob",
+        loginName: "bob-username",
+        phone: undefined,
+      },
+    ],
+  };
+});
 
 const TENANT = "eeeeeeee-0000-4000-e000-000000000704";
 const OTHER_TENANT = "ffffffff-0000-4000-f000-000000000705";
@@ -336,5 +363,37 @@ describe("POST /api/v1/tickets/:id/children", () => {
     expect(secondLevel.status).toBe(400);
     const body = (await secondLevel.json()) as { error: string };
     expect(body.error).toBe("SUBTICKET_NESTING_EXCEEDED");
+  });
+
+  it("resolves a username (loginName) assignee to its canonical userId", async () => {
+    const app = makeApp(apiKeyAuth(), actingAs(CREATOR));
+    const res = await app.request(`/${creatorTicketId}/children`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        entityTypeId,
+        fields: { title: "assignee via username" },
+        assignedTo: "bob-username",
+      }),
+    });
+    expect(res.status).toBe(201);
+    const { data } = (await res.json()) as { data: { assignedTo: string } };
+    expect(data.assignedTo).toBe("real-user-id-999");
+  });
+
+  it("rejects an assignee that does not resolve to any real org member", async () => {
+    const app = makeApp(apiKeyAuth(), actingAs(CREATOR));
+    const res = await app.request(`/${creatorTicketId}/children`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        entityTypeId,
+        fields: { title: "bad assignee" },
+        assignedTo: "totally-unknown-identifier-xyz",
+      }),
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { fields?: { assignedTo?: string } };
+    expect(body.fields?.assignedTo).toBeTruthy();
   });
 });

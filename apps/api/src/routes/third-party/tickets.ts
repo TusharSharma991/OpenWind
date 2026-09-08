@@ -25,6 +25,7 @@ import { stripInternalFields } from "../../lib/strip-internal-fields.js";
 import { withIdempotency, isIdempotencyStatus } from "../../lib/idempotency.js";
 import { applicationActorIdFromUserId } from "../../lib/application-actor-id.js";
 import { resolveOriginOidcClientId } from "../../lib/resolve-origin-oidc-client-id.js";
+import { resolveOrgMemberUserId } from "../../lib/resolve-org-member.js";
 import { writeAuditEntry } from "@platform/audit";
 import { logger } from "@platform/logger";
 
@@ -185,7 +186,7 @@ export const createThirdPartyTicketHandler = factory.createHandlers(
   requireTicketScope("create"),
   zValidator("json", CreateThirdPartyTicketSchema),
   async (c) => {
-    const { tenantId, userId: authUserId } = c.get("auth");
+    const { tenantId, orgId, userId: authUserId } = c.get("auth");
     const { userId: actingPersonId } = c.get("actingPerson");
     const input = c.req.valid("json");
     const applicationActorId = applicationActorIdFromUserId(authUserId);
@@ -217,6 +218,36 @@ export const createThirdPartyTicketHandler = factory.createHandlers(
       return c.json({ error: "UNAUTHORIZED", message: "Invalid API key" }, 401);
     }
 
+    // assignedTo is optional on this tree's schema, but when supplied it
+    // must resolve to a real org member -- accepts either their raw Zitadel
+    // user id or their username (loginName), same as the sibling
+    // AuthNexus-fork fix this was ported from. Previously an assignedTo
+    // value was stored verbatim with zero validation -- a caller-supplied
+    // username silently landed in assigned_to and never matched any real
+    // user in admin-ui's own lookup (which keys strictly on userId), so the
+    // ticket just looked unassigned with no error anywhere.
+    let resolvedAssignedTo: string | undefined;
+    if (input.assignedTo) {
+      const assignedToResolution = await resolveOrgMemberUserId(
+        orgId,
+        input.assignedTo,
+      );
+      if (!assignedToResolution.ok) {
+        return c.json(
+          {
+            error: "VALIDATION_ERROR",
+            message: "Validation failed",
+            fields: {
+              assignedTo:
+                "Must be an existing org member's user id or username",
+            },
+          },
+          422,
+        );
+      }
+      resolvedAssignedTo = assignedToResolution.userId;
+    }
+
     // ADR-012 Phase G, spec R3/R4/R5 -- idempotency wraps only the actual
     // mutating operation, not upstream validation, so a caller retrying a
     // request that already 422'd above re-validates fresh rather than
@@ -231,7 +262,7 @@ export const createThirdPartyTicketHandler = factory.createHandlers(
       {
         workflowId: input.workflowId,
         fields: input.fields,
-        assignedTo: input.assignedTo ?? null,
+        assignedTo: resolvedAssignedTo ?? null,
         attachmentIds: input.attachmentIds,
       },
       async () => {
@@ -245,7 +276,7 @@ export const createThirdPartyTicketHandler = factory.createHandlers(
               entityTypeId: workflow.entityTypeId,
               workflowId: workflow.id,
               fields: input.fields,
-              assignedTo: input.assignedTo,
+              assignedTo: resolvedAssignedTo,
               createdBy: actingPersonId,
               actorId: applicationActorId,
               actorType: "api_key",

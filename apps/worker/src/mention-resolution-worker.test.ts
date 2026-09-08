@@ -316,7 +316,7 @@ describe("mention-resolution-worker", () => {
         metadata: { text: string; actorName: string; replyTo: string };
       }
     ).metadata;
-    expect(commentMeta.actorName).toBe("System Agent");
+    expect(commentMeta.actorName).toBe("system");
     expect(commentMeta.text).toContain("nobody@example.com");
     expect(commentMeta.replyTo).toBe(COMMENT_ID);
 

@@ -206,7 +206,7 @@ export const mentionResolutionWorker = new Worker<MentionResolutionJob>(
       // failure design on the API route itself): the caller already got a
       // uniform 201 for this comment regardless of how mentionIdentifier
       // would resolve (spec R5/R6). The only place this failure is ever
-      // surfaced is here, now, as a "System Agent" reply comment notifying
+      // surfaced is here, now, as a system-tagged reply comment notifying
       // actingPersonId (the person who actually submitted the mention) --
       // never as anything the API caller can script/probe synchronously.
       // Deliberately covers BOTH outcome-3 sub-cases (unknown identifier,
@@ -231,7 +231,7 @@ export const mentionResolutionWorker = new Worker<MentionResolutionJob>(
               metadata: {
                 type: "comment",
                 text: `The mention "${mentionIdentifier}" could not be resolved to an org member.`,
-                actorName: "System Agent",
+                actorName: "system",
                 replyTo: commentId,
               },
             })

@@ -74,11 +74,18 @@ export function OriginCornerBadge({
 }
 
 /**
- * Inline `External · [App] · [Person]` / `Redirected · [App] · [Person]`
- * badge for comment authorship and activity-timeline entries
- * (docs/specs/third-party-api-origin-tagging.md R3/R5). Returns null
- * (renders nothing) when origin is null/undefined — a normal, in-app
- * ticket/comment/timeline entry never carries a tag.
+ * Inline `External` / `Redirected` badge for comment authorship and
+ * activity-timeline entries (docs/specs/third-party-api-origin-tagging.md
+ * R3/R5). Returns null (renders nothing) when origin is null/undefined — a
+ * normal, in-app ticket/comment/timeline entry never carries a tag.
+ *
+ * Collapsed to just the mechanism label by default (2026-09-08, found via
+ * live testing: a comment feed with several third-party entries got
+ * visually noisy with every one spelling out `External · [App] · [Person]`
+ * inline) -- click/tap toggles open to reveal `· [App] · [Person]`, same
+ * detail the title tooltip already carries for anyone hovering instead. A
+ * `title` attribute is kept on the collapsed state too so hover still works
+ * without a click.
  */
 export function OriginTag({
   origin,
@@ -87,15 +94,28 @@ export function OriginTag({
   origin: Origin;
   size?: "normal" | "compact";
 }): React.ReactElement | null {
+  const [expanded, setExpanded] = React.useState(false);
   if (!origin) return null;
 
   const color = COLOR_BY_MECHANISM[origin.mechanism];
   const fontSize = size === "compact" ? "10.5px" : "11.5px";
   const padding = size === "compact" ? "1px 7px" : "2px 9px";
+  const tooltip = `Created via ${origin.appName} by ${performerLabel(origin)}`;
 
   return (
-    <span
-      title={`Created via ${origin.appName} by ${performerLabel(origin)}`}
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        setExpanded((v) => !v);
+      }}
+      title={tooltip}
+      aria-expanded={expanded}
+      aria-label={
+        expanded
+          ? `${tooltip} — click to collapse`
+          : `${tooltip} — click to expand`
+      }
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -109,34 +129,40 @@ export function OriginTag({
         background: `color-mix(in srgb, ${color} 16%, var(--bg-secondary))`,
         border: `1px solid color-mix(in srgb, ${color} 45%, transparent)`,
         color: "var(--text-secondary)",
+        cursor: "pointer",
+        font: "inherit",
       }}
     >
       <span style={{ color }}>{LABEL_BY_MECHANISM[origin.mechanism]}</span>
-      <span aria-hidden="true" style={{ opacity: 0.5 }}>
-        ·
-      </span>
-      <span
-        style={{
-          maxWidth: "140px",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-        }}
-      >
-        {origin.appName}
-      </span>
-      <span aria-hidden="true" style={{ opacity: 0.5 }}>
-        ·
-      </span>
-      <span
-        style={{
-          maxWidth: "120px",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-        }}
-      >
-        {performerLabel(origin)}
-      </span>
-    </span>
+      {expanded && (
+        <>
+          <span aria-hidden="true" style={{ opacity: 0.5 }}>
+            ·
+          </span>
+          <span
+            style={{
+              maxWidth: "140px",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {origin.appName}
+          </span>
+          <span aria-hidden="true" style={{ opacity: 0.5 }}>
+            ·
+          </span>
+          <span
+            style={{
+              maxWidth: "120px",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {performerLabel(origin)}
+          </span>
+        </>
+      )}
+    </button>
   );
 }
 

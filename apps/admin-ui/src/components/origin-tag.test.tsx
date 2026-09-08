@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import {
   OriginTag,
   OriginCornerBadge,
@@ -20,7 +20,7 @@ describe("OriginTag", () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it('renders "External" for mechanism api, with app name and resolved performer name', () => {
+  it('renders only the collapsed "External" label by default — app/person detail is not shown until clicked', () => {
     render(
       <OriginTag
         origin={{
@@ -32,12 +32,33 @@ describe("OriginTag", () => {
       />,
     );
     expect(screen.getByText("External")).toBeTruthy();
-    expect(screen.getByText("Acme Sync")).toBeTruthy();
-    expect(screen.getByText("Jane Doe")).toBeTruthy();
+    expect(screen.queryByText("Acme Sync")).toBeNull();
+    expect(screen.queryByText("Jane Doe")).toBeNull();
     expect(screen.queryByText("378676050449661954")).toBeNull();
   });
 
-  it("falls back to the raw performer id when no display name resolved", () => {
+  it("expands to show app name and resolved performer name on click, and collapses again on a second click", () => {
+    render(
+      <OriginTag
+        origin={{
+          mechanism: "api",
+          appName: "Acme Sync",
+          performerUserId: "378676050449661954",
+          performerDisplayName: "Jane Doe",
+        }}
+      />,
+    );
+    const button = screen.getByRole("button");
+    fireEvent.click(button);
+    expect(screen.getByText("Acme Sync")).toBeTruthy();
+    expect(screen.getByText("Jane Doe")).toBeTruthy();
+
+    fireEvent.click(button);
+    expect(screen.queryByText("Acme Sync")).toBeNull();
+    expect(screen.queryByText("Jane Doe")).toBeNull();
+  });
+
+  it("falls back to the raw performer id when no display name resolved, once expanded", () => {
     render(
       <OriginTag
         origin={{
@@ -47,10 +68,11 @@ describe("OriginTag", () => {
         }}
       />,
     );
+    fireEvent.click(screen.getByRole("button"));
     expect(screen.getByText("jane@acme.com")).toBeTruthy();
   });
 
-  it('renders "Redirected" for mechanism handoff', () => {
+  it('renders "Redirected" for mechanism handoff, collapsed by default', () => {
     render(
       <OriginTag
         origin={{
@@ -62,7 +84,21 @@ describe("OriginTag", () => {
       />,
     );
     expect(screen.getByText("Redirected")).toBeTruthy();
-    expect(screen.getByText("Acme Portal")).toBeTruthy();
+    expect(screen.queryByText("Acme Portal")).toBeNull();
+  });
+
+  it("still carries the full detail in its title tooltip while collapsed, so hover works without clicking", () => {
+    render(
+      <OriginTag
+        origin={{
+          mechanism: "api",
+          appName: "Acme Sync",
+          performerUserId: "378676050449661954",
+          performerDisplayName: "Jane Doe",
+        }}
+      />,
+    );
+    expect(screen.getByTitle("Created via Acme Sync by Jane Doe")).toBeTruthy();
   });
 });
 

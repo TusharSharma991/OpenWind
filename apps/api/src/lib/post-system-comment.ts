@@ -2,9 +2,10 @@ import type { DbOrTx } from "@platform/db";
 import { workflowEvents, outboxEvents } from "@platform/db";
 
 /**
- * Posts a system-generated comment ("System Agent") notifying one specific
- * user that something they submitted via the third-party API (an assignedTo
- * value, a comment mention) could not be resolved to a real org member.
+ * Posts a system-generated comment (actor tag "system") notifying one
+ * specific user that something they submitted via the third-party API (an
+ * assignedTo value, a comment mention) could not be resolved to a real org
+ * member.
  *
  * Design (2026-09-08, discussed and agreed): this exists specifically so the
  * API response itself never has to reveal whether an identifier resolved --
@@ -28,10 +29,20 @@ import { workflowEvents, outboxEvents } from "@platform/db";
  * notification outcome, no reply target required.
  *
  * `actorId`/`triggeredBy` are the fixed sentinel `"system"` (never a real
- * user id), with `metadata.actorName: "System Agent"` set so the comment
- * timeline renders a fixed label without attempting an org-member lookup
+ * user id), with `metadata.actorName: "system"` set so the comment timeline
+ * renders a fixed label without attempting an org-member lookup
  * (list-workflow-events.ts uses `metadata.actorName` verbatim when present,
  * exactly the mechanism real users' snapshot names already rely on).
+ *
+ * Deliberately does NOT set originMechanism/originOidcClientId -- found via
+ * live testing (2026-09-08): this comment is generated internally by the
+ * platform itself, not by the third-party application whose request
+ * happened to trigger it. Tagging it with that app's originOidcClientId
+ * made admin-ui show it as "External · <app name>", wrongly attributing an
+ * internal system message to the third-party caller. Leaving origin fields
+ * unset renders it as a plain internal comment, same as any other
+ * platform-generated event (see docs/specs/third-party-api-origin-tagging.md
+ * §V: null origin means normal, in-app creation -- no tag rendered).
  */
 export async function postSystemComment(
   tx: DbOrTx,
@@ -43,7 +54,6 @@ export async function postSystemComment(
     text: string;
     replyToEventId?: string | undefined;
     notifyUserId: string;
-    originOidcClientId: string;
   },
 ): Promise<void> {
   const {
@@ -54,7 +64,6 @@ export async function postSystemComment(
     text,
     replyToEventId,
     notifyUserId,
-    originOidcClientId,
   } = params;
 
   const [event] = await tx
@@ -71,12 +80,9 @@ export async function postSystemComment(
       metadata: {
         type: "comment",
         text,
-        actorName: "System Agent",
+        actorName: "system",
         ...(replyToEventId ? { replyTo: replyToEventId } : {}),
       },
-      originMechanism: "api",
-      originOidcClientId,
-      originPerformerUserId: "system",
     })
     .returning();
   if (!event) return;

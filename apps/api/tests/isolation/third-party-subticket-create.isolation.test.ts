@@ -479,7 +479,7 @@ describe("POST /api/v1/tickets/:id/children — mandatory baseline fields", () =
     expect(systemReply).toBeTruthy();
     expect(
       (systemReply?.metadata as { actorName?: string } | null)?.actorName,
-    ).toBe("System Agent");
+    ).toBe("system");
 
     const [replyOutbox] = await withTenantContext(TENANT, (tx) =>
       tx

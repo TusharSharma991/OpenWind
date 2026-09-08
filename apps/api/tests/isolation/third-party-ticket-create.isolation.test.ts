@@ -579,7 +579,7 @@ describe("POST /api/v1/tickets — assignedTo resolves username or userId to the
     expect(systemReply).toBeTruthy();
     expect(
       (systemReply?.metadata as { actorName?: string } | null)?.actorName,
-    ).toBe("System Agent");
+    ).toBe("system");
     // Replies to the remark comment (this test's request included a
     // remark), which is what makes the existing comment.replied
     // notification path fire for the ticket's own creator.

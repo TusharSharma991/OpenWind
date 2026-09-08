@@ -12,7 +12,6 @@ import { logger } from "@platform/logger";
 import { writeAuditEntry } from "@platform/audit";
 import { applicationActorIdFromUserId } from "../../lib/application-actor-id.js";
 import { resolveOriginOidcClientId } from "../../lib/resolve-origin-oidc-client-id.js";
-import { resolveOrgMemberUserId } from "../../lib/resolve-org-member.js";
 import { zValidator } from "../../lib/validator.js";
 import { factory } from "./factory.js";
 import { requireTicketScope } from "./require-ticket-scope.js";
@@ -42,17 +41,18 @@ const CreateThirdPartyCommentSchema = z.object({
     .refine((v) => !FORBIDDEN_CHAR_PATTERN.test(v), {
       message: "text contains a null byte or control character",
     }),
-  // Stable identifiers only (email, username, or Zitadel org user ID) —
-  // never a display name (spec R4). Every identifier must now synchronously
-  // resolve to a real org member or the whole comment 422s (see the
-  // resolveOrgMemberUserId check below) -- a deliberate reversal of the
-  // original spec R5/R6 design (async-only resolution, never reported
-  // back, specifically to prevent using this field as an org-member
-  // enumeration probe), ported from the sibling AuthNexus fork's identical
-  // policy change (2026-09-08). The async mentionResolutionQueue enqueue
-  // below still runs for the actual notification/grant side effects — this
-  // schema comment and the validation block only gate whether the comment
-  // is accepted at all.
+  // Accepts a userId, email, or username (loginName) -- never a free-text
+  // display name (spec R4; see resolveIdentifier in
+  // mention-resolution-worker.ts for the exact three-way match). Resolution
+  // happens fully async, after this response is already sent (spec R5/R6).
+  // An identifier that fails to resolve never blocks or changes this
+  // response (a same-day 422-on-failure design was tried and reverted on
+  // the sibling AuthNexus fork once security review flagged it as a fast,
+  // scriptable "does this identifier exist" oracle) -- instead the worker's
+  // outcome-3 branch posts a "System Agent" reply comment notifying the
+  // original commenter, so the failure is only ever visible to the one
+  // person who submitted it, through a real notification, never through
+  // the API response itself.
   mentions: z.array(z.string().min(1)).max(20).default([]),
   // ADR-012 Phase D, spec R3 -- references completed attachment uploads;
   // never file content itself (spec R2, see attachments-presign.ts).
@@ -163,37 +163,6 @@ export const createThirdPartyCommentHandler = factory.createHandlers(
         );
       }
       return notFound(c);
-    }
-
-    // Mandatory-mention-validation policy, ported from the sibling
-    // AuthNexus fork (2026-09-08): every mentioned identifier must resolve
-    // to a real org member, or the comment is rejected outright -- see the
-    // schema comment above for the full history/rationale. The error
-    // deliberately reports ONLY that an identifier didn't resolve, never a
-    // user list or suggestions. Runs only after the access check above (the
-    // fork's own security review found this ordering mattered: resolving
-    // before the access check let the oracle be probed via a nonexistent or
-    // inaccessible ticket id with no real authorization needed).
-    if (mentions.length > 0) {
-      const unresolved: string[] = [];
-      for (const identifier of mentions) {
-        const resolution = await resolveOrgMemberUserId(orgId, identifier, {
-          matchEmail: true,
-        });
-        if (!resolution.ok) unresolved.push(identifier);
-      }
-      if (unresolved.length > 0) {
-        return c.json(
-          {
-            error: "VALIDATION_ERROR",
-            message: "Validation failed",
-            fields: {
-              mentions: `Not found: ${unresolved.join(", ")}`,
-            },
-          },
-          422,
-        );
-      }
     }
 
     // ADR-012 Phase G, spec R3/R4/R5 -- everything from here down (attachment

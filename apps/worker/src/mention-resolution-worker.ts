@@ -33,6 +33,7 @@ import {
   workflows,
   accessRequests,
   outboxEvents,
+  workflowEvents,
   withTenantContext,
 } from "@platform/db";
 import {
@@ -79,10 +80,18 @@ async function resolveIdentifier(
       : Promise.resolve(new Map<string, string[]>()),
   ]);
 
+  // Accepts userId, email, or username (loginName) -- widened 2026-09-08
+  // (found via manual testing on the sibling AuthNexus fork) since a real
+  // person composing an @mention naturally has a username/name on hand,
+  // never an opaque userId or necessarily an email. Matches
+  // resolveOrgMemberUserId's identical three-way match used for assignedTo
+  // resolution.
   const lowerIdentifier = identifier.toLowerCase();
   const match = zitadelUsers.find(
     (u: OrgUser) =>
-      u.userId === identifier || u.email.toLowerCase() === lowerIdentifier,
+      u.userId === identifier ||
+      u.email.toLowerCase() === lowerIdentifier ||
+      u.loginName === identifier,
   );
   if (!match) return null;
 
@@ -118,6 +127,7 @@ export const mentionResolutionWorker = new Worker<MentionResolutionJob>(
         .select({
           id: entityInstances.id,
           workflowId: entityInstances.workflowId,
+          currentState: entityInstances.currentState,
           createdBy: entityInstances.createdBy,
           assignedTo: entityInstances.assignedTo,
           fields: entityInstances.fields,
@@ -191,6 +201,78 @@ export const mentionResolutionWorker = new Worker<MentionResolutionJob>(
           metadata: { commentId, mentionIdentifier },
         }),
       );
+
+      // Policy (2026-09-08, ported from the sibling AuthNexus fork, revised
+      // from an earlier synchronous 422-on-failure design on the API route
+      // itself): the caller already got a uniform 201 for this comment
+      // regardless of how mentionIdentifier would resolve (spec R5/R6). The
+      // only place this failure is ever surfaced is here, now, as a
+      // "System Agent" reply comment notifying actingPersonId (the person
+      // who actually submitted the mention) -- never as anything the API
+      // caller can script/probe synchronously. Deliberately covers BOTH
+      // outcome-3 sub-cases (unknown identifier, and a known identifier
+      // with no tenant "user" role) with the same generic wording --
+      // distinguishing them in the message would reopen exactly the oracle
+      // this design exists to close. Best-effort: a failure here must
+      // never fail the job (the comment and its audit entry above have
+      // already committed).
+      try {
+        await withTenantContext(tenantId, async (tx) => {
+          const [event] = await tx
+            .insert(workflowEvents)
+            .values({
+              tenantId,
+              instanceId: ticketId,
+              workflowId,
+              fromState: instance.currentState,
+              toState: instance.currentState,
+              triggeredBy: "system",
+              actorId: "system",
+              comment: null,
+              metadata: {
+                type: "comment",
+                text: `The mention "${mentionIdentifier}" could not be resolved to an org member.`,
+                actorName: "System Agent",
+                replyTo: commentId,
+              },
+            })
+            .returning();
+          if (!event) return;
+
+          await tx.insert(outboxEvents).values({
+            tenantId,
+            eventType: "comment.created",
+            version: 1,
+            payload: {
+              eventType: "comment.created",
+              version: 1,
+              tenantId,
+              instanceId: ticketId,
+              actorId: "system",
+              commentId: event.id,
+            },
+          });
+
+          await tx.insert(outboxEvents).values({
+            tenantId,
+            eventType: "comment.replied",
+            version: 1,
+            payload: {
+              eventType: "comment.replied",
+              version: 1,
+              tenantId,
+              instanceId: ticketId,
+              actorId: "system",
+              targetUserId: actingPersonId,
+            },
+          });
+        });
+      } catch (systemCommentErr) {
+        logger.error(
+          { systemCommentErr, tenantId, ticketId, jobId: job.id },
+          "mention-resolution: failed to post unresolved-mention system reply",
+        );
+      }
       return;
     }
 

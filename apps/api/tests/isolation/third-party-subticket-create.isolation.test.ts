@@ -18,6 +18,9 @@ import {
   workflowStates,
   entityInstances,
   apiKeys,
+  workflowEvents,
+  outboxEvents,
+  withTenantContext,
 } from "@platform/db";
 import { createEntityType, createEntity } from "@platform/entity-engine";
 import { hashApiKey } from "@platform/auth";
@@ -381,7 +384,12 @@ describe("POST /api/v1/tickets/:id/children", () => {
     expect(data.assignedTo).toBe("real-user-id-999");
   });
 
-  it("rejects an assignee that does not resolve to any real org member", async () => {
+  // Policy (2026-09-08, ported from the sibling AuthNexus fork, revised
+  // from an earlier 422-on-failure design tried the same day): an
+  // unresolvable assignedTo no longer blocks sub-ticket creation -- see
+  // third-party-ticket-create.isolation.test.ts's identical test for the
+  // full rationale.
+  it("creates the sub-ticket unassigned (never 422s) when assignedTo matches no real org member, and posts a System Agent reply notifying the creator", async () => {
     const app = makeApp(apiKeyAuth(), actingAs(CREATOR));
     const res = await app.request(`/${creatorTicketId}/children`, {
       method: "POST",
@@ -392,8 +400,36 @@ describe("POST /api/v1/tickets/:id/children", () => {
         assignedTo: "totally-unknown-identifier-xyz",
       }),
     });
-    expect(res.status).toBe(422);
-    const body = (await res.json()) as { fields?: { assignedTo?: string } };
-    expect(body.fields?.assignedTo).toBeTruthy();
+    expect(res.status).toBe(201);
+    const { data } = (await res.json()) as {
+      data: { id: string; assignedTo: string | null };
+    };
+    expect(data.assignedTo).toBeNull();
+
+    const events = await withTenantContext(TENANT, (tx) =>
+      tx
+        .select({
+          actorId: workflowEvents.actorId,
+          metadata: workflowEvents.metadata,
+        })
+        .from(workflowEvents)
+        .where(eq(workflowEvents.instanceId, data.id)),
+    );
+    const systemReply = events.find((e) => e.actorId === "system");
+    expect(systemReply).toBeTruthy();
+    expect(
+      (systemReply?.metadata as { actorName?: string } | null)?.actorName,
+    ).toBe("System Agent");
+
+    const [mentionOutbox] = await withTenantContext(TENANT, (tx) =>
+      tx
+        .select({ payload: outboxEvents.payload })
+        .from(outboxEvents)
+        .where(eq(outboxEvents.eventType, "comment.mentioned")),
+    );
+    expect(
+      (mentionOutbox?.payload as { mentionedUserIds?: string[] } | undefined)
+        ?.mentionedUserIds,
+    ).toEqual([CREATOR]);
   });
 });

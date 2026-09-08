@@ -26,6 +26,7 @@ import { withIdempotency, isIdempotencyStatus } from "../../lib/idempotency.js";
 import { applicationActorIdFromUserId } from "../../lib/application-actor-id.js";
 import { resolveOriginOidcClientId } from "../../lib/resolve-origin-oidc-client-id.js";
 import { resolveOrgMemberUserId } from "../../lib/resolve-org-member.js";
+import { postSystemComment } from "../../lib/post-system-comment.js";
 import { writeAuditEntry } from "@platform/audit";
 import { logger } from "@platform/logger";
 
@@ -220,32 +221,32 @@ export const createThirdPartyTicketHandler = factory.createHandlers(
 
     // assignedTo is optional on this tree's schema, but when supplied it
     // must resolve to a real org member -- accepts either their raw Zitadel
-    // user id or their username (loginName), same as the sibling
-    // AuthNexus-fork fix this was ported from. Previously an assignedTo
-    // value was stored verbatim with zero validation -- a caller-supplied
-    // username silently landed in assigned_to and never matched any real
-    // user in admin-ui's own lookup (which keys strictly on userId), so the
-    // ticket just looked unassigned with no error anywhere.
+    // user id or their username (loginName). Previously an assignedTo value
+    // was stored verbatim with zero validation -- a caller-supplied username
+    // silently landed in assigned_to and never matched any real user in
+    // admin-ui's own lookup (which keys strictly on userId), so the ticket
+    // just looked unassigned with no error anywhere.
+    //
+    // Policy (2026-09-08, ported from the sibling AuthNexus fork, revised
+    // from an earlier 422-on-failure design tried the same day): an
+    // unresolvable assignedTo no longer blocks ticket creation. The ticket
+    // is always created (unassigned if resolution failed), and the caller
+    // learns about the failure only via a system-generated comment
+    // notification (posted below), never via a synchronous 422 -- see
+    // post-system-comment.ts for the full rationale (a 422 here is a fast,
+    // scriptable "does this identifier exist" oracle).
     let resolvedAssignedTo: string | undefined;
+    let assignedToUnresolved = false;
     if (input.assignedTo) {
       const assignedToResolution = await resolveOrgMemberUserId(
         orgId,
         input.assignedTo,
       );
-      if (!assignedToResolution.ok) {
-        return c.json(
-          {
-            error: "VALIDATION_ERROR",
-            message: "Validation failed",
-            fields: {
-              assignedTo:
-                "Must be an existing org member's user id or username",
-            },
-          },
-          422,
-        );
+      if (assignedToResolution.ok) {
+        resolvedAssignedTo = assignedToResolution.userId;
+      } else {
+        assignedToUnresolved = true;
       }
-      resolvedAssignedTo = assignedToResolution.userId;
     }
 
     // ADR-012 Phase G, spec R3/R4/R5 -- idempotency wraps only the actual
@@ -300,6 +301,31 @@ export const createThirdPartyTicketHandler = factory.createHandlers(
               actingPersonId,
               applicationActorId,
             );
+            // See resolveOrgMemberUserId call above and post-system-comment.ts
+            // -- notify the creator that assignedTo didn't resolve via a
+            // system comment, never via the API response itself. Top-level
+            // (no replyTo) since this tree's schema has no remark field to
+            // seed a host comment from. Best-effort: must never fail ticket
+            // creation, which has already committed by this point.
+            if (assignedToUnresolved) {
+              try {
+                await postSystemComment(tx, {
+                  tenantId,
+                  instanceId: created.id,
+                  workflowId: workflow.id,
+                  currentState: created.currentState,
+                  text: `assignedTo "${input.assignedTo}" could not be resolved to an org member -- this ticket was created unassigned.`,
+                  notifyUserId: actingPersonId,
+                  originOidcClientId,
+                });
+              } catch (systemCommentErr) {
+                logger.error(
+                  { systemCommentErr, tenantId, instanceId: created.id },
+                  "third-party ticket create: failed to post assignedTo-unresolved system comment",
+                );
+              }
+            }
+
             // ADR-012 Phase G, spec R7 -- same redact-then-strip pass every
             // read endpoint applies, so a create response (which echoes the
             // stored entity straight back) is never a second, unfiltered

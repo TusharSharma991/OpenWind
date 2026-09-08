@@ -1,20 +1,30 @@
 import { z } from "zod";
 import { eq, and, isNull } from "drizzle-orm";
 import { requireAuth, requireActingPerson } from "@platform/auth";
-import { withTenantContext, db, entityInstances } from "@platform/db";
+import {
+  withTenantContext,
+  db,
+  entityInstances,
+  workflowEvents,
+  outboxEvents,
+} from "@platform/db";
 import { createChildRelation, EntityError } from "@platform/entity-engine";
 import { zValidator } from "../../lib/validator.js";
 import { factory } from "./factory.js";
 import { requireTicketScope } from "./require-ticket-scope.js";
 import { hasEntityAccess } from "../../lib/entity-access.js";
 import { handleEntityError } from "../../lib/handle-entity-error.js";
-import { validateFieldsPayload } from "./validate-fields-payload.js";
+import {
+  validateFieldsPayload,
+  FORBIDDEN_CHAR_PATTERN,
+} from "./validate-fields-payload.js";
 import { notFound } from "./not-found.js";
 import { withIdempotency } from "../../lib/idempotency.js";
 import { writeAuditEntry } from "@platform/audit";
 import { logger } from "@platform/logger";
 import { applicationActorIdFromUserId } from "../../lib/application-actor-id.js";
 import { resolveOriginOidcClientId } from "../../lib/resolve-origin-oidc-client-id.js";
+import { resolveOrgMemberUserId } from "../../lib/resolve-org-member.js";
 import { redactEntityFieldsForThirdParty } from "../../lib/redact-entity-fields.js";
 import { stripInternalFields } from "../../lib/strip-internal-fields.js";
 
@@ -27,7 +37,16 @@ const CreateThirdPartyChildSchema = z.object({
   fields: z.record(z.unknown()).default({}),
   assignedTo: z.string().min(1),
   dueDate: z.string().datetime(),
-  remark: z.string().max(4000),
+  // Same control-character guard as tickets.ts's identical field -- remark
+  // is inserted as the sub-ticket's first comment, landing in the same
+  // workflow_events.metadata.text sink comments.ts's own `text` guards
+  // (found in security review, 2026-09-08).
+  remark: z
+    .string()
+    .max(4000)
+    .refine((v) => !FORBIDDEN_CHAR_PATTERN.test(v), {
+      message: "remark contains a null byte or control character",
+    }),
   // No state/currentState field, same rationale as Phase B's ticket-create
   // schema (spec R6 pattern) — a sub-ticket is always created into its own
   // "open" child_status, never a caller-supplied value.
@@ -60,11 +79,12 @@ export const createThirdPartyChildHandler = factory.createHandlers(
   zValidator("json", CreateThirdPartyChildSchema),
   async (c) => {
     const parentId = c.req.param("id") ?? "";
-    const { tenantId, userId: authUserId } = c.get("auth");
+    const { tenantId, orgId, userId: authUserId } = c.get("auth");
     const { userId: actingPersonId } = c.get("actingPerson");
     const input = c.req.valid("json");
     const applicationActorId = applicationActorIdFromUserId(authUserId);
     const idempotencyKey = c.req.header("Idempotency-Key");
+    const actingPersonToken = c.req.header("X-Acting-Person-Token") ?? "";
 
     const fieldsCheck = validateFieldsPayload(input.fields);
     if (!fieldsCheck.ok) {
@@ -148,6 +168,31 @@ export const createThirdPartyChildHandler = factory.createHandlers(
       return notFound(c);
     }
 
+    // assignedTo resolution -- same rationale/behavior as tickets.ts's
+    // identical check (accepts either a raw user id or a username). Runs
+    // only after the parent-access check above (moved here in security
+    // review, 2026-09-08) so this org-lookup -- and the accepted
+    // real-org-member oracle it exposes -- can't be probed via a
+    // nonexistent or inaccessible parent ticket id.
+    const assignedToResolution = await resolveOrgMemberUserId(
+      orgId,
+      actingPersonToken,
+      input.assignedTo,
+    );
+    if (!assignedToResolution.ok) {
+      return c.json(
+        {
+          error: "VALIDATION_ERROR",
+          message: "Validation failed",
+          fields: {
+            assignedTo: "Must be an existing org member's user id or username",
+          },
+        },
+        422,
+      );
+    }
+    const resolvedAssignedTo = assignedToResolution.userId;
+
     const response = await withIdempotency(
       {
         tenantId,
@@ -159,7 +204,7 @@ export const createThirdPartyChildHandler = factory.createHandlers(
         parentId,
         entityTypeId: input.entityTypeId,
         fields: input.fields,
-        assignedTo: input.assignedTo,
+        assignedTo: resolvedAssignedTo,
         dueDate: input.dueDate,
         remark: input.remark,
       },
@@ -170,7 +215,7 @@ export const createThirdPartyChildHandler = factory.createHandlers(
               parentId,
               entityTypeId: input.entityTypeId,
               childFields: input.fields,
-              assignedTo: input.assignedTo,
+              assignedTo: resolvedAssignedTo,
               dueDate: input.dueDate,
               remark: input.remark,
               createdBy: actingPersonId,
@@ -191,6 +236,59 @@ export const createThirdPartyChildHandler = factory.createHandlers(
               action: "child.created",
               metadata: { parentId },
             });
+
+            // Matches entities/create.ts's and tickets.ts's own
+            // remark-as-first-comment behavior -- see tickets.ts's identical
+            // block for the full rationale. Best-effort: a failure here must
+            // never fail sub-ticket creation itself.
+            const remark = input.remark.trim();
+            if (remark && created.instance.workflowId) {
+              try {
+                const [commentEvent] = await tx
+                  .insert(workflowEvents)
+                  .values({
+                    tenantId,
+                    instanceId: created.instance.id,
+                    workflowId: created.instance.workflowId,
+                    fromState: created.instance.currentState,
+                    toState: created.instance.currentState,
+                    triggeredBy: "api_key",
+                    actorId: actingPersonId,
+                    comment: null,
+                    metadata: {
+                      type: "comment",
+                      text: remark,
+                      actorType: "api_key",
+                      actingPersonId,
+                    },
+                    originMechanism: "api",
+                    originOidcClientId,
+                    originPerformerUserId: actingPersonId,
+                  })
+                  .returning();
+                if (commentEvent) {
+                  await tx.insert(outboxEvents).values({
+                    tenantId,
+                    eventType: "comment.created",
+                    version: 1,
+                    payload: {
+                      eventType: "comment.created",
+                      version: 1,
+                      tenantId,
+                      instanceId: created.instance.id,
+                      actorId: actingPersonId,
+                      commentId: commentEvent.id,
+                    },
+                  });
+                }
+              } catch (remarkErr) {
+                logger.error(
+                  { remarkErr, tenantId, instanceId: created.instance.id },
+                  "third-party sub-ticket create: failed to post remark as first comment",
+                );
+              }
+            }
+
             // ADR-012 Phase G, spec R7 -- same redact-then-strip pass the
             // GET routes apply, so a create response is never a second,
             // unfiltered path to the same ticket data (pii/financial values,

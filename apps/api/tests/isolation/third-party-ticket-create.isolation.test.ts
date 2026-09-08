@@ -8,15 +8,16 @@
  * force-to-initial-state, scope, actor-identity, and payload-guard behavior.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { Hono } from "hono";
 import type { Context, Next } from "hono";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import {
   db,
   tenants,
   workflows,
   workflowStates,
+  workflowEvents,
   adminAuditLog,
   apiKeys,
   withTenantContext,
@@ -29,6 +30,37 @@ import { writeAuditEntry } from "@platform/audit";
 import { hashApiKey } from "@platform/auth";
 import type { AuthContext, ActingPersonContext } from "@platform/auth";
 import { createThirdPartyTicketHandler } from "../../src/routes/third-party/tickets.js";
+
+// assignedTo now resolves against a real AuthNexus org-users lookup (an
+// external service call, not the database -- mocking it here follows
+// testing-conventions.md's "mock at service boundaries, never the DB" rule).
+// "some-assignee" (REQUIRED_BASELINE_FIELDS below) resolves to itself so
+// every existing assertion against that literal string keeps working.
+import type * as AuthnexusManagement from "../../src/lib/authnexus-management.js";
+vi.mock("../../src/lib/authnexus-management.js", async (importOriginal) => {
+  const real = await importOriginal<typeof AuthnexusManagement>();
+  return {
+    ...real,
+    listOrgUsers: async () => [
+      {
+        userId: "some-assignee",
+        email: "some-assignee@example.com",
+        displayName: "some-assignee",
+        loginName: "some-assignee",
+      },
+      // Distinct userId/loginName pair -- proves username resolution
+      // actually maps to the canonical id, not just an identity function
+      // (which "some-assignee" above can't distinguish, since its userId
+      // and loginName happen to be the same string).
+      {
+        userId: "real-user-id-999",
+        email: "bob@example.com",
+        displayName: "Bob",
+        loginName: "bob-username",
+      },
+    ],
+  };
+});
 
 const TENANT = "12121212-0000-4000-a000-000000000506";
 const API_KEY_ID = "33333333-3333-3333-3333-333333333333";
@@ -404,5 +436,139 @@ describe("POST /api/v1/tickets — mandatory baseline fields", () => {
     expect(body.data.assignedTo).toBe("some-assignee");
     expect(body.data.dueDate).toContain("2026-12-01");
     expect(body.data.remark).toBe("Please expedite");
+  });
+
+  // Security review (2026-09-08): remark is inserted verbatim as the
+  // ticket's first comment (workflow_events.metadata.text), the exact same
+  // sink comments.ts's own `text` field guards against control characters
+  // -- this proves remark now gets the identical ingress-level guard,
+  // rather than reaching that sink unchecked via this second entry point.
+  it("returns 400 when remark contains a null byte or control character", async () => {
+    const app = makeApp(apiKeyAuth(), ACTING_PERSON);
+    const res = await app.request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workflowId,
+        fields: { title: "Control char in remark" },
+        assignedTo: "some-assignee",
+        dueDate: "2026-12-01T00:00:00.000Z",
+        remark: "bad\x00remark",
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
+// Found via manual testing against a real client org's production instance:
+// assignedTo was stored verbatim with zero validation, so a caller-supplied
+// username silently landed in assigned_to and never matched any real user in
+// admin-ui's own lookup (which keys strictly on userId) -- the ticket just
+// looked unassigned, with no error surfaced anywhere.
+describe("POST /api/v1/tickets — assignedTo resolves username or userId to the canonical userId", () => {
+  it("accepts a raw userId and stores it as-is", async () => {
+    const app = makeApp(apiKeyAuth(), ACTING_PERSON);
+    const res = await app.request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workflowId,
+        fields: { title: "assignedTo as raw userId" },
+        assignedTo: "real-user-id-999",
+        dueDate: "2026-12-01T00:00:00.000Z",
+        remark: "test remark",
+      }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as {
+      data: { id: string; assignedTo: string };
+    };
+    createdInstanceIds.push(body.data.id);
+    expect(body.data.assignedTo).toBe("real-user-id-999");
+  });
+
+  it("accepts a username (loginName) and resolves it to the canonical userId", async () => {
+    const app = makeApp(apiKeyAuth(), ACTING_PERSON);
+    const res = await app.request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workflowId,
+        fields: { title: "assignedTo as username" },
+        assignedTo: "bob-username",
+        dueDate: "2026-12-01T00:00:00.000Z",
+        remark: "test remark",
+      }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as {
+      data: { id: string; assignedTo: string };
+    };
+    createdInstanceIds.push(body.data.id);
+    // The stored value is the canonical userId, NOT the username submitted --
+    // this is exactly what makes admin-ui's AssignDropdown (matches strictly
+    // on userId) able to find and display the assignment correctly.
+    expect(body.data.assignedTo).toBe("real-user-id-999");
+  });
+
+  it("returns 422 when assignedTo matches no real org member", async () => {
+    const app = makeApp(apiKeyAuth(), ACTING_PERSON);
+    const res = await app.request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workflowId,
+        fields: { title: "assignedTo unresolvable" },
+        assignedTo: "nobody-with-this-username",
+        dueDate: "2026-12-01T00:00:00.000Z",
+        remark: "test remark",
+      }),
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { fields: { assignedTo: string } };
+    expect(body.fields.assignedTo).toBeTruthy();
+  });
+});
+
+// Found via the same manual testing session: entities/create.ts (the
+// admin-ui's own create route) posts `remark` as the ticket's first comment
+// ("this becomes the first comment" in the UI), but this third-party route
+// only ever stored it on the instance's own column -- an API-created
+// ticket's remark was invisible in the Comments tab/timeline, unlike a
+// human-created one.
+describe("POST /api/v1/tickets — remark is posted as the ticket's first comment", () => {
+  it("creates a workflow_events comment row containing the remark text", async () => {
+    const app = makeApp(apiKeyAuth(), ACTING_PERSON);
+    const res = await app.request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workflowId,
+        fields: { title: "remark-as-first-comment test" },
+        assignedTo: "some-assignee",
+        dueDate: "2026-12-01T00:00:00.000Z",
+        remark: "This should appear as the first comment",
+      }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { data: { id: string } };
+    createdInstanceIds.push(body.data.id);
+
+    const [event] = await withTenantContext(TENANT, (tx) =>
+      tx
+        .select({ metadata: workflowEvents.metadata })
+        .from(workflowEvents)
+        .where(
+          and(
+            eq(workflowEvents.instanceId, body.data.id),
+            sql`${workflowEvents.metadata}->>'type' = 'comment'`,
+          ),
+        )
+        .limit(1),
+    );
+    expect(event?.metadata).toMatchObject({
+      type: "comment",
+      text: "This should appear as the first comment",
+    });
   });
 });

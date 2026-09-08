@@ -12,6 +12,7 @@ import { logger } from "@platform/logger";
 import { writeAuditEntry } from "@platform/audit";
 import { applicationActorIdFromUserId } from "../../lib/application-actor-id.js";
 import { resolveOriginOidcClientId } from "../../lib/resolve-origin-oidc-client-id.js";
+import { resolveOrgMemberUserId } from "../../lib/resolve-org-member.js";
 import { zValidator } from "../../lib/validator.js";
 import { factory } from "./factory.js";
 import { requireTicketScope } from "./require-ticket-scope.js";
@@ -24,13 +25,7 @@ import {
 } from "./attachments-reference.js";
 import { notFound } from "./not-found.js";
 import { withIdempotency } from "../../lib/idempotency.js";
-
-// Same forbidden-char set as validate-fields-payload.ts (ADR-012 Phase B,
-// R11) — null byte/control-character rejection at ingress, ahead of any
-// downstream rendering. Tab/LF/CR (0x09/0x0A/0x0D) are legitimate in
-// free-text comment bodies.
-// eslint-disable-next-line no-control-regex -- intentional: this IS the control-character check.
-const FORBIDDEN_CHAR_PATTERN = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/;
+import { FORBIDDEN_CHAR_PATTERN } from "./validate-fields-payload.js";
 
 const CreateThirdPartyCommentSchema = z.object({
   text: z
@@ -78,6 +73,7 @@ export const createThirdPartyCommentHandler = factory.createHandlers(
     const { text, mentions, attachmentIds } = c.req.valid("json");
     const applicationActorId = applicationActorIdFromUserId(authUserId);
     const idempotencyKey = c.req.header("Idempotency-Key");
+    const actingPersonToken = c.req.header("X-Acting-Person-Token") ?? "";
 
     const [instance] = await withTenantContext(tenantId, (tx) =>
       tx
@@ -153,6 +149,44 @@ export const createThirdPartyCommentHandler = factory.createHandlers(
         );
       }
       return notFound(c);
+    }
+
+    // Mandatory-mention-validation policy (2026-09-08): every mentioned
+    // identifier must resolve to a real org member, or the comment is
+    // rejected outright -- a conscious, deliberate reversal of this route's
+    // original design (mention resolution was async-only and never
+    // reported back, specifically to prevent using the mentions list as an
+    // org-member enumeration probe -- see resolve-org-member.ts's own
+    // comment for the full history). The error deliberately reports ONLY
+    // that an identifier didn't resolve, never a user list or suggestions,
+    // so the failure signal itself doesn't reopen the leak this design
+    // originally existed to close. Runs only after the access check above
+    // (moved here in security review, 2026-09-08) so this org-lookup --
+    // and the accepted real-org-member oracle it exposes -- can't be
+    // probed via a nonexistent or inaccessible ticket id.
+    if (mentions.length > 0) {
+      const unresolved: string[] = [];
+      for (const identifier of mentions) {
+        const resolution = await resolveOrgMemberUserId(
+          orgId,
+          actingPersonToken,
+          identifier,
+          { matchEmail: true },
+        );
+        if (!resolution.ok) unresolved.push(identifier);
+      }
+      if (unresolved.length > 0) {
+        return c.json(
+          {
+            error: "VALIDATION_ERROR",
+            message: "Validation failed",
+            fields: {
+              mentions: `Not found: ${unresolved.join(", ")}`,
+            },
+          },
+          422,
+        );
+      }
     }
 
     // ADR-012 Phase G, spec R3/R4/R5 -- everything from here down (attachment

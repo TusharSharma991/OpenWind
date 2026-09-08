@@ -9,7 +9,7 @@
  * Real Postgres connection, RLS + app_user enforced (not mocked).
  */
 
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { Hono } from "hono";
 import type { Context, Next } from "hono";
 import { inArray, eq, and } from "drizzle-orm";
@@ -36,6 +36,25 @@ import { executeThirdPartyTransitionHandler } from "../../src/routes/third-party
 import { getThirdPartyAccessLogsHandler } from "../../src/routes/admin/third-party-access-logs.js";
 import { writeAuditEntry } from "@platform/audit";
 import { withTenantContext } from "@platform/db";
+
+// assignedTo now resolves against a real AuthNexus org-users lookup -- see
+// third-party-ticket-create.isolation.test.ts's identical mock for the full
+// rationale. "some-assignee" resolves to itself.
+import type * as AuthnexusManagement from "../../src/lib/authnexus-management.js";
+vi.mock("../../src/lib/authnexus-management.js", async (importOriginal) => {
+  const real = await importOriginal<typeof AuthnexusManagement>();
+  return {
+    ...real,
+    listOrgUsers: async () => [
+      {
+        userId: "some-assignee",
+        email: "some-assignee@example.com",
+        displayName: "some-assignee",
+        loginName: "some-assignee",
+      },
+    ],
+  };
+});
 
 const TENANT = "bbccddee-0000-4000-b000-000000000f01";
 const OTHER_TENANT = "bbccddee-0000-4000-b000-000000000f02";

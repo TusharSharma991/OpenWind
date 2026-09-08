@@ -11,8 +11,12 @@ const MAX_FIELDS_DEPTH = 8;
 
 // C0 control characters and DEL, excluding tab/LF/CR (0x09/0x0A/0x0D) which
 // are legitimate in free-text field values. Includes the null byte (0x00).
+// Exported so every route writing free-text into workflow_events.metadata
+// (comments.ts's own `text`, and remark on ticket/child create, which lands
+// in the identical shape/sink as a synthesized first comment) applies the
+// same ingress-level guard rather than each re-declaring its own pattern.
 // eslint-disable-next-line no-control-regex -- intentional: this IS the control-character check.
-const FORBIDDEN_CHAR_PATTERN = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/;
+export const FORBIDDEN_CHAR_PATTERN = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/;
 
 export type FieldsPayloadValidation =
   | { ok: true }

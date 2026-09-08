@@ -7,7 +7,7 @@
  * (the bug fix in createChildRelation), and the 1-level API nesting cap.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { Hono } from "hono";
 import type { Context, Next } from "hono";
 import { inArray, eq, sql } from "drizzle-orm";
@@ -23,6 +23,25 @@ import { createEntityType, createEntity } from "@platform/entity-engine";
 import { hashApiKey } from "@platform/auth";
 import type { AuthContext, ActingPersonContext } from "@platform/auth";
 import { createThirdPartyChildHandler } from "../../src/routes/third-party/children.js";
+
+// assignedTo now resolves against a real AuthNexus org-users lookup -- see
+// third-party-ticket-create.isolation.test.ts's identical mock for the full
+// rationale. "some-assignee" resolves to itself.
+import type * as AuthnexusManagement from "../../src/lib/authnexus-management.js";
+vi.mock("../../src/lib/authnexus-management.js", async (importOriginal) => {
+  const real = await importOriginal<typeof AuthnexusManagement>();
+  return {
+    ...real,
+    listOrgUsers: async () => [
+      {
+        userId: "some-assignee",
+        email: "some-assignee@example.com",
+        displayName: "some-assignee",
+        loginName: "some-assignee",
+      },
+    ],
+  };
+});
 
 const TENANT = "eeeeeeee-0000-4000-e000-000000000704";
 const OTHER_TENANT = "ffffffff-0000-4000-f000-000000000705";
@@ -381,5 +400,24 @@ describe("POST /api/v1/tickets/:id/children — mandatory baseline fields", () =
     expect(data.assignedTo).toBe("some-assignee");
     expect(data.dueDate).toContain("2026-12-01");
     expect(data.remark).toBe("sub-ticket remark");
+  });
+
+  // Security review (2026-09-08): same guard as tickets.ts's identical
+  // remark field -- remark lands in the same workflow_events.metadata.text
+  // sink as a comment, so it needs the same control-character rejection.
+  it("returns 400 when remark contains a null byte or control character", async () => {
+    const app = makeApp(apiKeyAuth(), actingAs(CREATOR));
+    const res = await app.request(`/${creatorTicketId}/children`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        entityTypeId,
+        fields: { title: "control char in remark" },
+        assignedTo: "some-assignee",
+        dueDate: "2026-12-01T00:00:00.000Z",
+        remark: "bad\x00remark",
+      }),
+    });
+    expect(res.status).toBe(400);
   });
 });

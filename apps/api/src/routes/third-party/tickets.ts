@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { requireAuth, requireActingPerson } from "@platform/auth";
-import { withTenantContext, db } from "@platform/db";
+import {
+  withTenantContext,
+  db,
+  workflowEvents,
+  outboxEvents,
+} from "@platform/db";
 import { getEntity, createEntity } from "@platform/entity-engine";
 import { getWorkflow } from "@platform/workflow-engine";
 import { zValidator } from "../../lib/validator.js";
@@ -8,7 +13,10 @@ import { factory } from "./factory.js";
 import { requireTicketScope } from "./require-ticket-scope.js";
 import { hasEntityAccess } from "../../lib/entity-access.js";
 import { handleEntityError } from "../../lib/handle-entity-error.js";
-import { validateFieldsPayload } from "./validate-fields-payload.js";
+import {
+  validateFieldsPayload,
+  FORBIDDEN_CHAR_PATTERN,
+} from "./validate-fields-payload.js";
 import {
   referenceAttachments,
   AttachmentReferenceError,
@@ -20,6 +28,7 @@ import { stripInternalFields } from "../../lib/strip-internal-fields.js";
 import { withIdempotency } from "../../lib/idempotency.js";
 import { applicationActorIdFromUserId } from "../../lib/application-actor-id.js";
 import { resolveOriginOidcClientId } from "../../lib/resolve-origin-oidc-client-id.js";
+import { resolveOrgMemberUserId } from "../../lib/resolve-org-member.js";
 import { writeAuditEntry } from "@platform/audit";
 import { logger } from "@platform/logger";
 
@@ -157,7 +166,18 @@ const CreateThirdPartyTicketSchema = z.object({
   fields: z.record(z.unknown()).default({}),
   assignedTo: z.string().min(1),
   dueDate: z.string().datetime(),
-  remark: z.string().max(4000),
+  // remark is inserted verbatim as the ticket's first comment (see the
+  // remark-as-comment block below), landing in the exact same
+  // workflow_events.metadata.text sink comments.ts's own `text` field
+  // writes into -- same control-character guard required here so this
+  // create path can't reintroduce what that route's ingress check exists
+  // to block (found in security review, 2026-09-08).
+  remark: z
+    .string()
+    .max(4000)
+    .refine((v) => !FORBIDDEN_CHAR_PATTERN.test(v), {
+      message: "remark contains a null byte or control character",
+    }),
   // Any `state`/`currentState` field the caller sends is intentionally NOT
   // part of this schema — Zod's default "strip unknown keys" behavior drops
   // it silently, with no rejection (spec R6: force-to-initial-state
@@ -193,11 +213,12 @@ export const createThirdPartyTicketHandler = factory.createHandlers(
   requireTicketScope("create"),
   zValidator("json", CreateThirdPartyTicketSchema),
   async (c) => {
-    const { tenantId, userId: authUserId } = c.get("auth");
+    const { tenantId, orgId, userId: authUserId } = c.get("auth");
     const { userId: actingPersonId } = c.get("actingPerson");
     const input = c.req.valid("json");
     const applicationActorId = applicationActorIdFromUserId(authUserId);
     const idempotencyKey = c.req.header("Idempotency-Key");
+    const actingPersonToken = c.req.header("X-Acting-Person-Token") ?? "";
 
     const fieldsCheck = validateFieldsPayload(input.fields);
     if (!fieldsCheck.ok) {
@@ -225,6 +246,34 @@ export const createThirdPartyTicketHandler = factory.createHandlers(
       return c.json({ error: "UNAUTHORIZED", message: "Invalid API key" }, 401);
     }
 
+    // assignedTo must resolve to a real org member -- accepts either their
+    // raw AuthNexus user id or their username (loginName), since a caller
+    // integrating against this API is far more likely to have a person's
+    // username on hand than their opaque numeric id. Previously this field
+    // was stored verbatim with zero validation, so a username silently
+    // landed in assigned_to and never matched any real user in the UI's own
+    // lookup (which keys strictly on userId) -- the ticket just looked
+    // unassigned, with no error anywhere (found via manual testing against
+    // a real client org).
+    const assignedToResolution = await resolveOrgMemberUserId(
+      orgId,
+      actingPersonToken,
+      input.assignedTo,
+    );
+    if (!assignedToResolution.ok) {
+      return c.json(
+        {
+          error: "VALIDATION_ERROR",
+          message: "Validation failed",
+          fields: {
+            assignedTo: "Must be an existing org member's user id or username",
+          },
+        },
+        422,
+      );
+    }
+    const resolvedAssignedTo = assignedToResolution.userId;
+
     // ADR-012 Phase G, spec R3/R4/R5 -- idempotency wraps only the actual
     // mutating operation, not upstream validation, so a caller retrying a
     // request that already 422'd above re-validates fresh rather than
@@ -239,7 +288,7 @@ export const createThirdPartyTicketHandler = factory.createHandlers(
       {
         workflowId: input.workflowId,
         fields: input.fields,
-        assignedTo: input.assignedTo,
+        assignedTo: resolvedAssignedTo,
         dueDate: input.dueDate,
         remark: input.remark,
         attachmentIds: input.attachmentIds,
@@ -255,7 +304,7 @@ export const createThirdPartyTicketHandler = factory.createHandlers(
               entityTypeId: workflow.entityTypeId,
               workflowId: workflow.id,
               fields: input.fields,
-              assignedTo: input.assignedTo,
+              assignedTo: resolvedAssignedTo,
               dueDate: input.dueDate,
               remark: input.remark,
               createdBy: actingPersonId,
@@ -277,6 +326,64 @@ export const createThirdPartyTicketHandler = factory.createHandlers(
               actingPersonId,
               applicationActorId,
             );
+
+            // Matches entities/create.ts's own remark-as-first-comment
+            // behavior (the human-UI create form presents remark as "this
+            // becomes the first comment") -- previously this route stored
+            // remark only on the instance's own column, never posting it to
+            // the Comments tab/timeline, so an API-created ticket's remark
+            // was invisible everywhere a human-created ticket's wasn't
+            // (found via manual testing). Best-effort: a failure here must
+            // never fail ticket creation itself, which has already
+            // committed by this point.
+            const remark = input.remark.trim();
+            if (remark) {
+              try {
+                const [commentEvent] = await tx
+                  .insert(workflowEvents)
+                  .values({
+                    tenantId,
+                    instanceId: created.id,
+                    workflowId: workflow.id,
+                    fromState: created.currentState,
+                    toState: created.currentState,
+                    triggeredBy: "api_key",
+                    actorId: actingPersonId,
+                    comment: null,
+                    metadata: {
+                      type: "comment",
+                      text: remark,
+                      actorType: "api_key",
+                      actingPersonId,
+                    },
+                    originMechanism: "api",
+                    originOidcClientId,
+                    originPerformerUserId: actingPersonId,
+                  })
+                  .returning();
+                if (commentEvent) {
+                  await tx.insert(outboxEvents).values({
+                    tenantId,
+                    eventType: "comment.created",
+                    version: 1,
+                    payload: {
+                      eventType: "comment.created",
+                      version: 1,
+                      tenantId,
+                      instanceId: created.id,
+                      actorId: actingPersonId,
+                      commentId: commentEvent.id,
+                    },
+                  });
+                }
+              } catch (remarkErr) {
+                logger.error(
+                  { remarkErr, tenantId, instanceId: created.id },
+                  "third-party ticket create: failed to post remark as first comment",
+                );
+              }
+            }
+
             // ADR-012 Phase G, spec R7 -- same redact-then-strip pass every
             // read endpoint applies, so a create response (which echoes the
             // stored entity straight back) is never a second, unfiltered

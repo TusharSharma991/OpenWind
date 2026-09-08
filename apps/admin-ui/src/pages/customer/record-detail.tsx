@@ -3373,17 +3373,49 @@ export function CustomerRecordDetail(): React.ReactElement {
           {isCreate ? (
             <span className="rcd-feed-event-text">
               <strong>
-                {resolveActorName(event.actorDisplayName, event.actorId)}
+                {event.origin
+                  ? // API-created records (found via live testing,
+                    // 2026-09-08): actorId here is the calling
+                    // application's own synthetic actor id, never a real
+                    // person -- resolveActorName on it just surfaced a
+                    // meaningless, truncated uuid ("ad80aefd… created this
+                    // record"). The real person is origin.performerUserId/
+                    // performerDisplayName (the acting person who actually
+                    // triggered the API call), matching how the comment
+                    // feed already shows the real commenter's name, not
+                    // the app's.
+                    resolveActorName(
+                      event.origin.performerDisplayName,
+                      event.origin.performerUserId,
+                    )
+                  : resolveActorName(event.actorDisplayName, event.actorId)}
               </strong>{" "}
               created this record
+              {event.origin && (
+                <>
+                  {" "}
+                  <OriginTag origin={event.origin} size="compact" />
+                </>
+              )}
             </span>
           ) : isUpdate ? (
             <div>
               <span className="rcd-feed-event-text">
                 <strong>
-                  {resolveActorName(event.actorDisplayName, event.actorId)}
+                  {event.origin
+                    ? resolveActorName(
+                        event.origin.performerDisplayName,
+                        event.origin.performerUserId,
+                      )
+                    : resolveActorName(event.actorDisplayName, event.actorId)}
                 </strong>{" "}
                 updated the record
+                {event.origin && (
+                  <>
+                    {" "}
+                    <OriginTag origin={event.origin} size="compact" />
+                  </>
+                )}
               </span>
               {"changed" in (meta as Record<string, unknown>) &&
                 typeof (meta as Record<string, unknown>)["changed"] ===
@@ -3430,7 +3462,12 @@ export function CustomerRecordDetail(): React.ReactElement {
           ) : (
             <div className="rcd-feed-event-text">
               <strong>
-                {resolveActorName(event.actorDisplayName, event.actorId)}
+                {event.origin
+                  ? resolveActorName(
+                      event.origin.performerDisplayName,
+                      event.origin.performerUserId,
+                    )
+                  : resolveActorName(event.actorDisplayName, event.actorId)}
               </strong>{" "}
               moved{" "}
               {event.fromState && (
@@ -3442,6 +3479,12 @@ export function CustomerRecordDetail(): React.ReactElement {
               <span className="rcd-tl-state rcd-tl-state-to">
                 {event.toState}
               </span>
+              {event.origin && (
+                <>
+                  {" "}
+                  <OriginTag origin={event.origin} size="compact" />
+                </>
+              )}
               {event.comment && (
                 <div className="rcd-tl-comment" style={{ marginTop: "6px" }}>
                   "{event.comment}"
@@ -4294,17 +4337,6 @@ export function CustomerRecordDetail(): React.ReactElement {
                       .map((event) => (
                         <React.Fragment key={event.id}>
                           {renderFeedEvent(event)}
-                          {/* docs/specs/third-party-api-origin-tagging.md R5 —
-                              appended as a sibling rather than threaded through
-                              renderFeedEvent's many per-type branches. */}
-                          {event.origin && (
-                            <div
-                              className="rcd-feed-event-body"
-                              style={{ marginTop: "-4px", marginLeft: "30px" }}
-                            >
-                              <OriginTag origin={event.origin} size="compact" />
-                            </div>
-                          )}
                         </React.Fragment>
                       ))}
                   </div>

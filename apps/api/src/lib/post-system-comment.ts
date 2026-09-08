@@ -29,10 +29,16 @@ import { workflowEvents, outboxEvents } from "@platform/db";
  * notification outcome, no reply target required.
  *
  * `actorId`/`triggeredBy` are the fixed sentinel `"system"` (never a real
- * user id), with `metadata.actorName: "system"` set so the comment timeline
+ * user id), with `metadata.actorName: "System"` set so the comment timeline
  * renders a fixed label without attempting an org-member lookup
- * (list-workflow-events.ts uses `metadata.actorName` verbatim when present,
- * exactly the mechanism real users' snapshot names already rely on).
+ * (list-workflow-events.ts uses `metadata.actorName` verbatim when present
+ * -- exactly the mechanism real users' snapshot names already rely on --
+ * BUT ONLY when it differs from `actorId`; that route's snapshot-name dedup
+ * guard treats an exact actorId match as "no real name, just the raw id
+ * repeated" and discards it, which is why actorName can't also be the
+ * literal string `"system"` -- found via live testing, 2026-09-08: it
+ * collapsed to a truncated `actorId.slice(0,8) + "…"` fallback, rendering
+ * as "system…").
  *
  * Deliberately does NOT set originMechanism/originOidcClientId -- found via
  * live testing (2026-09-08): this comment is generated internally by the
@@ -80,7 +86,7 @@ export async function postSystemComment(
       metadata: {
         type: "comment",
         text,
-        actorName: "system",
+        actorName: "System",
         ...(replyToEventId ? { replyTo: replyToEventId } : {}),
       },
     })

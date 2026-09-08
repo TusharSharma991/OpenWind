@@ -122,6 +122,12 @@ export function OriginTag({
         gap: "4px",
         padding,
         borderRadius: "999px",
+        // fontFamily (not the `font` shorthand -- that also resets
+        // font-size/line-height/weight, which silently overrode the
+        // fontSize set below and made the collapsed label render oversized,
+        // found via live testing 2026-09-08) is all a <button> needs reset
+        // here; everything else below is set explicitly anyway.
+        fontFamily: "inherit",
         fontSize,
         fontWeight: 600,
         lineHeight: 1.4,
@@ -130,7 +136,6 @@ export function OriginTag({
         border: `1px solid color-mix(in srgb, ${color} 45%, transparent)`,
         color: "var(--text-secondary)",
         cursor: "pointer",
-        font: "inherit",
       }}
     >
       <span style={{ color }}>{LABEL_BY_MECHANISM[origin.mechanism]}</span>
@@ -139,27 +144,17 @@ export function OriginTag({
           <span aria-hidden="true" style={{ opacity: 0.5 }}>
             ·
           </span>
-          <span
-            style={{
-              maxWidth: "140px",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            }}
-          >
-            {origin.appName}
-          </span>
+          {/* No maxWidth/ellipsis here (found via live testing, 2026-09-08):
+              the whole point of expanding is to see the FULL app/person
+              detail -- a truncated app name defeats that. Truncation only
+              ever made sense for a collapsed preview, and the collapsed
+              state already shows just the mechanism label with the full
+              detail in the title tooltip. */}
+          <span>{origin.appName}</span>
           <span aria-hidden="true" style={{ opacity: 0.5 }}>
             ·
           </span>
-          <span
-            style={{
-              maxWidth: "120px",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            }}
-          >
-            {performerLabel(origin)}
-          </span>
+          <span>{performerLabel(origin)}</span>
         </>
       )}
     </button>

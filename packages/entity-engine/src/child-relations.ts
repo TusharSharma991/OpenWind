@@ -366,6 +366,12 @@ export async function createChildRelation(
       ...(actorType && { actorType }),
       ...(actingPersonId && { actingPersonId }),
     },
+    // Mirrors the identical fields already written to entity_instances a
+    // few lines above -- previously omitted here entirely, same gap as
+    // createEntity's own create event (found via live testing, 2026-09-08).
+    originMechanism: originMechanism ?? null,
+    originOidcClientId: originOidcClientId ?? null,
+    originPerformerUserId: originPerformerUserId ?? null,
   });
 
   // Outbox events for entity.created/entity.assigned automations (#126) —

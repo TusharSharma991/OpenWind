@@ -344,7 +344,23 @@ export async function createEntity(
       workflowId: row.workflowId,
       fromState: null,
       toState: row.currentState,
-      triggeredBy: "user",
+      // Was hardcoded "user" regardless of who/what actually created the
+      // record -- found via live testing (2026-09-08): a third-party
+      // API-created ticket's own creation history entry showed as if a
+      // human had created it, and (see origin fields below) carried no
+      // app/person attribution at all, unlike every other API-originated
+      // event (comments, remark-as-first-comment) on the same ticket.
+      // workflow_events.triggered_by has its own canonical vocabulary
+      // (user|automation|api|system, see event-schemas.ts's
+      // WorkflowTransitionedV1Schema) distinct from actorType's
+      // (user|api_key|system) -- "api_key" is never a valid triggered_by
+      // value, so it's mapped to "api" here (matching
+      // child-relations.ts's identical mapping for sub-ticket creation).
+      triggeredBy:
+        input.actorType === "api_key"
+          ? "api"
+          : (input.actorType ??
+            (input.createdBy !== undefined ? "user" : "system")),
       actorId: input.actorId ?? input.createdBy ?? null,
       comment: "Record created",
       metadata: {
@@ -352,6 +368,12 @@ export async function createEntity(
         fields: redactedFieldsForEvents,
         actorName: input.actorName ?? null,
       },
+      // Mirrors the identical fields already written to entity_instances a
+      // few lines above -- previously omitted here entirely, so the
+      // create event's own OriginTag never had anything to render from.
+      originMechanism: input.originMechanism ?? null,
+      originOidcClientId: input.originOidcClientId ?? null,
+      originPerformerUserId: input.originPerformerUserId ?? null,
     });
   }
 

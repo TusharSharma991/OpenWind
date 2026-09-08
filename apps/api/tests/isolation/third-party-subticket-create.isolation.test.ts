@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { Hono } from "hono";
 import type { Context, Next } from "hono";
-import { inArray, eq, sql } from "drizzle-orm";
+import { inArray, eq, sql, and } from "drizzle-orm";
 import {
   db,
   tenants,
@@ -284,6 +284,39 @@ describe("POST /api/v1/tickets/:id/children", () => {
     expect(res.status).toBe(201);
   });
 
+  // Found via live testing (2026-09-08): same gap as the top-level ticket
+  // create event -- createChildRelation's own "create" workflow_events row
+  // never carried originMechanism/originOidcClientId/originPerformerUserId.
+  it("the create event itself (not just the entity row) carries origin tagging, so the history/timeline entry shows which app/person created it", async () => {
+    const app = makeApp(apiKeyAuth(), actingAs(CREATOR));
+    const res = await postChild(app, creatorTicketId, {
+      title: "origin-tagged create event test",
+    });
+    expect(res.status).toBe(201);
+    const { data } = (await res.json()) as { data: { id: string } };
+
+    const [createEvent] = await withTenantContext(TENANT, (tx) =>
+      tx
+        .select({
+          triggeredBy: workflowEvents.triggeredBy,
+          originMechanism: workflowEvents.originMechanism,
+          originOidcClientId: workflowEvents.originOidcClientId,
+          originPerformerUserId: workflowEvents.originPerformerUserId,
+        })
+        .from(workflowEvents)
+        .where(
+          and(
+            eq(workflowEvents.instanceId, data.id),
+            sql`${workflowEvents.metadata}->>'type' = 'create'`,
+          ),
+        ),
+    );
+    expect(createEvent?.triggeredBy).toBe("api");
+    expect(createEvent?.originMechanism).toBe("api");
+    expect(createEvent?.originOidcClientId).toBe(ORIGIN_OIDC_CLIENT_ID);
+    expect(createEvent?.originPerformerUserId).toBe(CREATOR);
+  });
+
   it("child inherits the parent's __accessUsers grants — the ACL-inheritance bug fix (verified at the DB level, since the API response never exposes this internal key)", async () => {
     const app = makeApp(apiKeyAuth(), actingAs(CREATOR));
     const res = await postChild(app, mentionedTicketId, { title: "sub2" });
@@ -479,7 +512,7 @@ describe("POST /api/v1/tickets/:id/children — mandatory baseline fields", () =
     expect(systemReply).toBeTruthy();
     expect(
       (systemReply?.metadata as { actorName?: string } | null)?.actorName,
-    ).toBe("system");
+    ).toBe("System");
 
     const [replyOutbox] = await withTenantContext(TENANT, (tx) =>
       tx

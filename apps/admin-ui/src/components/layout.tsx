@@ -141,7 +141,33 @@ const AUTOMATIONS_NAV = {
   ),
 };
 
+// Moved out of the shared admin+agent nav (ADMIN_NAV) into the admin-only
+// section below -- per explicit request (2026-09-08): normal/agent users
+// should only see Dashboard, Users, Records in the main nav; workflow
+// configuration belongs alongside the platform's other admin-only setup
+// screens (Templates, Automations, etc.), not the everyday agent workspace.
+const WORKFLOWS_NAV = {
+  route: "/workflows",
+  label: "Workflows",
+  icon: (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      viewBox="0 0 24 24"
+      strokeWidth="2"
+      stroke="currentColor"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M3 8.689c0-.864.933-1.406 1.683-.977l7.108 4.061a1.125 1.125 0 010 1.954l-7.108 4.061A1.125 1.125 0 013 16.811V8.69zM12.75 8.689c0-.864.933-1.406 1.683-.977l7.108 4.061a1.125 1.125 0 010 1.954l-7.108 4.061a1.125 1.125 0 01-1.683-.977V8.69z"
+      />
+    </svg>
+  ),
+};
+
 const SUPER_ADMIN_NAV_EXTRA = [
+  WORKFLOWS_NAV,
   ANALYTICS_NAV,
   TEMPLATES_NAV,
   AUTOMATIONS_NAV,
@@ -177,25 +203,6 @@ const ADMIN_NAV = [
     ),
   },
   USERS_NAV,
-  {
-    route: "/workflows",
-    label: "Workflows",
-    icon: (
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        fill="none"
-        viewBox="0 0 24 24"
-        strokeWidth="2"
-        stroke="currentColor"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          d="M3 8.689c0-.864.933-1.406 1.683-.977l7.108 4.061a1.125 1.125 0 010 1.954l-7.108 4.061A1.125 1.125 0 013 16.811V8.69zM12.75 8.689c0-.864.933-1.406 1.683-.977l7.108 4.061a1.125 1.125 0 010 1.954l-7.108 4.061a1.125 1.125 0 01-1.683-.977V8.69z"
-        />
-      </svg>
-    ),
-  },
   {
     route: "/records",
     label: "Records",
@@ -356,10 +363,11 @@ export function Layout({
 
   // RBAC tiers:
   //   admin  = super admin — full access, including the admin-only sidebar
-  //            section (Analytics, Templates, Automations, Users, System
-  //            Logs, API Keys, API Access Logs)
-  //   agent  = workflow admin — Dashboard, Users, Workflows, Records; no
-  //            admin-only section
+  //            section (Workflows, Analytics, Templates, Automations, Users,
+  //            System Logs, API Keys, API Access Logs)
+  //   agent  = day-to-day workspace user — Dashboard, Users, Records only; no
+  //            admin-only section (Workflows moved there 2026-09-08 -- see
+  //            WORKFLOWS_NAV's own comment)
   //   user   = record assignee — Records only (portal-like view)
   const isAdmin = roles.includes("admin");
   const isAgent = roles.includes("agent") && !isAdmin;
@@ -840,8 +848,8 @@ export function Layout({
   }
 
   // Both admin and agent see everything in ADMIN_NAV (Dashboard, Users,
-  // Workflows, Records). Super admin ALSO gets SUPER_ADMIN_NAV_EXTRA
-  // (Analytics, Templates, Automations, System Logs, API Keys, API Access
+  // Records). Super admin ALSO gets SUPER_ADMIN_NAV_EXTRA (Workflows,
+  // Analytics, Templates, Automations, System Logs, API Keys, API Access
   // Logs), rendered as a visually separate labeled section below (not just
   // appended to the same flat list) so admin-only items are easy to tell
   // apart from the rest of the workspace at a glance.

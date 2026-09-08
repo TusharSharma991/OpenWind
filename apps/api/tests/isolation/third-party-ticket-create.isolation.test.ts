@@ -221,6 +221,51 @@ describe("POST /api/v1/tickets", () => {
     expect(body.data.createdBy).toBe(ACTING_PERSON.userId);
   });
 
+  // Found via live testing (2026-09-08): an API-created ticket's own
+  // "create" history entry showed a raw, unresolvable application-actor id
+  // with no app/person attribution at all, unlike every other API-
+  // originated event (comments, remark-as-first-comment) on the same
+  // ticket -- entity-engine's createEntity never forwarded
+  // originMechanism/originOidcClientId/originPerformerUserId onto the
+  // workflow_events "create" row it writes, despite writing them onto
+  // entity_instances in the same call.
+  it("the create event itself (not just the entity row) carries origin tagging, so the history/timeline entry shows which app/person created it", async () => {
+    const app = makeApp(apiKeyAuth(), ACTING_PERSON);
+    const res = await app.request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        workflowId,
+        fields: { title: "Origin-tagged create event test" },
+        ...REQUIRED_BASELINE_FIELDS,
+      }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { data: { id: string } };
+    createdInstanceIds.push(body.data.id);
+
+    const [createEvent] = await withTenantContext(TENANT, (tx) =>
+      tx
+        .select({
+          triggeredBy: workflowEvents.triggeredBy,
+          originMechanism: workflowEvents.originMechanism,
+          originOidcClientId: workflowEvents.originOidcClientId,
+          originPerformerUserId: workflowEvents.originPerformerUserId,
+        })
+        .from(workflowEvents)
+        .where(
+          and(
+            eq(workflowEvents.instanceId, body.data.id),
+            sql`${workflowEvents.metadata}->>'type' = 'create'`,
+          ),
+        ),
+    );
+    expect(createEvent?.triggeredBy).toBe("api");
+    expect(createEvent?.originMechanism).toBe("api");
+    expect(createEvent?.originOidcClientId).toBe(ORIGIN_OIDC_CLIENT_ID);
+    expect(createEvent?.originPerformerUserId).toBe(ACTING_PERSON.userId);
+  });
+
   it("applies an optional assignee", async () => {
     const app = makeApp(apiKeyAuth(), ACTING_PERSON);
     const res = await app.request("/", {
@@ -579,7 +624,7 @@ describe("POST /api/v1/tickets — assignedTo resolves username or userId to the
     expect(systemReply).toBeTruthy();
     expect(
       (systemReply?.metadata as { actorName?: string } | null)?.actorName,
-    ).toBe("system");
+    ).toBe("System");
     // Replies to the remark comment (this test's request included a
     // remark), which is what makes the existing comment.replied
     // notification path fire for the ticket's own creator.

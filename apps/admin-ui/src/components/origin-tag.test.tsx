@@ -58,6 +58,34 @@ describe("OriginTag", () => {
     expect(screen.queryByText("Jane Doe")).toBeNull();
   });
 
+  // Found via live testing (2026-09-08): the expanded app/person text had a
+  // maxWidth + ellipsis truncation that clipped long real values -- the
+  // whole point of expanding is to see the FULL detail, so no width/overflow
+  // constraint may be applied to these two spans.
+  it("shows the full app name and performer name when expanded, with no width/ellipsis truncation", () => {
+    render(
+      <OriginTag
+        origin={{
+          mechanism: "api",
+          appName: "A Very Long Third Party Application Name Indeed",
+          performerUserId: "378676050449661954",
+          performerDisplayName: "A Very Long Person Display Name Indeed",
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button"));
+    const appNameEl = screen.getByText(
+      "A Very Long Third Party Application Name Indeed",
+    );
+    const personNameEl = screen.getByText(
+      "A Very Long Person Display Name Indeed",
+    );
+    expect(appNameEl.style.maxWidth).toBe("");
+    expect(appNameEl.style.textOverflow).toBe("");
+    expect(personNameEl.style.maxWidth).toBe("");
+    expect(personNameEl.style.textOverflow).toBe("");
+  });
+
   it("falls back to the raw performer id when no display name resolved, once expanded", () => {
     render(
       <OriginTag

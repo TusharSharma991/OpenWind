@@ -221,6 +221,14 @@ export const mentionResolutionWorker = new Worker<MentionResolutionJob>(
       // reopen exactly the oracle this design exists to close.
       // Best-effort: a failure here must never fail the job (the comment
       // and its audit entry above have already committed).
+      //
+      // metadata.actorName is "System" (capitalized), NOT the literal
+      // string "system" -- found via live testing, 2026-09-08:
+      // list-workflow-events.ts's snapshot-name dedup guard discards
+      // actorName whenever it exactly equals actorId (treating that as "no
+      // real name, just the raw id repeated"), which silently collapsed
+      // this to a truncated actorId.slice(0,8) + "…" fallback, rendering
+      // as "system…" in the UI.
       try {
         await withTenantContext(tenantId, async (tx) => {
           const [event] = await tx
@@ -237,7 +245,7 @@ export const mentionResolutionWorker = new Worker<MentionResolutionJob>(
               metadata: {
                 type: "comment",
                 text: `The mention "${mentionIdentifier}" could not be resolved to an org member.`,
-                actorName: "system",
+                actorName: "System",
                 replyTo: commentId,
               },
             })

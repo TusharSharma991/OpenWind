@@ -155,6 +155,7 @@ type WorkflowFull = {
   maxChildDepth: number | null;
   maxChildrenPerParent: number | null;
   allowAutoGrantOnMention: boolean;
+  adminOnly: boolean;
 };
 
 type EntityField = {
@@ -1361,6 +1362,37 @@ export function WorkflowDetail(): React.ReactElement {
       setAllowAutoGrantOnMention(!checked);
     } finally {
       setSavingMentionToggle(false);
+    }
+  }
+
+  // Hides this workflow (and every ticket under it) from anyone but the
+  // global "admin" role — see workflows.adminOnly's own doc comment. Only a
+  // global admin can flip this (updateWorkflow rejects the field otherwise),
+  // so this control should only ever render for an admin caller.
+  const [adminOnly, setAdminOnly] = useState(false);
+  const [savingAdminOnly, setSavingAdminOnly] = useState(false);
+
+  useEffect(() => {
+    if (data?.data) {
+      const wf = data.data as WorkflowFull;
+      setAdminOnly(wf.adminOnly);
+    }
+  }, [data?.data]);
+
+  async function handleToggleAdminOnly(checked: boolean): Promise<void> {
+    if (!id) return;
+    setAdminOnly(checked);
+    setSavingAdminOnly(true);
+    try {
+      await fetchWithAuth(`${API_URL}/workflows/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ adminOnly: checked }),
+      });
+      void refetch();
+    } catch {
+      setAdminOnly(!checked);
+    } finally {
+      setSavingAdminOnly(false);
     }
   }
 
@@ -3464,6 +3496,39 @@ export function WorkflowDetail(): React.ReactElement {
                   </span>
                 </label>
               </div>
+
+              {/* Admin-only visibility — only a global admin can see or
+                  change this; updateWorkflow rejects the field otherwise. */}
+              {isAdmin && (
+                <div className="data-panel wfd-settings-panel">
+                  <SectionHeader label="Visibility" />
+                  <p
+                    style={{
+                      fontSize: "13px",
+                      color: "var(--text-muted)",
+                      marginBottom: "14px",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    Hide this workflow and every ticket under it from everyone
+                    but an admin — the Workflows page, Records page, dashboard,
+                    and the third-party API all stop showing it. Use this for
+                    internal/test workflows that shouldn't appear to normal
+                    users.
+                  </p>
+                  <label className="form-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={adminOnly}
+                      disabled={savingAdminOnly}
+                      onChange={(e) =>
+                        void handleToggleAdminOnly(e.target.checked)
+                      }
+                    />
+                    <span>Admin only — hide from everyone else</span>
+                  </label>
+                </div>
+              )}
 
               {/* Activate / Deactivate */}
               <div className="data-panel wfd-settings-panel">

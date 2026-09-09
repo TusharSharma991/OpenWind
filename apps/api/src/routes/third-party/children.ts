@@ -9,6 +9,7 @@ import {
   outboxEvents,
 } from "@platform/db";
 import { createChildRelation, EntityError } from "@platform/entity-engine";
+import { isWorkflowAdminOnly } from "@platform/workflow-engine";
 import { zValidator } from "../../lib/validator.js";
 import { factory } from "./factory.js";
 import { requireTicketScope } from "./require-ticket-scope.js";
@@ -147,6 +148,19 @@ export const createThirdPartyChildHandler = factory.createHandlers(
 
     if (!parent) {
       return notFound(c);
+    }
+
+    // Admin-only workflows are hidden from every third-party caller, no
+    // exceptions -- see workflows.adminOnly's doc comment. This route
+    // doesn't otherwise go through getWorkflow (unlike tickets.ts/
+    // list-tickets.ts), so it needs this explicit check.
+    if (parent.workflowId) {
+      const adminOnly = await withTenantContext(tenantId, (tx) =>
+        isWorkflowAdminOnly(tx, tenantId, parent.workflowId as string),
+      );
+      if (adminOnly) {
+        return notFound(c);
+      }
     }
 
     const allowed = await withTenantContext(tenantId, (tx) =>

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Hono } from "hono";
 import type { AuthContext } from "@platform/auth";
+import type * as WorkflowEngine from "@platform/workflow-engine";
 
 // ── Mock @platform/db ─────────────────────────────────────────────────────────
 
@@ -60,6 +61,21 @@ vi.mock("@platform/auth", () => ({
 vi.mock("@platform/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
+
+// list-children.ts's admin_only gate (workflows.adminOnly) — no test in this
+// file exercises admin-only workflows, so a constant false keeps every
+// existing test's behavior unchanged. importOriginal preserves the real
+// hasEntityReadAccess (re-exported via ../../lib/entity-access.js) and every
+// other real export — only isWorkflowAdminOnly is overridden.
+const mockIsWorkflowAdminOnly = vi.fn().mockResolvedValue(false);
+vi.mock("@platform/workflow-engine", async (importOriginal) => {
+  const actual = await importOriginal<typeof WorkflowEngine>();
+  return {
+    ...actual,
+    isWorkflowAdminOnly: (...args: unknown[]) =>
+      mockIsWorkflowAdminOnly(...args),
+  };
+});
 
 // archive.ts also cascade-cancels pending ticket alerts (docs/specs/ticket-alerts.md) —
 // unrelated to this file's child-relations focus, and cancelAllPendingAlertsForInstance
@@ -194,6 +210,10 @@ describe("GET /:id/children", () => {
   const app = buildApp("get", "/:id/children", ...listChildrenHandler);
 
   it("returns 200 with paginated children", async () => {
+    // list-children.ts now reads parent.workflowId for the admin_only gate —
+    // must resolve to a real object (workflowId: null is fine, same shape
+    // real getEntity always returns).
+    mockGetEntity.mockResolvedValue(fakeChild);
     mockListChildInstances.mockResolvedValue({
       data: [fakeChild],
       nextCursor: null,
@@ -211,6 +231,7 @@ describe("GET /:id/children", () => {
   });
 
   it("passes cursor and limit to engine", async () => {
+    mockGetEntity.mockResolvedValue(fakeChild);
     mockListChildInstances.mockResolvedValue({ data: [], nextCursor: null });
 
     await app.request(`/${PARENT_ID}/children?cursor=abc&limit=5`);

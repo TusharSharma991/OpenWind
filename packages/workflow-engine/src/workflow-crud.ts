@@ -39,6 +39,7 @@ function rowToWorkflow(r: typeof workflows.$inferSelect): WorkflowDefinition {
     maxChildDepth: r.maxChildDepth,
     maxChildrenPerParent: r.maxChildrenPerParent,
     allowAutoGrantOnMention: r.allowAutoGrantOnMention,
+    adminOnly: r.adminOnly,
     createdAt: r.createdAt,
   };
 }
@@ -76,9 +77,21 @@ function rowToTransition(
 // ── Workflow visibility predicate ─────────────────────────────────────────────
 // Tenants can read system workflows (tenantId = null) and their own.
 // Writes (create/delete states/transitions) are restricted to tenant-owned rows.
-
-function visibleTo(tenantId: string): ReturnType<typeof or> {
-  return or(isNull(workflows.tenantId), eq(workflows.tenantId, tenantId));
+//
+// `caller` is optional so existing bare calls keep their prior tenant-only
+// behavior; every read/list path that should honor admin_only passes it.
+// A caller with isGlobalAdmin sees every workflow regardless of admin_only —
+// everyone else never sees an admin_only=true row through this predicate.
+function visibleTo(
+  tenantId: string,
+  caller?: WorkflowCaller,
+): ReturnType<typeof and> {
+  const tenantCond = or(
+    isNull(workflows.tenantId),
+    eq(workflows.tenantId, tenantId),
+  );
+  if (caller?.isGlobalAdmin) return and(tenantCond);
+  return and(tenantCond, eq(workflows.adminOnly, false));
 }
 
 // ── Workflow CRUD ─────────────────────────────────────────────────────────────
@@ -146,21 +159,22 @@ export async function getWorkflowByEntityTypeId(
 // tenant member working with its records, e.g. a ticket assignee viewing
 // their record's state options, not just the workflow's admins. Per-workflow
 // ownership is enforced on the *mutation* routes (assertWorkflowOwned,
-// updateWorkflow, deleteWorkflow, canvas.ts) and, for the admin-only settings
-// page specifically, client-side in admin-ui using the createdBy/assignedTo
-// this call returns. `caller` is accepted for API-shape consistency with the
-// other workflow-crud functions but unused here — every tenant member reads
-// the same data regardless of role.
+// updateWorkflow, deleteWorkflow, canvas.ts).
+//
+// `caller` DOES gate one thing here: admin_only visibility (see visibleTo).
+// A non-global-admin caller gets WORKFLOW_NOT_FOUND for an admin_only
+// workflow, same 404 every other "not visible to you" case in this file
+// returns — never a distinguishable 403.
 export async function getWorkflow(
   db: DbOrTx,
   tenantId: string,
   workflowId: string,
-  _caller: WorkflowCaller,
+  caller: WorkflowCaller,
 ): Promise<WorkflowFull> {
   const [row] = await db
     .select()
     .from(workflows)
-    .where(and(eq(workflows.id, workflowId), visibleTo(tenantId)))
+    .where(and(eq(workflows.id, workflowId), visibleTo(tenantId, caller)))
     .limit(1);
 
   if (!row) throw new WorkflowError("WORKFLOW_NOT_FOUND", { workflowId });
@@ -199,9 +213,11 @@ export async function getWorkflow(
 // resolution) — skips the states/transitions/record-count joins list() does.
 //
 // Listing (with or without entityTypeId) is tenant-wide for every authenticated
-// member — any tenant user can see every workflow that exists. Ownership
-// (createdBy/assignedTo[]) gates *mutating* a workflow's settings
-// (assertWorkflowOwned / updateWorkflow / deleteWorkflow), not listing it.
+// member — any tenant user can see every workflow that exists, EXCEPT
+// admin_only=true workflows, which only a caller with isGlobalAdmin sees (see
+// visibleTo). Ownership (createdBy/assignedTo[]) gates *mutating* a workflow's
+// settings (assertWorkflowOwned / updateWorkflow / deleteWorkflow), not listing
+// it — admin_only is a separate, coarser gate on top of that.
 //
 // This is a deliberate, signed-off widening of the bare/unscoped call beyond
 // what docs/specs/workflow-open-ticket-creation.md originally scoped (that
@@ -212,15 +228,13 @@ export async function getWorkflow(
 export async function listWorkflowsSummary(
   db: DbOrTx,
   tenantId: string,
-  // Accepted for API-shape consistency with other workflow-crud functions —
-  // listing is tenant-wide for every caller, see the comment above.
-  _caller: WorkflowCaller,
+  caller: WorkflowCaller,
   entityTypeId?: string,
   activeOnly?: boolean,
   limit = 500,
   offset = 0,
 ): Promise<WorkflowDefinition[]> {
-  const visibility = visibleTo(tenantId);
+  const visibility = visibleTo(tenantId, caller);
 
   const baseFilter = entityTypeId
     ? and(eq(workflows.entityTypeId, entityTypeId), visibility)
@@ -246,28 +260,31 @@ export async function listWorkflowsSummary(
 // name/id within your own tenant isn't a new disclosure: listWorkflows was
 // unfiltered for every tenant member before the ownership model existed, and
 // the detail fetch that follows still enforces the real access check.
+//
+// `caller` DOES gate admin_only visibility here (see visibleTo) — a slug
+// resolving to an admin_only workflow simply doesn't appear for a
+// non-global-admin caller, same as it wouldn't in listWorkflows/Summary.
 export async function listWorkflowSlugs(
   db: DbOrTx,
   tenantId: string,
+  caller: WorkflowCaller,
 ): Promise<{ id: string; name: string }[]> {
   return db
     .select({ id: workflows.id, name: workflows.name })
     .from(workflows)
-    .where(visibleTo(tenantId));
+    .where(visibleTo(tenantId, caller));
 }
 
 export async function listWorkflows(
   db: DbOrTx,
   tenantId: string,
-  // Accepted for API-shape consistency with other workflow-crud functions —
-  // listing is tenant-wide for every caller, see listWorkflowsSummary's comment.
-  _caller: WorkflowCaller,
+  caller: WorkflowCaller,
   entityTypeId?: string,
   activeOnly?: boolean,
   limit = 500,
   offset = 0,
 ): Promise<WorkflowFull[]> {
-  const visibility = visibleTo(tenantId);
+  const visibility = visibleTo(tenantId, caller);
 
   const baseFilter = entityTypeId
     ? and(eq(workflows.entityTypeId, entityTypeId), visibility)
@@ -351,6 +368,30 @@ export async function listWorkflows(
   }));
 }
 
+// Lightweight admin_only lookup for call sites that only need this one flag
+// and would otherwise pay getWorkflow's states/transitions joins just to
+// check it (e.g. a single ticket-detail view, a sub-ticket-create gate).
+// Returns false (never hides anything) for a workflowId that doesn't
+// resolve -- callers that need "does this workflow exist at all" already
+// have their own existence check upstream (the entity_instances row itself).
+export async function isWorkflowAdminOnly(
+  db: DbOrTx,
+  tenantId: string,
+  workflowId: string,
+): Promise<boolean> {
+  const [row] = await db
+    .select({ adminOnly: workflows.adminOnly })
+    .from(workflows)
+    .where(
+      and(
+        eq(workflows.id, workflowId),
+        or(isNull(workflows.tenantId), eq(workflows.tenantId, tenantId)),
+      ),
+    )
+    .limit(1);
+  return row?.adminOnly ?? false;
+}
+
 export async function updateWorkflow(
   db: DbOrTx,
   tenantId: string,
@@ -361,7 +402,7 @@ export async function updateWorkflow(
   const [row] = await db
     .select()
     .from(workflows)
-    .where(and(eq(workflows.id, workflowId), visibleTo(tenantId)))
+    .where(and(eq(workflows.id, workflowId), visibleTo(tenantId, caller)))
     .limit(1);
 
   if (row === undefined)
@@ -394,6 +435,12 @@ export async function updateWorkflow(
     throw new WorkflowError("WORKFLOW_ADMIN_REMOVE_CREATOR_FORBIDDEN", {
       workflowId,
     });
+  }
+  // Only a global admin may flip admin_only -- a per-workflow admin
+  // (createdBy/assignedTo, not the global "admin" role) shouldn't be able to
+  // hide a workflow from the rest of the tenant unilaterally.
+  if (input.adminOnly !== undefined && !caller.isGlobalAdmin) {
+    throw new WorkflowError("WORKFLOW_ADMIN_LIST_FORBIDDEN", { workflowId });
   }
 
   if (input.initialState !== undefined) {
@@ -430,6 +477,7 @@ export async function updateWorkflow(
     updates.initialState = input.initialState;
   if (input.allowAutoGrantOnMention !== undefined)
     updates.allowAutoGrantOnMention = input.allowAutoGrantOnMention;
+  if (input.adminOnly !== undefined) updates.adminOnly = input.adminOnly;
 
   if (Object.keys(updates).length === 0) {
     const [current] = await db
@@ -465,7 +513,7 @@ export async function deleteWorkflow(
   const [row] = await db
     .select()
     .from(workflows)
-    .where(and(eq(workflows.id, workflowId), visibleTo(tenantId)))
+    .where(and(eq(workflows.id, workflowId), visibleTo(tenantId, caller)))
     .limit(1);
 
   // Not found, or is a system workflow (tenant_id = null — read-only)

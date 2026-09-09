@@ -14,6 +14,8 @@ import {
   withTenantContext,
   entityInstances,
   entityTypes,
+  workflows,
+  workflowEvents,
 } from "@platform/db";
 import { createEntity } from "@platform/entity-engine";
 import type { AuthContext } from "@platform/auth";
@@ -68,7 +70,7 @@ afterAll(async () => {
   await db.delete(entityTypes).where(eq(entityTypes.id, entityTypeId));
 });
 
-function makeApp(tenantId: string, userId: string) {
+function makeApp(tenantId: string, userId: string, roles: string[] = ["user"]) {
   const app = new Hono<{ Variables: { auth: AuthContext } }>();
   app.use(
     "*",
@@ -76,7 +78,7 @@ function makeApp(tenantId: string, userId: string) {
       c.set("auth", {
         tenantId,
         userId,
-        roles: ["user"],
+        roles,
         email: "t@example.com",
       });
       await next();
@@ -116,5 +118,89 @@ describe("GET /entities/my-tickets — cross-tenant isolation", () => {
     // queries — the real regression this guards is the missing tenantId
     // filter on the workflows/workflowStates/workflowTransitions lookups.
     expect(Array.isArray(data.workflows)).toBe(true);
+  });
+});
+
+describe("GET /entities/my-tickets — admin_only workflow visibility", () => {
+  const USER_ADMIN_ONLY = "user-admin-only-my-tickets-test";
+  let adminOnlyWorkflowId: string;
+  let adminOnlyEntityTypeId: string;
+  let adminOnlyInstanceId: string;
+
+  beforeAll(async () => {
+    const [etRow] = await db
+      .insert(entityTypes)
+      .values({
+        tenantId: null,
+        name: `isolation_admin_only_${Date.now()}`,
+        plural: `isolation_admin_only_${Date.now()}`,
+        allowCustomFields: true,
+      })
+      .returning();
+    if (!etRow) throw new Error("entity type insert failed");
+    adminOnlyEntityTypeId = etRow.id;
+
+    const [wfRow] = await db
+      .insert(workflows)
+      .values({
+        tenantId: TENANT_A,
+        entityTypeId: adminOnlyEntityTypeId,
+        name: "Admin Only My-Tickets Test Workflow",
+        initialState: "open",
+        adminOnly: true,
+      })
+      .returning();
+    if (!wfRow) throw new Error("workflow insert failed");
+    adminOnlyWorkflowId = wfRow.id;
+
+    const inst = await withTenantContext(TENANT_A, (tx) =>
+      createEntity(tx, TENANT_A, {
+        entityTypeId: adminOnlyEntityTypeId,
+        workflowId: adminOnlyWorkflowId,
+        fields: { title: "Admin-only ticket" },
+        createdBy: USER_ADMIN_ONLY,
+        assignedTo: USER_ADMIN_ONLY,
+      }),
+    );
+    adminOnlyInstanceId = inst.id;
+  });
+
+  afterAll(async () => {
+    // createEntity writes a "create" workflow_events row for this instance —
+    // must go before entity_instances or the FK blocks the delete.
+    await db
+      .delete(workflowEvents)
+      .where(eq(workflowEvents.instanceId, adminOnlyInstanceId));
+    await db
+      .delete(entityInstances)
+      .where(eq(entityInstances.entityTypeId, adminOnlyEntityTypeId));
+    await db.delete(workflows).where(eq(workflows.id, adminOnlyWorkflowId));
+    await db
+      .delete(entityTypes)
+      .where(eq(entityTypes.id, adminOnlyEntityTypeId));
+  });
+
+  it("hides the admin_only workflow's own ticket from its creator/assignee when they lack the global admin role", async () => {
+    const res = await makeApp(TENANT_A, USER_ADMIN_ONLY, ["user"]).request(
+      "/my-tickets",
+    );
+    expect(res.status).toBe(200);
+    const { data } = (await res.json()) as {
+      data: { parentTickets: { id: string }[] };
+    };
+    expect(data.parentTickets.map((t) => t.id)).not.toContain(
+      adminOnlyInstanceId,
+    );
+  });
+
+  it("shows the admin_only workflow's ticket to a caller with the global admin role", async () => {
+    const res = await makeApp(TENANT_A, USER_ADMIN_ONLY, ["admin"]).request(
+      "/my-tickets",
+    );
+    expect(res.status).toBe(200);
+    const { data } = (await res.json()) as {
+      data: { parentTickets: { id: string }[] };
+    };
+    expect(data.parentTickets.map((t) => t.id)).toContain(adminOnlyInstanceId);
   });
 });

@@ -16,6 +16,9 @@ const UpdateWorkflowSchema = z.object({
   maxChildrenPerParent: z.number().int().min(1).max(100).nullable().optional(),
   initialState: z.string().min(1).max(100).optional(),
   allowAutoGrantOnMention: z.boolean().optional(),
+  // Only a global admin may set this — see updateWorkflow's own check
+  // (WORKFLOW_ADMIN_LIST_FORBIDDEN for anyone else).
+  adminOnly: z.boolean().optional(),
 });
 
 export const updateWorkflowHandler = factory.createHandlers(

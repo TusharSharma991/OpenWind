@@ -8,6 +8,7 @@ import {
   DEFAULT_PAGE_SIZE,
   MAX_PAGE_SIZE,
 } from "@platform/entity-engine";
+import { isWorkflowAdminOnly } from "@platform/workflow-engine";
 import { factory } from "./factory.js";
 import { handleEntityError } from "../../lib/handle-entity-error.js";
 import {
@@ -45,6 +46,21 @@ export const listChildrenHandler = factory.createHandlers(
 
       if (!hasEntityReadAccess(parent, userId, roles)) {
         return c.json({ error: "NOT_FOUND", message: "Record not found" }, 404);
+      }
+
+      // Admin-only workflows are hidden from everyone but the global
+      // "admin" role — see workflows.adminOnly's doc comment. Checked here
+      // too since hasEntityReadAccess treats "agent" as unrestricted.
+      if (parent.workflowId && !roles.includes("admin")) {
+        const adminOnly = await withTenantContext(tenantId, (tx) =>
+          isWorkflowAdminOnly(tx, tenantId, parent.workflowId as string),
+        );
+        if (adminOnly) {
+          return c.json(
+            { error: "NOT_FOUND", message: "Record not found" },
+            404,
+          );
+        }
       }
 
       const page = await withTenantContext(tenantId, (tx) =>

@@ -21,7 +21,7 @@ import {
 export const orgViewHandler = factory.createHandlers(
   requireAuth(),
   async (c) => {
-    const { tenantId, userId, orgId } = c.get("auth");
+    const { tenantId, userId, orgId, roles } = c.get("auth");
     const now = new Date();
     const bearerToken = c.req.header("Authorization")?.slice(7) ?? "";
 
@@ -62,7 +62,10 @@ export const orgViewHandler = factory.createHandlers(
       const scopedIds = await resolveUserScopedEntityIds(
         tenantId,
         [userId, ...subordinates.ids],
-        { limit: DASHBOARD_SCOPE_LIMIT },
+        {
+          limit: DASHBOARD_SCOPE_LIMIT,
+          isGlobalAdmin: roles.includes("admin"),
+        },
       );
 
       const { rows, ...sections } = await buildScopedDashboardSections(

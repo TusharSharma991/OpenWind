@@ -59,6 +59,8 @@ let noAccessTicketId: string;
 let otherTenantTicketId: string;
 let grandchildParentId: string;
 let softDeletedTicketId: string;
+let adminOnlyWorkflowId: string;
+let adminOnlyParentTicketId: string;
 
 const CREATOR = "third-party-child-creator";
 const MENTIONED_PERSON = "third-party-child-mentioned";
@@ -213,6 +215,42 @@ beforeAll(async () => {
     .update(entityInstances)
     .set({ deletedAt: new Date() })
     .where(eq(entityInstances.id, softDeletedTicketId));
+
+  // admin_only=true workflow -- this route has no getWorkflow call to
+  // catch this via the choke point, so it needs its own explicit check
+  // (see children.ts's own comment).
+  const [adminOnlyWorkflow] = await db
+    .insert(workflows)
+    .values({
+      tenantId: TENANT,
+      entityTypeId: (
+        await createEntityType(db, null, {
+          name: `third_party_child_admin_only_test_${Date.now()}`,
+          plural: "third_party_child_admin_only_tests",
+          allowCustomFields: true,
+        })
+      ).id,
+      name: "3P Admin-Only Child Workflow",
+      initialState: "open",
+      adminOnly: true,
+    })
+    .returning({ id: workflows.id, entityTypeId: workflows.entityTypeId });
+  adminOnlyWorkflowId = adminOnlyWorkflow!.id;
+  await db.insert(workflowStates).values({
+    tenantId: TENANT,
+    workflowId: adminOnlyWorkflowId,
+    name: "open",
+    label: "Open",
+    sortOrder: 0,
+  });
+  const adminOnlyParentTicket = await createEntity(db, TENANT, {
+    entityTypeId: adminOnlyWorkflow!.entityTypeId,
+    fields: {},
+    createdBy: CREATOR,
+    workflowId: adminOnlyWorkflowId,
+    currentState: "open",
+  });
+  adminOnlyParentTicketId = adminOnlyParentTicket.id;
 });
 
 afterAll(async () => {
@@ -524,5 +562,15 @@ describe("POST /api/v1/tickets/:id/children — mandatory baseline fields", () =
       (replyOutbox?.payload as { targetUserId?: string } | undefined)
         ?.targetUserId,
     ).toBe(CREATOR);
+  });
+});
+
+describe("POST /api/v1/tickets/:id/children — admin_only workflow", () => {
+  it("404s even for the parent ticket's own creator when the parent's workflow is admin_only", async () => {
+    const app = makeApp(apiKeyAuth(), actingAs(CREATOR));
+    const res = await postChild(app, adminOnlyParentTicketId, {
+      title: "should never be created",
+    });
+    expect(res.status).toBe(404);
   });
 });

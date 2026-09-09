@@ -64,7 +64,7 @@ export const myTicketsHandler = factory.createHandlers(
   requireRole("admin", "agent", "user", "superadmin"),
   zValidator("query", MyTicketsQuerySchema),
   async (c) => {
-    const { tenantId, userId } = c.get("auth");
+    const { tenantId, userId, roles } = c.get("auth");
     const { workflowId } = c.req.valid("query");
 
     try {
@@ -73,12 +73,29 @@ export const myTicketsHandler = factory.createHandlers(
       // Shared with the personal-dashboard endpoint via buildUserScopeFilter —
       // do not inline a divergent predicate here (see scoped-access.ts).
       const accessFilter = buildUserScopeFilter([userId]);
+      const isGlobalAdmin = roles.includes("admin");
 
       const baseConditions = and(
         eq(entityInstances.tenantId, tenantId),
         isNull(entityInstances.deletedAt),
         accessFilter,
         workflowId ? eq(entityInstances.workflowId, workflowId) : undefined,
+        // Admin-only workflows are hidden from everyone but the global
+        // "admin" role, even from their own creator/assignee — see
+        // workflows.adminOnly's doc comment. This endpoint has no other
+        // workflow-visibility check (it's purely "tickets I have a
+        // relationship to"), so exclude them here. A single NOT EXISTS
+        // subquery (same pattern as scoped-access.ts's identical check)
+        // rather than a separate lookup query + notInArray, so this stays
+        // one round-trip and correctly includes workflow-less instances
+        // (NOT IN would incorrectly exclude a NULL workflowId).
+        isGlobalAdmin
+          ? undefined
+          : sql`NOT EXISTS (
+              SELECT 1 FROM ${workflows}
+              WHERE ${workflows.id} = ${entityInstances.workflowId}
+                AND ${workflows.adminOnly} = true
+            )`,
       );
 
       const fetchedRows = await withTenantContext(tenantId, (tx) =>

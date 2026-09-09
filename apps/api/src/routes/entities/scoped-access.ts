@@ -1,5 +1,5 @@
 import { eq, and, isNull, or, inArray, sql, desc, type SQL } from "drizzle-orm";
-import { withTenantContext, entityInstances } from "@platform/db";
+import { withTenantContext, entityInstances, workflows } from "@platform/db";
 
 /**
  * Single source of truth for "is this user scoped to this ticket" — creator,
@@ -24,6 +24,15 @@ export function buildUserScopeFilter(userIds: string[]): SQL | undefined {
 export interface ResolveScopedIdsOptions {
   workflowId?: string;
   limit?: number;
+  /**
+   * Admin-only workflows (workflows.adminOnly) are hidden from every caller
+   * except a global admin, even from a ticket's own creator/assignee — see
+   * that column's doc comment. Defaults to false (exclude admin-only
+   * workflows) since every current caller of this function is a
+   * non-role-gated personal/team dashboard view; pass true only for a
+   * caller already confirmed to be a global admin.
+   */
+  isGlobalAdmin?: boolean;
 }
 
 /**
@@ -38,13 +47,20 @@ export async function resolveUserScopedEntityIds(
   opts: ResolveScopedIdsOptions = {},
 ): Promise<string[]> {
   if (userIds.length === 0) return [];
-  const { workflowId, limit } = opts;
+  const { workflowId, limit, isGlobalAdmin } = opts;
 
   const conditions = and(
     eq(entityInstances.tenantId, tenantId),
     isNull(entityInstances.deletedAt),
     buildUserScopeFilter(userIds),
     workflowId ? eq(entityInstances.workflowId, workflowId) : undefined,
+    isGlobalAdmin
+      ? undefined
+      : sql`NOT EXISTS (
+          SELECT 1 FROM ${workflows}
+          WHERE ${workflows.id} = ${entityInstances.workflowId}
+            AND ${workflows.adminOnly} = true
+        )`,
   );
 
   const rows = await withTenantContext(tenantId, (tx) => {

@@ -41,6 +41,16 @@ export const workflows = pgTable(
     allowAutoGrantOnMention: boolean("allow_auto_grant_on_mention")
       .default(false)
       .notNull(),
+    /**
+     * Hides this workflow (and every ticket under it) from anyone but the
+     * global "admin" role -- workflows page, records page, dashboard, and
+     * the third-party API's GET /workflows / ticket create/read/list.
+     * Default false preserves prior behavior (every workflow visible to
+     * every tenant member). Set per-workflow via the admin-ui workflow
+     * settings page for internal/test workflows that shouldn't appear to
+     * normal users.
+     */
+    adminOnly: boolean("admin_only").default(false).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),

@@ -93,6 +93,15 @@ beforeAll(async () => {
         name: "3P Other Tenant Workflow",
         initialState: "open",
       },
+      {
+        // admin_only=true -- hidden from every third-party caller (acting
+        // persons via AuthNexus are never isGlobalAdmin on this API today).
+        tenantId: TENANT,
+        entityTypeId: await newEntityType("admin-only"),
+        name: "3P Admin-Only Workflow",
+        initialState: "open",
+        adminOnly: true,
+      },
     ])
     .returning({ id: workflows.id });
   workflowIds.push(...rows.map((r) => r.id));
@@ -152,6 +161,14 @@ describe("GET /api/v1/workflows", () => {
     expect(names).toContain("3P System Workflow");
     expect(names).not.toContain("3P Inactive Workflow");
     expect(names).not.toContain("3P Other Tenant Workflow");
+  });
+
+  it("never returns an admin_only workflow -- third-party acting persons are never isGlobalAdmin", async () => {
+    const app = makeApp(apiKeyAuth(), ACTING_PERSON);
+    const res = await app.request("/?limit=200");
+    const body = (await res.json()) as { data: { name: string }[] };
+    const names = body.data.map((w) => w.name);
+    expect(names).not.toContain("3P Admin-Only Workflow");
   });
 
   it("each returned object contains exactly id, name, entityTypeId — no other fields", async () => {

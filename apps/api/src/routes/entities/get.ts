@@ -64,15 +64,29 @@ export const getEntityHandler = factory.createHandlers(
       }
 
       let maxChildDepth = 0;
+      let workflowAdminOnly = false;
       if (instance.workflowId) {
         const [wf] = await withTenantContext(tenantId, (tx) =>
           tx
-            .select({ maxChildDepth: workflows.maxChildDepth })
+            .select({
+              maxChildDepth: workflows.maxChildDepth,
+              adminOnly: workflows.adminOnly,
+            })
             .from(workflows)
             .where(eq(workflows.id, instance.workflowId ?? ""))
             .limit(1),
         );
         maxChildDepth = wf?.maxChildDepth ?? 0;
+        workflowAdminOnly = wf?.adminOnly ?? false;
+      }
+
+      // Admin-only workflows (see workflows.adminOnly's doc comment) are
+      // hidden from everyone but the global "admin" role — even hasEntityAccess's
+      // own creator/assignee/ACL grant, and even an "agent", which
+      // hasEntityAccess treats as unrestricted. Same 404 as any other
+      // "not visible to you" case, never a distinguishable 403.
+      if (workflowAdminOnly && !roles.includes("admin")) {
+        return c.json({ error: "NOT_FOUND", message: "Record not found" }, 404);
       }
 
       const canAddChildren = maxChildDepth > 0 && ancestorDepth < maxChildDepth;

@@ -14,6 +14,7 @@ export {
   updateWorkflow,
   getWorkflow,
   getWorkflowByEntityTypeId,
+  isWorkflowAdminOnly,
   listWorkflows,
   listWorkflowsSummary,
   listWorkflowSlugs,

@@ -19,6 +19,12 @@ export interface WorkflowDefinition {
    * (true) or creates an access-request instead (false, default).
    */
   allowAutoGrantOnMention: boolean;
+  /**
+   * Hides this workflow (and every ticket under it) from anyone but a
+   * caller with WorkflowCaller.isGlobalAdmin -- see workflow-crud.ts's
+   * visibleTo() and migration 0094. Default false.
+   */
+  adminOnly: boolean;
   createdAt: Date;
 }
 
@@ -136,6 +142,7 @@ export type UpdateWorkflowInput = {
    * updateWorkflow's validation and addWorkflowState's auto-heal. */
   initialState?: string | undefined;
   allowAutoGrantOnMention?: boolean | undefined;
+  adminOnly?: boolean | undefined;
 };
 
 // Caller identity for per-workflow authorization checks (see authorization.ts).

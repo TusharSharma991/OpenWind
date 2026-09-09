@@ -42,6 +42,7 @@ type PendingApprovalsSection = z.infer<typeof PendingApprovalsSectionSchema>;
 async function fetchAdminWorkflows(
   tenantId: string,
   userId: string,
+  isGlobalAdmin: boolean,
 ): Promise<AdminWorkflow[]> {
   const rows = await withTenantContext(tenantId, (tx) =>
     tx
@@ -51,22 +52,29 @@ async function fetchAdminWorkflows(
         entityTypeId: workflows.entityTypeId,
         createdBy: workflows.createdBy,
         assignedTo: workflows.assignedTo,
+        adminOnly: workflows.adminOnly,
       })
       .from(workflows)
       .where(eq(workflows.tenantId, tenantId)),
   );
-  return rows
-    .filter((w) =>
-      isWorkflowAdmin(userId, {
-        createdBy: w.createdBy,
-        assignedTo: w.assignedTo ?? [],
-      }),
-    )
-    .map((w) => ({
-      workflowId: w.id,
-      workflowName: w.name,
-      entityTypeId: w.entityTypeId,
-    }));
+  return (
+    rows
+      // Admin-only workflows are hidden from everyone but a global admin, even
+      // this workflow's own designated per-workflow admin — see
+      // workflows.adminOnly's doc comment.
+      .filter((w) => isGlobalAdmin || !w.adminOnly)
+      .filter((w) =>
+        isWorkflowAdmin(userId, {
+          createdBy: w.createdBy,
+          assignedTo: w.assignedTo ?? [],
+        }),
+      )
+      .map((w) => ({
+        workflowId: w.id,
+        workflowName: w.name,
+        entityTypeId: w.entityTypeId,
+      }))
+  );
 }
 
 // R11 — saved_views has a dual tenant+user RLS policy (db-conventions.md), so
@@ -158,7 +166,8 @@ async function fetchPendingApprovals(
 export const myViewHandler = factory.createHandlers(
   requireAuth(),
   async (c) => {
-    const { tenantId, userId } = c.get("auth");
+    const { tenantId, userId, roles } = c.get("auth");
+    const isGlobalAdmin = roles.includes("admin");
     const now = new Date();
 
     try {
@@ -168,7 +177,11 @@ export const myViewHandler = factory.createHandlers(
       // skipped by the scopedIds-empty early return.
       let adminWorkflows: AdminWorkflow[] = [];
       try {
-        adminWorkflows = await fetchAdminWorkflows(tenantId, userId);
+        adminWorkflows = await fetchAdminWorkflows(
+          tenantId,
+          userId,
+          isGlobalAdmin,
+        );
       } catch (err) {
         logger.error(
           { err, tenantId, userId },
@@ -203,6 +216,7 @@ export const myViewHandler = factory.createHandlers(
       // ── Core (R1) — must succeed, or the whole request fails ────────────────
       const scopedIds = await resolveUserScopedEntityIds(tenantId, [userId], {
         limit: DASHBOARD_SCOPE_LIMIT,
+        isGlobalAdmin,
       });
 
       const {

@@ -2,7 +2,11 @@ import { zValidator } from "../../lib/validator.js";
 import { z } from "zod";
 import { requireAuth } from "@platform/auth";
 import { withTenantContext } from "@platform/db";
-import { listEntities, MAX_PAGE_SIZE } from "@platform/entity-engine";
+import {
+  listEntities,
+  MAX_PAGE_SIZE,
+  EntityError,
+} from "@platform/entity-engine";
 import {
   getWorkflowByEntityTypeId,
   isWorkflowAdmin,
@@ -66,20 +70,30 @@ export const listEntitiesHandler = factory.createHandlers(
     const { tenantId, userId, roles } = c.get("auth");
     const query = c.req.valid("query");
 
-    let isPrivileged = roles.includes("admin") || roles.includes("agent");
+    const isGlobalAdmin = roles.includes("admin");
+    let isPrivileged = isGlobalAdmin || roles.includes("agent");
 
     try {
       const { fields, ...rest } = query;
 
+      // Admin-only workflows (admin_only=true) are hidden from everyone but
+      // a global admin — even the workflow's own creator/assignee, and even
+      // an "agent" — see workflows.adminOnly's doc comment. Always resolve
+      // the workflow (not just when !isPrivileged) so this check runs
+      // regardless of role.
+      const workflow = await withTenantContext(tenantId, (tx) =>
+        getWorkflowByEntityTypeId(tx, tenantId, rest.entityTypeId),
+      );
+      if (workflow?.adminOnly && !isGlobalAdmin) {
+        throw new EntityError("ENTITY_TYPE_NOT_FOUND", {
+          entityTypeId: rest.entityTypeId,
+        });
+      }
+
       // A workflow admin (creator/assigned_to of the workflow that owns this
       // entity type) gets the same unrestricted list access as admin/agent.
-      if (!isPrivileged) {
-        const workflow = await withTenantContext(tenantId, (tx) =>
-          getWorkflowByEntityTypeId(tx, tenantId, rest.entityTypeId),
-        );
-        if (workflow && isWorkflowAdmin(userId, workflow)) {
-          isPrivileged = true;
-        }
+      if (!isPrivileged && workflow && isWorkflowAdmin(userId, workflow)) {
+        isPrivileged = true;
       }
 
       // Non-privileged users are always scoped to their own records — query param cannot

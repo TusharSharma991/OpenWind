@@ -111,6 +111,7 @@ const {
   listWorkflows,
   listWorkflowsSummary,
   getWorkflowByEntityTypeId,
+  getWorkflow,
   addWorkflowState,
   updateWorkflow,
 } = await import("./workflow-crud.js");
@@ -476,6 +477,92 @@ describe("addWorkflowState — initialState auto-heal", () => {
 
     const healUpdate = updateCalls.find((c) => c.table === "workflows_mock");
     expect(healUpdate).toBeUndefined();
+  });
+});
+
+describe("admin_only visibility (workflows.adminOnly)", () => {
+  const NON_ADMIN_CALLER = { userId: "user-222", isGlobalAdmin: false };
+  const GLOBAL_ADMIN_CALLER = { userId: "user-333", isGlobalAdmin: true };
+
+  // eq(workflows.adminOnly, false) is the only call anywhere in this file's
+  // functions where the mocked eq() is invoked with a literal `false` value
+  // (isActive filtering only ever passes `true`) — a safe, distinguishing
+  // proxy for "was the admin_only exclusion applied" without needing to
+  // execute real SQL against the mocked column reference.
+  function adminOnlyExclusionApplied(): boolean {
+    return vi.mocked(eq).mock.calls.some(([, val]) => val === false);
+  }
+
+  it("listWorkflowsSummary: applies the admin_only exclusion for a non-global-admin caller", async () => {
+    selectQueue = [() => []];
+    await listWorkflowsSummary(dbMock as never, TENANT_ID, NON_ADMIN_CALLER);
+    expect(adminOnlyExclusionApplied()).toBe(true);
+  });
+
+  it("listWorkflowsSummary: does NOT apply the admin_only exclusion for a global-admin caller", async () => {
+    selectQueue = [() => []];
+    await listWorkflowsSummary(dbMock as never, TENANT_ID, GLOBAL_ADMIN_CALLER);
+    expect(adminOnlyExclusionApplied()).toBe(false);
+  });
+
+  it("listWorkflows: applies the admin_only exclusion for a non-global-admin caller", async () => {
+    selectQueue = [() => []];
+    await listWorkflows(dbMock as never, TENANT_ID, NON_ADMIN_CALLER);
+    expect(adminOnlyExclusionApplied()).toBe(true);
+  });
+
+  it("listWorkflows: does NOT apply the admin_only exclusion for a global-admin caller", async () => {
+    selectQueue = [() => []];
+    await listWorkflows(dbMock as never, TENANT_ID, GLOBAL_ADMIN_CALLER);
+    expect(adminOnlyExclusionApplied()).toBe(false);
+  });
+
+  it("getWorkflow: applies the admin_only exclusion for a non-global-admin caller", async () => {
+    selectQueue = [() => []]; // no row -> WORKFLOW_NOT_FOUND, fine — only the query shape matters here
+    await expect(
+      getWorkflow(dbMock as never, TENANT_ID, WORKFLOW_ID, NON_ADMIN_CALLER),
+    ).rejects.toMatchObject({ code: "WORKFLOW_NOT_FOUND" });
+    expect(adminOnlyExclusionApplied()).toBe(true);
+  });
+
+  it("getWorkflow: does NOT apply the admin_only exclusion for a global-admin caller", async () => {
+    selectQueue = [() => [workflowRow], () => [], () => []];
+    await getWorkflow(
+      dbMock as never,
+      TENANT_ID,
+      WORKFLOW_ID,
+      GLOBAL_ADMIN_CALLER,
+    );
+    expect(adminOnlyExclusionApplied()).toBe(false);
+  });
+
+  it("updateWorkflow: rejects setting adminOnly from a non-global-admin caller with WORKFLOW_ADMIN_LIST_FORBIDDEN", async () => {
+    selectQueue = [() => [workflowRow]];
+    await expect(
+      updateWorkflow(
+        dbMock as never,
+        TENANT_ID,
+        WORKFLOW_ID,
+        NON_ADMIN_CALLER,
+        {
+          adminOnly: true,
+        },
+      ),
+    ).rejects.toMatchObject({ code: "WORKFLOW_ADMIN_LIST_FORBIDDEN" });
+    expect(updateCalls).toHaveLength(0);
+  });
+
+  it("updateWorkflow: a global admin can set adminOnly", async () => {
+    selectQueue = [() => [workflowRow]];
+    await updateWorkflow(
+      dbMock as never,
+      TENANT_ID,
+      WORKFLOW_ID,
+      GLOBAL_ADMIN_CALLER,
+      { adminOnly: true },
+    );
+    const call = updateCalls.find((c) => c.table === "workflows_mock");
+    expect(call?.setVals.adminOnly).toBe(true);
   });
 });
 

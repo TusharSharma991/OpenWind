@@ -29,7 +29,7 @@ import {
 export const teamMemberViewHandler = factory.createHandlers(
   requireAuth(),
   async (c) => {
-    const { tenantId, userId, orgId } = c.get("auth");
+    const { tenantId, userId, orgId, roles } = c.get("auth");
     const targetUserId = c.req.param("userId");
     const now = new Date();
     const bearerToken = c.req.header("Authorization")?.slice(7) ?? "";
@@ -57,6 +57,7 @@ export const teamMemberViewHandler = factory.createHandlers(
         getUserById(targetUserId, bearerToken),
         resolveUserScopedEntityIds(tenantId, [targetUserId], {
           limit: DASHBOARD_SCOPE_LIMIT,
+          isGlobalAdmin: roles.includes("admin"),
         }),
       ]);
 

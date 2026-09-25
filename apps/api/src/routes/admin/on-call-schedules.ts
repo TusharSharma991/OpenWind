@@ -12,6 +12,17 @@
  * this schema has no separate "deactivated user" signal beyond that, so
  * R6's "referenced_user_deleted" distinction is approximated as "no
  * tenant_users row found", not a true deactivation flag).
+ *
+ * tenant_users only gets a row for a user once they've actually logged into
+ * OpenWind (packages/auth/src/middleware.ts upserts it from the JWT on every
+ * request). GET /admin/members -- the picker this route's writes are
+ * validated against -- sources from the live Zitadel org instead (same data
+ * GET /users uses), so it can legitimately list an agent/admin who's never
+ * logged in here. Without a fallback, that user is selectable but every
+ * write referencing them 422s. validateScheduleRefs below falls back to the
+ * same live Zitadel org+role check the picker uses, and upserts a
+ * tenant_users row on a match so later lookups don't need to re-hit
+ * Zitadel.
  */
 
 import { Hono } from "hono";
@@ -19,7 +30,12 @@ import { zValidator } from "../../lib/validator.js";
 import { z } from "zod";
 import { and, eq, gt, or, inArray, isNull, lte, gte, asc } from "drizzle-orm";
 import type { AuthContext } from "@platform/auth";
-import { requireAuth, requireRole } from "@platform/auth";
+import {
+  requireAuth,
+  requireRole,
+  listOrgUsers,
+  listUserRolesByUserId,
+} from "@platform/auth";
 import {
   db,
   withTenantContext,
@@ -100,9 +116,21 @@ function isExclusionViolation(err: unknown): boolean {
 // explicit tenantId filters already applied (PR #583-series review: an
 // app-layer-only check with no RLS backstop is one accidental edit away
 // from a cross-tenant leak).
+// Must match GET /admin/members' role filter (apps/api/src/routes/admin/
+// members.ts) -- that route is this one's picker, so a role accepted there
+// has to be accepted here too, or a pickable user 422s on save (as
+// happened when members.ts was broadened to include "user" without this
+// list being updated to match). See members.ts's header comment for why
+// "user" is included here despite normally being the customer role.
+const ONCALL_ASSIGNABLE_ROLES = ["agent", "admin", "user"];
+
+const INVALID_REFERENCE_MESSAGE =
+  "Referenced resource does not exist or is not accessible";
+
 async function validateScheduleRefs(
   tx: DbOrTx,
   tenantId: string,
+  orgId: string | undefined,
   input: {
     teamId?: string | undefined;
     primaryUserId?: string | undefined;
@@ -157,13 +185,54 @@ async function validateScheduleRefs(
       undefined, // tenant_users has no soft-delete column
       tenantId,
     );
-    const userErrors = await validateCrossTenantRefs(userRefs, userLookup);
-    errors.push(
-      ...userErrors.map((e: FieldError) => ({
-        field: e.field,
-        message: e.message,
-      })),
-    );
+    const refIds = [...new Set(userRefs.map((r) => r.refId))];
+    const validIds = await userLookup(refIds);
+    const missingIds = refIds.filter((id) => !validIds.has(id));
+
+    if (missingIds.length > 0 && orgId) {
+      const [orgUsers, rolesByUserId] = await Promise.all([
+        listOrgUsers(orgId),
+        listUserRolesByUserId(orgId),
+      ]);
+      const orgUsersById = new Map(orgUsers.map((u) => [u.userId, u]));
+
+      for (const id of missingIds) {
+        const orgUser = orgUsersById.get(id);
+        const roles = rolesByUserId.get(id) ?? [];
+        if (
+          !orgUser ||
+          !roles.some((r) => ONCALL_ASSIGNABLE_ROLES.includes(r))
+        ) {
+          continue;
+        }
+        validIds.add(id);
+        // Same self-sync upsert packages/auth/src/middleware.ts does on
+        // login, so a user we've just confirmed exists in the org doesn't
+        // require re-hitting Zitadel on the next validation or display-name
+        // lookup (at most 3 rows per request -- not worth batching).
+        await tx
+          .insert(tenantUsers)
+          .values({
+            tenantId,
+            userId: id,
+            email: orgUser.email || null,
+            displayName: orgUser.displayName || null,
+          })
+          .onConflictDoUpdate({
+            target: [tenantUsers.tenantId, tenantUsers.userId],
+            set: {
+              email: orgUser.email || null,
+              displayName: orgUser.displayName || null,
+            },
+          });
+      }
+    }
+
+    for (const { fieldName, refId } of userRefs) {
+      if (!validIds.has(refId)) {
+        errors.push({ field: fieldName, message: INVALID_REFERENCE_MESSAGE });
+      }
+    }
   }
 
   return errors;
@@ -411,7 +480,12 @@ router.post(
 
     try {
       const result = await withTenantContext(auth.tenantId, async (tx) => {
-        const refErrors = await validateScheduleRefs(tx, auth.tenantId, input);
+        const refErrors = await validateScheduleRefs(
+          tx,
+          auth.tenantId,
+          auth.orgId,
+          input,
+        );
         if (refErrors.length > 0) {
           return { status: "invalid" as const, refErrors };
         }
@@ -500,7 +574,12 @@ router.patch(
 
     try {
       const result = await withTenantContext(auth.tenantId, async (tx) => {
-        const refErrors = await validateScheduleRefs(tx, auth.tenantId, input);
+        const refErrors = await validateScheduleRefs(
+          tx,
+          auth.tenantId,
+          auth.orgId,
+          input,
+        );
         if (refErrors.length > 0) {
           return { status: "invalid" as const, refErrors };
         }

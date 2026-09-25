@@ -186,19 +186,22 @@ export async function executeDispatchSeverityNotificationAction(
       return; // severity didn't change in this event
     }
     severity = severityChange.new;
-  } else if (event.eventType === "entity.created") {
-    const created = event.fields["severity"];
-    if (typeof created !== "string" || !created) return;
-    severity = created;
-  } else {
+  } else if (event.eventType !== "entity.created") {
     return;
   }
+  // entity.created: severity is resolved below from the persisted column,
+  // not event.fields -- severity is a dedicated entity_instances column /
+  // createEntity top-level param (packages/entity-engine/src/engine.ts),
+  // never part of the fields JSONB payload the create event carries, for
+  // any creation path (manual or scheduled). Checking event.fields["severity"]
+  // here always missed it.
 
   const [instance] = await db
     .select({
       assignedTo: entityInstances.assignedTo,
       workflowId: entityInstances.workflowId,
       fields: entityInstances.fields,
+      severity: entityInstances.severity,
     })
     .from(entityInstances)
     .where(
@@ -210,6 +213,12 @@ export async function executeDispatchSeverityNotificationAction(
     )
     .limit(1);
   if (!instance) return;
+
+  if (event.eventType === "entity.created") {
+    if (!instance.severity) return;
+    severity = instance.severity;
+  }
+  if (!severity) return;
 
   const fields = instance.fields as Record<string, unknown>;
   const teamId =

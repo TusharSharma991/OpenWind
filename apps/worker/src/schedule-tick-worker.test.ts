@@ -421,6 +421,41 @@ describe("schedulerTick", () => {
       );
     });
 
+    // Bug this covers: severity used to be merged into `fields`, which
+    // entity-engine's per-entity-type field schema silently strips unless
+    // that type happens to declare a custom field literally named
+    // "severity" -- it must go through createEntity's dedicated top-level
+    // `severity` param instead (same as apps/api/src/routes/entities/
+    // create.ts:287), so it lands regardless of the target entity type's
+    // declared custom fields.
+    it("passes template.severity as createEntity's top-level severity param, not inside fields", async () => {
+      const rule = makeRule({
+        template: {
+          title: "Severity check",
+          teamId: "22222222-2222-2222-2222-222222222222",
+          due_days: 1,
+          remark: "r",
+          severity: "critical",
+        },
+      });
+      dueRules = [rule];
+      claimRows = [rule];
+      mockCreateEntity.mockResolvedValue({
+        id: "ticket-severity",
+        workflowId: "wf-1",
+        currentState: "open",
+      });
+
+      await schedulerTick();
+
+      const createArgs = mockCreateEntity.mock.calls[0]?.[2] as {
+        severity?: string;
+        fields: Record<string, unknown>;
+      };
+      expect(createArgs.severity).toBe("critical");
+      expect(createArgs.fields["severity"]).toBeUndefined();
+    });
+
     it("assignedTo mode passes assignedTo directly and writes no team_id field", async () => {
       const rule = makeRule({
         template: {

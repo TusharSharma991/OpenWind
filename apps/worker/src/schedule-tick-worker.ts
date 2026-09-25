@@ -284,6 +284,15 @@ async function fireRule(
           assignedTo: rendered.assignedTo,
           dueDate,
           createdBy: rule.createdBy,
+          // severity is a dedicated entity_instances column / top-level
+          // createEntity param (same as apps/api/src/routes/entities/
+          // create.ts:287), not a custom field -- passing it inside `fields`
+          // instead (as this call used to) silently dropped it for any
+          // entity type that doesn't ALSO happen to declare a custom field
+          // literally named "severity", since entity-engine's per-type
+          // field schema (engine.ts's schema.safeParse(input.fields))
+          // strips unrecognized keys with no error.
+          severity: rendered.severity,
           fields: {
             priority: DEFAULT_SCHEDULED_TICKET_PRIORITY,
             category: DEFAULT_SCHEDULED_TICKET_CATEGORY,
@@ -292,7 +301,6 @@ async function fireRule(
             ...(rendered.description
               ? { description: rendered.description }
               : {}),
-            ...(rendered.severity ? { severity: rendered.severity } : {}),
             ...(rendered.teamId ? { team_id: rendered.teamId } : {}),
             ...(rendered.service_id ? { service_id: rendered.service_id } : {}),
           },

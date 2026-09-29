@@ -1,15 +1,10 @@
 -- analytics: excluded (no new table — CHECK constraint update only)
 --
--- ADR-012 Phase F follow-up: the third-party access-logs screen only ever
--- had write actions to show (comments/children/attachments/transitions/
--- ticket-create) — every READ endpoint (GET ticket detail, GET ticket list,
--- GET workflows, GET workflow fields, GET attachment download) wrote no
--- admin_audit_log row at all, allowed or denied. A caller who only ever
--- reads ticket data leaves zero trail. Adds 6 new actions, mirroring the
--- existing allowed/denied-pair convention (see 0081's comment.created/
--- comment.access_denied) — extended in the same commit as @platform/audit's
--- AuditAction TS union and outcome.ts's exhaustiveness map, per the Phase C
--- B1 incident's self-imposed rule.
+-- docs/specs/oncall-routing.md T36 -- adds the 2 label.* action strings
+-- used by label assignment/removal (R1c): label.assigned, label.removed.
+-- Extended in the same commit as @platform/audit's AuditAction TS union
+-- and outcome.ts/request-kind.ts's exhaustiveness maps, per the Phase C
+-- B1 incident's self-imposed rule (see migration 0091's comment).
 --
 -- Rollback (undoes only what THIS migration added):
 --   ALTER TABLE admin_audit_log DROP CONSTRAINT audit_log_action_check;
@@ -25,7 +20,13 @@
 --       'transition.executed', 'transition.access_denied',
 --       'comment.created', 'comment.access_denied',
 --       'child.created', 'child.access_denied',
---       'attachment.referenced', 'attachment.reference_denied'
+--       'attachment.referenced', 'attachment.reference_denied',
+--       'ticket.viewed', 'ticket.view_denied',
+--       'ticket.listed',
+--       'workflow.listed',
+--       'workflow_fields.listed',
+--       'attachment.downloaded', 'attachment.download_denied',
+--       'oncall.auto_assigned', 'oncall.no_schedule', 'oncall.skipped_explicit_assignee'
 --     ));
 
 ALTER TABLE admin_audit_log DROP CONSTRAINT audit_log_action_check;
@@ -47,5 +48,7 @@ ALTER TABLE admin_audit_log
     'ticket.listed',
     'workflow.listed',
     'workflow_fields.listed',
-    'attachment.downloaded', 'attachment.download_denied'
+    'attachment.downloaded', 'attachment.download_denied',
+    'oncall.auto_assigned', 'oncall.no_schedule', 'oncall.skipped_explicit_assignee',
+    'label.assigned', 'label.removed'
   ));

@@ -1,5 +1,5 @@
 -- ============================================================
--- Migration: 0099_notification_policies_table
+-- Migration: 0103_notification_policies_table
 -- docs/specs/oncall-routing.md T21, R14-R15 -- 3E on-call routing, Phase 1
 -- ============================================================
 --
@@ -27,7 +27,7 @@
 -- team_id/workflow_type_id have NO foreign key constraints -- app-layer
 -- cross-tenant validation only (R1d/T44, packages/teams' shared
 -- validateCrossTenantRefs helper), matching services.team_id's treatment
--- (migration 0093, PR #583 review blocker 1) for consistency across this
+-- (migration 0097, PR #583 review blocker 1) for consistency across this
 -- feature. docs/oncall-routing-design.md's own SQL kept a FK on team_id
 -- here (inconsistent with services.team_id, which the design doc itself
 -- says should have none) -- deliberately not following that inconsistency;

@@ -1,5 +1,5 @@
 -- ============================================================
--- Migration: 0092_teams_table
+-- Migration: 0096_teams_table
 -- docs/specs/oncall-routing.md T1, R3 -- 3E on-call routing, Phase 1
 -- ============================================================
 --
@@ -40,7 +40,7 @@ CREATE UNIQUE INDEX "teams_tenant_name_unique"
 
 ALTER TABLE "teams" ENABLE ROW LEVEL SECURITY;
 
--- nullif-guarded per the fix in migration 0090 -- current_setting(...) can
+-- nullif-guarded per the fix in migration 0092 -- current_setting(...) can
 -- return '' (not NULL) on a connection where app.tenant_id was previously
 -- set and later reset; bare ''::uuid casts throw instead of filtering.
 CREATE POLICY "tenant_read" ON "teams"

@@ -1,5 +1,5 @@
 -- ============================================================
--- Migration: 0097_ticket_labels_table
+-- Migration: 0101_ticket_labels_table
 -- docs/specs/oncall-routing.md T35, R1c -- 3E on-call routing, Phase 1
 -- ============================================================
 --
@@ -17,7 +17,7 @@
 -- surrogate-id + soft-delete shape entity_relations uses, per the spec's
 -- explicit invariant (§V): "ticket_labels rows are hard-deleted only on
 -- explicit label removal" -- assignment HISTORY is preserved via the audit
--- log's label.removed entries (see migration 0098), not via a deleted_at
+-- log's label.removed entries (see migration 0102), not via a deleted_at
 -- column on this table itself. tenant_id is denormalized (not derived via
 -- a join to entity_instances) so RLS can filter directly on this table,
 -- matching the same pattern the spec calls out for this exact reason.
@@ -25,7 +25,7 @@
 -- label_id has NO foreign key to labels(id) -- cross-tenant ownership is
 -- validated at the application layer (R1d/T44, packages/teams' shared
 -- validateCrossTenantRefs helper), same reasoning as services.team_id
--- (migration 0093) and on_call_schedules' user columns (migration 0094).
+-- (migration 0097) and on_call_schedules' user columns (migration 0098).
 -- ticket_instance_id DOES have a FK to entity_instances(id) -- that table
 -- IS the tenant-scoped entity store the entity engine already guards via
 -- its own existing validation path, unlike labels/teams/services.--

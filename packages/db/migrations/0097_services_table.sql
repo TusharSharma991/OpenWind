@@ -1,5 +1,5 @@
 -- ============================================================
--- Migration: 0093_services_table
+-- Migration: 0097_services_table
 -- docs/specs/oncall-routing.md T2, R4 -- 3E on-call routing, Phase 1
 -- ============================================================
 --
@@ -15,7 +15,7 @@
 -- analytics: included (id, tenant_id, name, team_id, created_at)
 --
 -- created_by NOT NULL (PR #583 review, G1) -- same rationale as
--- teams.created_by, see migration 0092's comment.
+-- teams.created_by, see migration 0096's comment.
 --
 -- team_id has NO foreign key constraint to teams(id) -- cross-tenant
 -- ownership of team_id is validated at the application layer (R1d/T44,
@@ -28,7 +28,7 @@
 -- app-layer helper is fixed to exclude soft-deleted rows (see the
 -- companion fix in packages/teams/src/cross-tenant-ref-validator.ts) --
 -- the app-layer check is the SOLE guard here, deliberately, matching
--- on_call_schedules.team_id's identical no-FK treatment (migration 0094).
+-- on_call_schedules.team_id's identical no-FK treatment (migration 0098).
 --
 -- (PR #583 review, blocker 1: an earlier revision of this migration had
 -- `REFERENCES teams(id) ON DELETE RESTRICT` on this column, contradicting

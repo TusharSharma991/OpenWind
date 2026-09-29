@@ -1,5 +1,5 @@
 -- ============================================================
--- Migration: 0094_on_call_schedules_table
+-- Migration: 0098_on_call_schedules_table
 -- docs/specs/oncall-routing.md T3, R5-R7 -- 3E on-call routing, Phase 1
 -- ============================================================
 --
@@ -34,7 +34,7 @@
 -- users(id) table in this schema).
 --
 -- team_id has NO foreign key to teams(id) either, for the same reason as
--- services.team_id in migration 0093 -- cross-tenant ownership is an
+-- services.team_id in migration 0097 -- cross-tenant ownership is an
 -- app-layer check (R1d/T44), not a DB constraint.
 
 CREATE EXTENSION IF NOT EXISTS btree_gist;

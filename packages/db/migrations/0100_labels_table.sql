@@ -1,5 +1,5 @@
 -- ============================================================
--- Migration: 0096_labels_table
+-- Migration: 0100_labels_table
 -- docs/specs/oncall-routing.md T34, R1b -- 3E on-call routing, Phase 1
 -- ============================================================
 --

@@ -1,5 +1,5 @@
 -- ============================================================
--- Migration: 0102_schedule_executions_table
+-- Migration: 0106_schedule_executions_table
 -- docs/specs/temporal-scheduler.md T2, R5-R9 -- 3F temporal scheduler, Phase 1
 -- ============================================================
 --

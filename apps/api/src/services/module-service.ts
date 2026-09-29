@@ -31,124 +31,18 @@ export function getWorkspaceRoot(): string {
 
 export class ModuleService {
   /**
-   * seedRegistry - Populates default standard modules into the database
-   */
-  static async seedRegistry(): Promise<void> {
-    // ADR-005: category classifies helpdesk/crm/hrms/reimbursements/projects/
-    // invoicing/procurement as "core" (auto-installed by provisionTenant) and
-    // tender as "optional" (manual install only).
-    const standardModules = [
-      {
-        slug: "helpdesk",
-        name: "Helpdesk",
-        description:
-          "Support ticket management with priority, SLA, and category tracking",
-        version: "0.0.1",
-        isSystem: false,
-        minPlan: "standard",
-        category: "core" as const,
-      },
-      {
-        slug: "crm",
-        name: "CRM",
-        description: "Sales pipeline and deal tracking from lead to close",
-        version: "0.0.1",
-        isSystem: false,
-        minPlan: "standard",
-        category: "core" as const,
-      },
-      {
-        slug: "hrms",
-        name: "HRMS",
-        description: "Leave request and employee workflow management",
-        version: "0.0.1",
-        isSystem: false,
-        minPlan: "standard",
-        category: "core" as const,
-      },
-      {
-        slug: "reimbursements",
-        name: "Reimbursements",
-        description: "Expense claim submission, approval, and payment tracking",
-        version: "0.0.1",
-        isSystem: false,
-        minPlan: "standard",
-        category: "core" as const,
-      },
-      {
-        slug: "projects",
-        name: "Projects",
-        description:
-          "Task and project tracking with backlog, sprint, and review stages",
-        version: "0.0.1",
-        isSystem: false,
-        minPlan: "standard",
-        category: "core" as const,
-      },
-      {
-        slug: "invoicing",
-        name: "Invoicing",
-        description:
-          "Invoice lifecycle from draft through sent, viewed, to paid",
-        version: "0.0.1",
-        isSystem: false,
-        minPlan: "standard",
-        category: "core" as const,
-      },
-      {
-        slug: "procurement",
-        name: "Procurement",
-        description:
-          "Purchase order requests, approvals, and delivery tracking",
-        version: "0.0.1",
-        isSystem: false,
-        minPlan: "standard",
-        category: "core" as const,
-      },
-      {
-        slug: "tender",
-        name: "Tender Management",
-        description:
-          "Tender lifecycle from draft through BOQ, isolated costing review, and submission",
-        version: "0.0.1",
-        isSystem: false,
-        minPlan: "standard",
-        category: "optional" as const,
-      },
-    ];
-
-    logger.info({}, "Seeding modules registry...");
-    for (const mod of standardModules) {
-      await db
-        .insert(modules)
-        .values({
-          slug: mod.slug,
-          name: mod.name,
-          description: mod.description,
-          version: mod.version,
-          isSystem: mod.isSystem,
-          minPlan: mod.minPlan,
-          category: mod.category,
-        })
-        .onConflictDoUpdate({
-          target: modules.slug,
-          set: {
-            name: mod.name,
-            description: mod.description,
-            version: mod.version,
-            isSystem: mod.isSystem,
-            minPlan: mod.minPlan,
-            category: mod.category,
-            updatedAt: new Date(),
-          },
-        });
-    }
-    logger.info({}, "Modules registry seeded.");
-  }
-
-  /**
    * listModules - Returns all registered modules with installation status for a tenant.
-   * Auto-seeds the registry on first call or after a reset so templates always appear.
+   *
+   * Does NOT auto-seed an empty registry -- migration 0066 revoked app_user's
+   * INSERT/UPDATE on `modules` (issue #404, "read-only catalog"), so an
+   * attempt from this pooled app_user connection would just fail with
+   * "permission denied for table modules" (this is what happened here and
+   * at API startup for a long time -- non-fatal only because the table
+   * already had rows from before that grant was revoked). The catalog is
+   * now seeded by migration 0116_seed_modules_registry.sql, run as
+   * migration_user like any other DDL/catalog change -- an empty result
+   * here on a real deployment means that migration hasn't run yet, not
+   * something this request can fix by writing around the grant.
    */
   static async listModules(
     tenantId: string,
@@ -160,12 +54,12 @@ export class ModuleService {
       .where(eq(tenants.id, tenantId))
       .limit(1);
 
-    let allModules = await db.select().from(modules);
-
-    // Auto-seed if the registry is empty (first boot or after a data reset)
+    const allModules = await db.select().from(modules);
     if (allModules.length === 0) {
-      await ModuleService.seedRegistry();
-      allModules = await db.select().from(modules);
+      logger.warn(
+        {},
+        "listModules: modules registry is empty -- has migration 0116_seed_modules_registry.sql run?",
+      );
     }
     const installedList = (
       tenant?.config as Record<string, unknown> | undefined

@@ -108,17 +108,25 @@ router.post(
   },
 );
 
-// Seed the module registry (admin only) — idempotent, safe to call multiple times
+// Reports the current module registry (admin only). Previously attempted to
+// write the standard-modules catalog on every call via ModuleService's now-
+// removed seedRegistry() -- that always failed with "permission denied for
+// table modules" (migration 0066 revoked app_user's write access to this
+// read-only catalog, issue #404). The catalog is now seeded by migration
+// 0116_seed_modules_registry.sql (run as migration_user), so there is
+// nothing left for this endpoint to write; it just confirms the registry is
+// populated. Route kept (not removed) since it's a stable, documented admin
+// API surface -- callers checking `data.seeded > 0` after a fresh deploy
+// still get a meaningful answer.
 router.post("/seed", requireAuth(db), requireRole("admin"), async (c) => {
   const auth = c.get("auth");
   try {
-    await ModuleService.seedRegistry();
     const list = await ModuleService.listModules(auth.tenantId, true);
-    return c.json({ data: { seeded: list.length } }, 201);
+    return c.json({ data: { seeded: list.length } }, 200);
   } catch (err: unknown) {
-    logger.error({ err }, "seedRegistry failed");
+    logger.error({ err }, "listModules failed");
     return c.json(
-      { error: "SEED_FAILED", message: "Failed to seed module registry" },
+      { error: "SEED_FAILED", message: "Failed to read module registry" },
       500,
     );
   }

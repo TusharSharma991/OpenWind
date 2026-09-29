@@ -806,6 +806,13 @@
       "when": 1789033300000,
       "tag": "0115_schedule_sweeper_entity_instance_tags_grant",
       "breakpoints": false
+    },
+    {
+      "idx": 115,
+      "version": "7",
+      "when": 1790669171582,
+      "tag": "0116_seed_modules_registry",
+      "breakpoints": false
     }
   ]
 }

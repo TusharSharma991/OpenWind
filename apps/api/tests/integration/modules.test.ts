@@ -70,8 +70,10 @@ describe("Module System Integration Tests", () => {
     // 2. Instantiate Hono app
     app = createApp();
 
-    // 3. Populate modules registry
-    await ModuleService.seedRegistry();
+    // Modules registry is seeded by migration 0116_seed_modules_registry.sql
+    // (run as part of this test DB's own fresh-schema migration pass, per
+    // testing-conventions.md) -- no runtime seed call needed or possible
+    // (app_user has no write access to this read-only catalog, issue #404).
   });
 
   afterAll(async () => {
@@ -319,7 +321,8 @@ describe("standard module seed SQL idempotency (#161 regression)", () => {
         })
         .onConflictDoNothing();
     }
-    await ModuleService.seedRegistry();
+    // Modules registry is seeded by migration 0116_seed_modules_registry.sql
+    // -- see the earlier beforeAll's identical comment.
   });
 
   afterAll(async () => {
@@ -424,7 +427,8 @@ describe("installModule — workflowName rename (issue #170)", () => {
         })
         .onConflictDoNothing();
     }
-    await ModuleService.seedRegistry();
+    // Modules registry is seeded by migration 0116_seed_modules_registry.sql
+    // -- see the first beforeAll's identical comment.
   });
 
   afterAll(async () => {

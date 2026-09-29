@@ -35,7 +35,10 @@ describe("ModuleService.installCoreModules", () => {
         config: {},
       })
       .onConflictDoNothing();
-    await ModuleService.seedRegistry();
+    // Modules registry is seeded by migration 0116_seed_modules_registry.sql
+    // (run as part of this test DB's own fresh-schema migration pass, per
+    // testing-conventions.md) -- no runtime seed call needed or possible
+    // (app_user has no write access to this read-only catalog, issue #404).
   });
 
   afterAll(async () => {

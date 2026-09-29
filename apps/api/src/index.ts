@@ -9,7 +9,6 @@ import {
   stopTenantStatusInvalidationSubscriber,
 } from "@platform/auth";
 import { createApp } from "./app.js";
-import { ModuleService } from "./services/module-service.js";
 import {
   attachNotificationWebSocket,
   stopNotificationWebSocket,
@@ -23,9 +22,6 @@ logger.info({ port }, "API server starting");
 const server = serve({ fetch: app.fetch, port }, () => {
   logger.info({ port }, "API server listening");
   startTenantStatusInvalidationSubscriber();
-  ModuleService.seedRegistry().catch((err: unknown) => {
-    logger.error({ err }, "Failed to seed modules registry on startup");
-  });
 });
 
 attachNotificationWebSocket(server);

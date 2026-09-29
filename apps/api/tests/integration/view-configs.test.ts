@@ -4,7 +4,6 @@ import type { Context, Next } from "hono";
 import type { AuthContext } from "@platform/auth";
 import { eq } from "drizzle-orm";
 import { db, tenants, viewConfigs } from "@platform/db";
-import { ModuleService } from "../../src/services/module-service.js";
 import { createApp } from "../../src/app.js";
 
 const TEST_TENANT_ID = "00000000-0000-0000-0000-000000000088";
@@ -58,7 +57,10 @@ describe("View Configs Integration Tests", () => {
       .onConflictDoNothing();
 
     app = createApp();
-    await ModuleService.seedRegistry();
+    // Modules registry is seeded by migration 0116_seed_modules_registry.sql
+    // (run as part of this test DB's own fresh-schema migration pass, per
+    // testing-conventions.md) -- no runtime seed call needed or possible
+    // (app_user has no write access to this read-only catalog, issue #404).
   });
 
   afterAll(async () => {

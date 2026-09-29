@@ -1,5 +1,5 @@
 -- ============================================================
--- Migration: 0085_tenant_usage_daily
+-- Migration: 0095_tenant_usage_daily
 -- ADR-015 Decision #3, issue #505 -- tenant_usage_daily metering
 -- ============================================================
 --

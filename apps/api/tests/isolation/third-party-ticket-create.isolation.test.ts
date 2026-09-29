@@ -614,13 +614,13 @@ describe("POST /api/v1/tickets — assignedTo resolves username or userId to the
         .from(workflowEvents)
         .where(eq(workflowEvents.instanceId, body.data.id)),
     );
-    const systemReply = events.find(
-      (e) =>
-        e.actorId === "system" &&
-        (e.metadata as { text?: string } | null)?.text?.includes(
-          "nobody-with-this-username",
-        ),
-    );
+    // Deliberately does NOT assert the metadata.text includes the caller-
+    // supplied assignedTo value ("nobody-with-this-username") -- PR #576
+    // review (PrabhuVijit, F2) removed that echo on purpose (see
+    // post-system-comment.ts's call site in tickets.ts): unvalidated,
+    // unbounded, third-party-controlled input must never render inside a
+    // System-attributed comment as if the platform itself wrote it.
+    const systemReply = events.find((e) => e.actorId === "system");
     expect(systemReply).toBeTruthy();
     expect(
       (systemReply?.metadata as { actorName?: string } | null)?.actorName,

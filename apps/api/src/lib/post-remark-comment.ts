@@ -17,6 +17,14 @@ import { workflowEvents, outboxEvents } from "@platform/db";
  * it has committed, and swallow failures at the call site (logged, not
  * thrown) -- by the time this runs the ticket already exists, so a failure
  * here must never appear to the caller as a failed ticket creation.
+ *
+ * Returns the created comment's workflow_events id (or `undefined` if the
+ * insert's `.returning()` came back empty) so a caller that also needs to
+ * post an assignedTo-unresolved system notice (post-system-comment.ts) can
+ * thread it through as `replyToEventId` -- this remark is always the
+ * ticket's first comment on every route that calls this, so a reply to it
+ * is always possible, unlike the "no comment exists yet" case that
+ * function's own doc comment describes.
  */
 export async function postRemarkComment(
   tx: DbOrTx,
@@ -29,7 +37,7 @@ export async function postRemarkComment(
     actorName?: string | undefined;
     text: string;
   },
-): Promise<void> {
+): Promise<string | undefined> {
   const {
     tenantId,
     instanceId,
@@ -61,7 +69,7 @@ export async function postRemarkComment(
     })
     .returning();
 
-  if (!event) return;
+  if (!event) return undefined;
 
   await tx.insert(outboxEvents).values({
     tenantId,
@@ -76,4 +84,6 @@ export async function postRemarkComment(
       commentId: event.id,
     },
   });
+
+  return event.id;
 }

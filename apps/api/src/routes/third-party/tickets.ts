@@ -13,7 +13,10 @@ import { requireTicketScope } from "./require-ticket-scope.js";
 import { forwardResponseHeaders } from "./utils.js";
 import { hasEntityAccess } from "../../lib/entity-access.js";
 import { handleEntityError } from "../../lib/handle-entity-error.js";
-import { validateFieldsPayload } from "./validate-fields-payload.js";
+import {
+  validateFieldsPayload,
+  FORBIDDEN_CHAR_PATTERN,
+} from "./validate-fields-payload.js";
 import {
   referenceAttachments,
   AttachmentReferenceError,
@@ -163,9 +166,23 @@ const CreateThirdPartyTicketSchema = z.object({
   // PR #576 review (PrabhuVijit, F2/M4) -- bounded + trimmed so an
   // unbounded-length or whitespace-padded value never reaches
   // resolveOrgMemberUserId or (on the unresolved path) the log line.
-  assignedTo: z.string().trim().min(1).max(256),
+  assignedTo: z
+    .string()
+    .trim()
+    .min(1)
+    .max(256)
+    .refine((v) => !FORBIDDEN_CHAR_PATTERN.test(v), {
+      message: "assignedTo contains a null byte or control character",
+    }),
   dueDate: z.string().datetime(),
-  remark: z.string().trim().min(1).max(4000),
+  remark: z
+    .string()
+    .trim()
+    .min(1)
+    .max(4000)
+    .refine((v) => !FORBIDDEN_CHAR_PATTERN.test(v), {
+      message: "remark contains a null byte or control character",
+    }),
   // Any `state`/`currentState` field the caller sends is intentionally NOT
   // part of this schema — Zod's default "strip unknown keys" behavior drops
   // it silently, with no rejection (spec R6: force-to-initial-state
@@ -364,9 +381,11 @@ export const createThirdPartyTicketHandler = factory.createHandlers(
           // by this point) -- a failure here must never surface as a failed
           // ticket creation. See post-remark-comment.ts. Posted before the
           // assignedTo-unresolved system notice below so the remark is the
-          // ticket's genuine first comment.
+          // ticket's genuine first comment, and its id is captured so that
+          // notice can reply to it (see below).
+          let remarkEventId: string | undefined;
           try {
-            await withTenantContext(tenantId, (tx) =>
+            remarkEventId = await withTenantContext(tenantId, (tx) =>
               postRemarkComment(tx, {
                 tenantId,
                 instanceId: instance.created.id,
@@ -396,9 +415,12 @@ export const createThirdPartyTicketHandler = factory.createHandlers(
           // best-effort. See resolveOrgMemberUserId call above and
           // post-system-comment.ts -- notify the creator that assignedTo
           // didn't resolve via a system comment, never via the API response
-          // itself. Top-level (no replyTo) -- could reply to the remark
-          // comment just posted above, but that coupling is deliberately
-          // not made here; keeping the two best-effort writes independent.
+          // itself. Replies to the remark comment just posted above (remark
+          // is mandatory on this route, so it always exists by this point)
+          // so the notification rides the existing comment.replied path
+          // (see add-comment.ts) rather than the top-level comment.mentioned
+          // one -- the recipient sees it as a reply on the ticket they just
+          // created, not an unrelated mention.
           if (assignedToUnresolved) {
             try {
               await withTenantContext(tenantId, (tx) =>
@@ -407,6 +429,7 @@ export const createThirdPartyTicketHandler = factory.createHandlers(
                   instanceId: instance.created.id,
                   workflowId: instance.workflowId,
                   currentState: instance.created.currentState,
+                  replyToEventId: remarkEventId,
                   // PR #576 review (PrabhuVijit, F2) -- deliberately does NOT
                   // echo the caller-supplied assignedTo value back into a
                   // System-attributed record. That value is unvalidated,

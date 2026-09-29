@@ -1,7 +1,12 @@
 import { z } from "zod";
 import { eq, and, isNull } from "drizzle-orm";
 import { requireAuth, requireActingPerson } from "@platform/auth";
-import { withTenantContext, db, entityInstances } from "@platform/db";
+import {
+  withTenantContext,
+  db,
+  entityInstances,
+  workflows,
+} from "@platform/db";
 import { createChildRelation, EntityError } from "@platform/entity-engine";
 import { zValidator } from "../../lib/validator.js";
 import { factory } from "./factory.js";
@@ -9,7 +14,10 @@ import { requireTicketScope } from "./require-ticket-scope.js";
 import { forwardResponseHeaders } from "./utils.js";
 import { hasEntityAccess } from "../../lib/entity-access.js";
 import { handleEntityError } from "../../lib/handle-entity-error.js";
-import { validateFieldsPayload } from "./validate-fields-payload.js";
+import {
+  validateFieldsPayload,
+  FORBIDDEN_CHAR_PATTERN,
+} from "./validate-fields-payload.js";
 import { notFound } from "./not-found.js";
 import { withIdempotency, isIdempotencyStatus } from "../../lib/idempotency.js";
 import { writeAuditEntry } from "@platform/audit";
@@ -34,9 +42,23 @@ const CreateThirdPartyChildSchema = z.object({
   //
   // PR #576 review (PrabhuVijit, F2/M4) -- bounded + trimmed, same rationale
   // as tickets.ts's identical schema field.
-  assignedTo: z.string().trim().min(1).max(256),
+  assignedTo: z
+    .string()
+    .trim()
+    .min(1)
+    .max(256)
+    .refine((v) => !FORBIDDEN_CHAR_PATTERN.test(v), {
+      message: "assignedTo contains a null byte or control character",
+    }),
   dueDate: z.string().datetime(),
-  remark: z.string().trim().min(1).max(4000),
+  remark: z
+    .string()
+    .trim()
+    .min(1)
+    .max(4000)
+    .refine((v) => !FORBIDDEN_CHAR_PATTERN.test(v), {
+      message: "remark contains a null byte or control character",
+    }),
   // No state/currentState field, same rationale as Phase B's ticket-create
   // schema (spec R6 pattern) — a sub-ticket is always created into its own
   // "open" child_status, never a caller-supplied value.
@@ -128,6 +150,27 @@ export const createThirdPartyChildHandler = factory.createHandlers(
 
     if (!parent) {
       return notFound(c);
+    }
+
+    // Admin-only workflows (workflows.adminOnly) are hidden from every
+    // third-party caller unconditionally -- there is no isGlobalAdmin
+    // concept for an acting person on this API surface (see
+    // third-party-workflows-list.isolation.test.ts's identical assertion
+    // for GET /workflows), so unlike entities/get.ts's internal-API check
+    // this never needs a role comparison, only the flag itself. This route
+    // has no getWorkflow call elsewhere to catch this via a shared choke
+    // point, so it needs its own explicit check here.
+    if (parent.workflowId) {
+      const [parentWorkflow] = await withTenantContext(tenantId, (tx) =>
+        tx
+          .select({ adminOnly: workflows.adminOnly })
+          .from(workflows)
+          .where(eq(workflows.id, parent.workflowId as string))
+          .limit(1),
+      );
+      if (parentWorkflow?.adminOnly) {
+        return notFound(c);
+      }
     }
 
     const allowed = await withTenantContext(tenantId, (tx) =>
@@ -263,10 +306,13 @@ export const createThirdPartyChildHandler = factory.createHandlers(
 
           // Best-effort, outside the create transaction (already committed
           // by this point) -- a failure here must never surface as a failed
-          // sub-ticket creation. See post-remark-comment.ts.
+          // sub-ticket creation. See post-remark-comment.ts. Its id is
+          // captured so the assignedTo-unresolved notice below can reply to
+          // it (see that block's comment).
+          let remarkEventId: string | undefined;
           if (result.instance.workflowId) {
             try {
-              await withTenantContext(tenantId, (tx) =>
+              remarkEventId = await withTenantContext(tenantId, (tx) =>
                 postRemarkComment(tx, {
                   tenantId,
                   instanceId: result.instance.id,
@@ -303,9 +349,11 @@ export const createThirdPartyChildHandler = factory.createHandlers(
           // creation too. See resolveOrgMemberUserId call above and
           // post-system-comment.ts -- notify the creator that assignedTo
           // didn't resolve via a system comment, never via the API response
-          // itself. Top-level (no replyTo) -- could reply to the remark
-          // comment just posted above, but that coupling is deliberately
-          // not made here.
+          // itself. Replies to the remark comment just posted above (remark
+          // is mandatory on this route, so it exists whenever workflowId
+          // does) so the notification rides the existing comment.replied
+          // path (see add-comment.ts) rather than a top-level
+          // comment.mentioned one.
           if (assignedToUnresolved && result.instance.workflowId) {
             try {
               await withTenantContext(tenantId, (tx) =>
@@ -318,6 +366,7 @@ export const createThirdPartyChildHandler = factory.createHandlers(
                   // ensures it's truthy here.
                   workflowId: result.instance.workflowId as string,
                   currentState: result.instance.currentState,
+                  replyToEventId: remarkEventId,
                   // PR #576 review (PrabhuVijit, F2) -- same rationale as
                   // tickets.ts's identical fix: never echo the caller-
                   // supplied assignedTo value into a System-attributed

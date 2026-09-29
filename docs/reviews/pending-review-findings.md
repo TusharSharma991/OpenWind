@@ -14,7 +14,7 @@ reconciliation (2026-08-03): #194, #196, #197, and #201 closed
 (rows removed); #192 and #198 still open by deliberate scope decision, not neglect; #200 has
 scaffolding merged (PR #272) but was still marked "untouched" — corrected. The July-2026
 internal security audit (issues #221–#267, tracked in
-[roadmap-tracker.md](../sup-docs/roadmap-tracker.md)) is a separate, later audit round and isn't
+[roadmap-tracker.md](../tracker/roadmap-tracker.md)) is a separate, later audit round and isn't
 folded into this doc.
 
 **Consolidated:** 2026-07-24, from a full audit of `docs/reviews/2026-06-29-consulting-review.md`,
@@ -34,13 +34,8 @@ that's the difference between the two halves of this list.
 ## Already has a tracked issue — just needs a person
 
 **Reconciled 2026-08-19:** #143 (automation-triggered transitions absent from outbox) closed —
-both phases done per `docs/sup-docs/week-log.md`'s 2026-08-12 entries (PR #372, #380); row
+both phases done per `docs/tracker/week-log.md`'s 2026-08-12 entries (PR #372, #380); row
 removed per this doc's own rule below.
-
-**Added 2026-08-29:** #524 (entity-engine reserved-key gap on `fields`, possible `__accessUsers`
-injection/privilege-escalation) — found during a security review of a separate `__accessUsers`
-information-disclosure fix (that fix shipped same session). Narrower/severer sibling issue, not
-yet investigated end-to-end — see the issue for full detail.
 
 **Added 2026-08-31:** #540 (rate-limit.ts trusts first X-Forwarded-For hop, spoofable if a
 fronting proxy appends instead of overwrites) — found during a security review of the fix that
@@ -49,13 +44,21 @@ published no host port, so this was unreachable/unexploitable). This diff's own 
 overwrite form, but the underlying trust assumption in `rate-limit.ts` has no enforcement — see
 the issue for suggested fix directions.
 
-| Finding                                                                                                                                                                                                                               | Issue                    | Owner      |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ | ---------- |
-| No backup / disaster-recovery runbook — mechanical building block shipped (PR #286), RPO/RTO policy still an open maintainer decision                                                                                                 | [#192](../../issues/192) | Unassigned |
-| No accessibility floor on modals — waves 1 & 2 shipped (PR #285, PR #298); 2 items deliberately deferred (workflow-canvas slide-in panel, access-denied overlay); closing vs. leaving open for those 2 is an open maintainer decision | [#198](../../issues/198) | Unassigned |
-| Zero internationalization — scaffolding shipped (PR #272), ~55 of 57 files still hardcoded English                                                                                                                                    | [#200](../../issues/200) | Unassigned |
-| `entity-engine`'s `createEntity`/`updateEntity` have no reserved-key check on `fields` — a caller may be able to inject `__accessUsers` directly, bypassing the @mention-grant flow (privilege escalation, unconfirmed end-to-end)    | [#524](../../issues/524) | Unassigned |
-| `rate-limit.ts` trusts the first `X-Forwarded-For` hop with no enforcement that a fronting proxy overwrites (not appends) it — spoofable rate-limit bypass if misconfigured                                                           | [#540](../../issues/540) | Unassigned |
+**Reconciled 2026-09-18:** #192 (backup/DR runbook) closed and actually resolved, not just
+mechanically shipped — `docs/local-setup.md`'s "Backup & Disaster Recovery" section documents the
+RPO/RTO policy this doc's row said was still pending (RPO 24h, RTO measured-not-pre-committed),
+with a working nightly cron/systemd-timer scheduling section; row removed. #198's "close vs.
+leave open" maintainer decision resolved the same day — **keep open**: direct repo check
+confirms both deferred items (`workflow-canvas.tsx`'s slide-in panel, `record-detail.tsx`'s
+access-denied overlay) are still plain, un-ARIA'd markup, not partially addressed elsewhere; the
+mid-market-buyer direction confirmed the same day (see #622) makes accessibility procurement
+requirements more likely to surface, not less. Row updated below, not removed.
+
+| Finding                                                                                                                                                                                                                                                          | Issue                    | Owner      |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ | ---------- |
+| No accessibility floor on modals — waves 1 & 2 shipped (PR #285, PR #298); 2 items deliberately deferred (workflow-canvas slide-in panel, access-denied overlay) — **decided 2026-09-18: keep open**, not a maintainer-decision gap anymore, just unstaffed work | [#198](../../issues/198) | Unassigned |
+| Zero internationalization — scaffolding shipped (PR #272), ~55 of 57 files still hardcoded English                                                                                                                                                               | [#200](../../issues/200) | Unassigned |
+| `rate-limit.ts` trusts the first `X-Forwarded-For` hop with no enforcement that a fronting proxy overwrites (not appends) it — spoofable rate-limit bypass if misconfigured                                                                                      | [#540](../../issues/540) | Unassigned |
 
 ---
 

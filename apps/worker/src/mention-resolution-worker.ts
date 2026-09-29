@@ -26,7 +26,7 @@
  * Access Logs screen exists (see the Phase C spec's §C "new schema" row).
  */
 
-import { Worker } from "bullmq";
+import { Worker } from "@platform/telemetry";
 import { eq, and, sql, isNull } from "drizzle-orm";
 import {
   entityInstances,
@@ -92,12 +92,15 @@ async function resolveIdentifier(
   // retry attempt for any mention identifier once such an account existed
   // anywhere in the org's user list, regardless of what was actually
   // mentioned -- outcome 3's System Agent reply never got a chance to post.
+  // PR #576 review (PrabhuVijit, M1) -- loginName compared case-
+  // insensitively too, matching email's treatment (userId stays exact --
+  // an opaque id, never something a human retypes in a different case).
   const lowerIdentifier = identifier.toLowerCase();
   const match = zitadelUsers.find(
     (u: OrgUser) =>
       u.userId === identifier ||
       u.email?.toLowerCase() === lowerIdentifier ||
-      u.loginName === identifier,
+      u.loginName.toLowerCase() === lowerIdentifier,
   );
   if (!match) return null;
 
@@ -244,10 +247,31 @@ export const mentionResolutionWorker = new Worker<MentionResolutionJob>(
               comment: null,
               metadata: {
                 type: "comment",
-                text: `The mention "${mentionIdentifier}" could not be resolved to an org member.`,
+                // PR #576 review (PrabhuVijit, F2) -- deliberately does NOT
+                // echo the caller-supplied mentionIdentifier back into a
+                // System-attributed record, same rationale as
+                // post-system-comment.ts's identical fix: it's unvalidated,
+                // unbounded third-party input (mentions[] has a max(20)
+                // array-length cap but no per-string length cap), and the
+                // comment's own author already knows which identifier they
+                // typed.
+                text: "One of the mentions in this comment could not be resolved to an org member.",
+                // "System" not "System Agent"/"system" -- list-workflow-
+                // events.ts's dedup guard discards metadata.actorName
+                // whenever it exactly equals actorId ("system" here), which
+                // would otherwise render this as a truncated "system…".
                 actorName: "System",
                 replyTo: commentId,
               },
+              // Deliberately NOT origin-tagged -- same reasoning as
+              // post-system-comment.ts's identical fix: this is an
+              // internally-generated notice, not something the third-party
+              // app itself submitted, so tagging it with the triggering
+              // request's originOidcClientId would wrongly render it as
+              // "External · <caller's app>", misattributing a platform
+              // notice to whichever app happened to surface the failure.
+              // A null origin renders no tag, same as any other normal
+              // in-app comment.
             })
             .returning();
           if (!event) return;

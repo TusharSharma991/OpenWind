@@ -14,7 +14,9 @@ import {
   MAX_PAGE_SIZE,
 } from "./pagination.js";
 import { logger } from "@platform/logger";
-import { EntityError } from "./errors.js";
+import { EntityError, ValidationError } from "./errors.js";
+import { validateReservedFieldNames } from "./validation/index.js";
+import { DEFAULT_TICKET_SEVERITY } from "./severity-and-tags.js";
 import {
   buildEntityAssignedPayload,
   buildEntityCreatedPayload,
@@ -218,6 +220,23 @@ export async function createChildRelation(
     throw new EntityError("ENTITY_NOT_FOUND", { instanceId: parentId });
   }
 
+  try {
+    validateReservedFieldNames(childFields);
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      logger.warn(
+        {
+          tenantId,
+          parentId,
+          actorId: createdBy,
+          reservedFields: err.fields.map((f) => f.field),
+        },
+        "Security: attempt to create child ticket with reserved field blocked",
+      );
+    }
+    throw err;
+  }
+
   // Workflow limits — parent must have a workflow_id (top-level ticket)
   if (!parent.workflowId) {
     throw new EntityError("CHILDREN_DISABLED", {
@@ -333,6 +352,9 @@ export async function createChildRelation(
       originMechanism: originMechanism ?? null,
       originOidcClientId: originOidcClientId ?? null,
       originPerformerUserId: originPerformerUserId ?? null,
+      // docs/specs/ticket-severity-and-tags.md R1/R7 — sub-tickets follow the
+      // same "never NULL past creation" rule as top-level tickets.
+      severity: DEFAULT_TICKET_SEVERITY,
     })
     .returning();
 
@@ -795,9 +817,14 @@ function rowToInstance(
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     deletedAt: row.deletedAt,
+    // Drizzle infers this text() column as string | null, not the narrower
+    // union — migration 0093's CHECK constraint guarantees only these two
+    // values (or null) are ever stored, so the type system can't infer it
+    // but the DB does enforce it.
     originMechanism: row.originMechanism as "api" | "handoff" | null,
     originOidcClientId: row.originOidcClientId,
     originPerformerUserId: row.originPerformerUserId,
+    severity: row.severity ?? null,
   };
 }
 

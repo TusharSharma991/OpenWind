@@ -35,6 +35,10 @@ export default defineConfig({
         packages,
         "notifications/src/index.ts",
       ),
+      // Not yet imported by any apps/api test (Phase 2 routes land later,
+      // per docs/specs/oncall-routing.md) -- added ahead of need per PR #583
+      // review G4, so it's in place before those imports start appearing.
+      "@platform/teams": path.join(packages, "teams/src/index.ts"),
     },
   },
   test: {
@@ -48,7 +52,7 @@ export default defineConfig({
         // Allow CI job env to override the local default — vitest env block
         // would otherwise win over the runner's process.env, breaking CI auth.
         process.env["DATABASE_URL"] ??
-        "postgresql://platform:platform_dev_password@localhost:5432/platform_test",
+        "postgresql://platform:platform_test_password@localhost:5432/platform_test",
       DATABASE_POOL_MIN: "1",
       DATABASE_POOL_MAX: "3",
       REDIS_URL: "redis://localhost:6379",

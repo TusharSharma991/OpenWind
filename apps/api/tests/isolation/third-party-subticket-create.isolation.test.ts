@@ -42,6 +42,12 @@ vi.mock("../../src/lib/authnexus-management.js", async (importOriginal) => {
         displayName: "some-assignee",
         loginName: "some-assignee",
       },
+      {
+        userId: "real-user-id-999",
+        email: "bob@example.com",
+        displayName: "Bob",
+        loginName: "bob-username",
+      },
     ],
   };
 });
@@ -474,6 +480,24 @@ describe("POST /api/v1/tickets/:id/children — mandatory baseline fields", () =
     expect(data.assignedTo).toBe("some-assignee");
     expect(data.dueDate).toContain("2026-12-01");
     expect(data.remark).toBe("sub-ticket remark");
+  });
+
+  it("resolves a username (loginName) assignee to its canonical userId", async () => {
+    const app = makeApp(apiKeyAuth(), actingAs(CREATOR));
+    const res = await app.request(`/${creatorTicketId}/children`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        entityTypeId,
+        fields: { title: "assignee via username" },
+        assignedTo: "bob-username",
+        dueDate: "2026-01-01T00:00:00.000Z",
+        remark: "a remark",
+      }),
+    });
+    expect(res.status).toBe(201);
+    const { data } = (await res.json()) as { data: { assignedTo: string } };
+    expect(data.assignedTo).toBe("real-user-id-999");
   });
 
   // Security review (2026-09-08): same guard as tickets.ts's identical

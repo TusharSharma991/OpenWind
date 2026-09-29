@@ -26,6 +26,16 @@ interface Props {
   onChange: (userId: string | null) => void;
   placeholder?: string;
   disabled?: boolean;
+  /**
+   * Where to portal the dropdown. Defaults to document.body. Pass the DOM
+   * node of an ancestor Radix Dialog's content when using this inside a
+   * modal -- Dialog's focus trap forces focus back into its own subtree
+   * the instant it escapes to an external document.body portal, which
+   * broke both search-input autofocus and row-click selection. Portaling
+   * inside the dialog's own content node keeps focus within the trap
+   * (position: fixed positioning is unaffected by DOM ancestry).
+   */
+  portalContainer?: Element | null;
 }
 
 interface UserOptionRowProps {
@@ -131,6 +141,7 @@ export function UserPicker({
   onChange,
   placeholder = "Assign to…",
   disabled = false,
+  portalContainer,
 }: Props): React.ReactElement {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -282,6 +293,7 @@ export function UserPicker({
         createPortal(
           <div
             ref={dropdownRef}
+            data-user-picker-dropdown=""
             style={{
               position: "fixed",
               top: dropdownRect.bottom + 4,
@@ -413,7 +425,7 @@ export function UserPicker({
               )}
             </div>
           </div>,
-          document.body,
+          portalContainer ?? document.body,
         )}
     </div>
   );
@@ -425,6 +437,8 @@ interface MultiProps {
   onChange: (userIds: string[]) => void;
   placeholder?: string;
   disabled?: boolean;
+  /** See UserPicker's `portalContainer` doc comment above. */
+  portalContainer?: Element | null;
 }
 
 interface MultiUserOptionRowProps {
@@ -530,6 +544,7 @@ export function MultiUserPicker({
   onChange,
   placeholder = "Add admins…",
   disabled = false,
+  portalContainer,
 }: MultiProps): React.ReactElement {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -674,6 +689,7 @@ export function MultiUserPicker({
         createPortal(
           <div
             ref={dropdownRef}
+            data-user-picker-dropdown=""
             style={{
               position: "fixed",
               top: dropdownRect.bottom + 4,
@@ -759,7 +775,7 @@ export function MultiUserPicker({
               )}
             </div>
           </div>,
-          document.body,
+          portalContainer ?? document.body,
         )}
     </div>
   );

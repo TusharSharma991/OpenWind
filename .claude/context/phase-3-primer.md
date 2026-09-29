@@ -288,7 +288,7 @@ Scopes track (can run in parallel with the runtime track, same stage):
 
 - [x] Update this primer's ADR references from `docs/specs/` to `docs/decisions/ADR-00N-*.md` —
       done 2026-08-06, all three accepted at their originally-proposed numbers.
-- [x] Flip `docs/sup-docs/roadmap-tracker.md`'s 3A row from 🔴 Not started as stages land — done;
+- [x] Flip `docs/tracker/roadmap-tracker.md`'s 3A row from 🔴 Not started as stages land — done;
       currently 🟡 ~30%, kept current there each session, not duplicated here or in `CLAUDE.md`
       (both of those went stale for this exact reason once before — see 2026-08-13 cleanup).
 
@@ -309,9 +309,10 @@ Scopes track (can run in parallel with the runtime track, same stage):
   cross-mechanism outbound cap (ADR-010).
 - **Optional-tier: iPaaS bridge (Trigger.dev).** ADR-009 explicitly resolved this as Optional
   (lower priority than the Important items above), not Important as issue #16's body groups it —
-  the two source documents disagreed; ADR-009 sided with `docs/roadmap.md`'s classification.
-  Solves a different problem (long-running/human-in-the-loop orchestration) than the connector
-  marketplace ADR-009 covers — not folded in or dropped, just out of scope until picked up.
+  the two source documents disagreed at the time; ADR-009 sided with the (since-retired)
+  `docs/roadmap.md`'s classification. Solves a different problem (long-running/human-in-the-loop
+  orchestration) than the connector marketplace ADR-009 covers — not folded in or dropped, just
+  out of scope until picked up.
 
 ## Open confirmations still needed before specific PRs (not primer-blocking)
 

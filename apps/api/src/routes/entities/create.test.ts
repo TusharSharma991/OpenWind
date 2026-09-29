@@ -42,28 +42,26 @@ vi.mock("../../lib/ensure-user-refs.js", () => ({
 const mockUpdateWhere = vi.fn().mockResolvedValue(undefined);
 const mockUpdateSet = vi.fn(() => ({ where: mockUpdateWhere }));
 const mockUpdate = vi.fn(() => ({ set: mockUpdateSet }));
-const mockInsertValues = vi.fn();
-const mockInsert = vi.fn(() => ({
-  values: (v: unknown) => {
-    mockInsertValues(v);
-    return { returning: () => Promise.resolve([{ id: "event-1" }]) };
-  },
-}));
+
+// Controls what any tx.select()...limit(1) chain resolves to — used both for
+// the pre-existing dbUser (actorName) lookup and the new teams lookup
+// (docs/specs/team-assign-oncall-fallback.md R1). Default [] matches prior
+// behavior (dbUser lookup finding nothing); tests that need a real team row
+// set this before the request.
+let mockSelectLimitResult: unknown[] = [];
 
 const mockTx = {
   select: () => mockTx,
   from: () => mockTx,
   where: () => mockTx,
-  limit: () => Promise.resolve([]),
+  limit: () => Promise.resolve(mockSelectLimitResult),
   update: mockUpdate,
-  insert: mockInsert,
 };
 
 vi.mock("@platform/db", () => ({
   db: {},
   tenantUsers: {},
-  workflowEvents: {},
-  outboxEvents: {},
+  teams: { id: "id", tenantId: "tenant_id", deletedAt: "deleted_at" },
   files: {
     id: "id",
     tenantId: "tenant_id",
@@ -110,22 +108,17 @@ const fakeInstance = {
   deletedAt: null,
 };
 
-// Mandatory-baseline-fields policy (2026-09-07): assignedTo/dueDate/remark
-// are required on every create request now (CreateEntitySchema) -- every
-// fixture below must include valid values for all three, same as a real
-// caller now has to. DEFAULT_ASSIGNED_TO is pre-registered as a real
-// tenant "user"-role member in the top-level beforeEach below so tests that
-// don't care about assignedTo validation specifically don't need to repeat
-// that setup themselves.
-const DEFAULT_ASSIGNED_TO = "u-default-assignee";
-
 function validBody(overrides: Record<string, unknown> = {}) {
   return JSON.stringify({
     entityTypeId: TYPE_ID,
     fields: { subject: "hello" },
-    assignedTo: DEFAULT_ASSIGNED_TO,
-    dueDate: "2026-12-01T00:00:00.000Z",
-    remark: "Default remark",
+    // assignedTo/dueDate are mandatory (platform-wide invariant, see
+    // SYNC-TO-CURRENT-FORMAT.md's "current format" definition) -- default
+    // to a valid pair here so tests unrelated to these two fields don't all
+    // need to supply them individually.
+    assignedTo: "u-target",
+    dueDate: "2026-01-01T00:00:00.000Z",
+    remark: "default test remark",
     ...overrides,
   });
 }
@@ -135,50 +128,53 @@ function validBody(overrides: Record<string, unknown> = {}) {
 describe("POST /entities", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockListUserIdsWithRole.mockResolvedValue(new Set([DEFAULT_ASSIGNED_TO]));
+    mockListUserIdsWithRole.mockResolvedValue(new Set(["u-target"]));
+    mockSelectLimitResult = [];
   });
 
-  it("returns 400 when assignedTo is missing", async () => {
+  it("returns 400 when assignedTo is missing (mandatory field)", async () => {
     const res = await makeApp().request("/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         entityTypeId: TYPE_ID,
         fields: { subject: "hello" },
-        dueDate: "2026-12-01T00:00:00.000Z",
-        remark: "Default remark",
+        dueDate: "2026-01-01T00:00:00.000Z",
       }),
     });
+
     expect(res.status).toBe(400);
     expect(mockCreateEntity).not.toHaveBeenCalled();
   });
 
-  it("returns 400 when dueDate is missing", async () => {
+  it("returns 400 when dueDate is missing (mandatory field)", async () => {
     const res = await makeApp().request("/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         entityTypeId: TYPE_ID,
         fields: { subject: "hello" },
-        assignedTo: DEFAULT_ASSIGNED_TO,
-        remark: "Default remark",
+        assignedTo: "u-target",
+        remark: "a remark",
       }),
     });
+
     expect(res.status).toBe(400);
     expect(mockCreateEntity).not.toHaveBeenCalled();
   });
 
-  it("returns 400 when remark is missing", async () => {
+  it("returns 400 when remark is missing (mandatory field)", async () => {
     const res = await makeApp().request("/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         entityTypeId: TYPE_ID,
         fields: { subject: "hello" },
-        assignedTo: DEFAULT_ASSIGNED_TO,
-        dueDate: "2026-12-01T00:00:00.000Z",
+        assignedTo: "u-target",
+        dueDate: "2026-01-01T00:00:00.000Z",
       }),
     });
+
     expect(res.status).toBe(400);
     expect(mockCreateEntity).not.toHaveBeenCalled();
   });
@@ -200,58 +196,6 @@ describe("POST /entities", () => {
       "t-aaa",
       expect.objectContaining({ entityTypeId: TYPE_ID }),
     );
-  });
-
-  it("posts the remark as the ticket's first comment when the entity has a workflow", async () => {
-    mockCreateEntity.mockResolvedValue({
-      ...fakeInstance,
-      workflowId: "wf-1",
-    });
-
-    const res = await makeApp().request("/", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: validBody({ remark: "  Please expedite this  " }),
-    });
-
-    expect(res.status).toBe(201);
-    expect(mockInsert).toHaveBeenCalledTimes(2); // workflowEvents + outboxEvents
-    const commentInsertArg = mockInsertValues.mock.calls[0]?.[0] as {
-      metadata: { type: string; text: string };
-    };
-    expect(commentInsertArg.metadata).toMatchObject({
-      type: "comment",
-      text: "Please expedite this",
-    });
-  });
-
-  it("does not post a comment when remark is empty/whitespace-only", async () => {
-    mockCreateEntity.mockResolvedValue({
-      ...fakeInstance,
-      workflowId: "wf-1",
-    });
-
-    const res = await makeApp().request("/", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: validBody({ remark: "   " }),
-    });
-
-    expect(res.status).toBe(201);
-    expect(mockInsert).not.toHaveBeenCalled();
-  });
-
-  it("does not post a remark comment when the entity has no workflow", async () => {
-    mockCreateEntity.mockResolvedValue(fakeInstance); // workflowId: null
-
-    const res = await makeApp().request("/", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: validBody({ remark: "Some remark" }),
-    });
-
-    expect(res.status).toBe(201);
-    expect(mockInsert).not.toHaveBeenCalled();
   });
 
   it("returns 400 when entityTypeId is not a valid UUID", async () => {
@@ -347,7 +291,10 @@ describe("POST /entities", () => {
 });
 
 describe("POST /entities — assignedTo validation (R3)", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSelectLimitResult = [];
+  });
 
   it("succeeds when assignedTo is a real tenant member holding the 'user' role", async () => {
     mockListUserIdsWithRole.mockResolvedValue(new Set(["u-target"]));
@@ -408,22 +355,106 @@ describe("POST /entities — assignedTo validation (R3)", () => {
     expect(mockCreateEntity).not.toHaveBeenCalled();
   });
 
-  it("returns 400 when assignedTo is omitted — it is mandatory, not optional", async () => {
+  it("always calls listUserIdsWithRole — assignedTo can no longer be omitted", async () => {
+    mockListUserIdsWithRole.mockResolvedValue(new Set(["u-target"]));
     mockCreateEntity.mockResolvedValue(fakeInstance);
 
     const res = await makeApp().request("/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        entityTypeId: TYPE_ID,
-        fields: { subject: "hello" },
-        dueDate: "2026-12-01T00:00:00.000Z",
-        remark: "Default remark",
+      body: validBody(),
+    });
+
+    expect(res.status).toBe(201);
+    expect(mockListUserIdsWithRole).toHaveBeenCalledWith("org-ccc", "user", "");
+  });
+});
+
+describe("POST /entities — assignedTo/teamId exactly-one-of (docs/specs/team-assign-oncall-fallback.md R1)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockListUserIdsWithRole.mockResolvedValue(new Set(["u-target"]));
+    mockSelectLimitResult = [];
+  });
+
+  // Zod schema-level failures (including the superRefine exactly-one-of
+  // check) return 400 via lib/validator.ts's zValidator wrapper — same
+  // status as every other CreateEntitySchema violation (assignedTo/dueDate/
+  // remark missing, above). 422 is reserved for checks that run AFTER
+  // schema validation (e.g. teamId not resolving to a real team, below).
+  it("returns 400 when neither assignedTo nor teamId is set", async () => {
+    const res = await makeApp().request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: validBody({ assignedTo: undefined }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(mockCreateEntity).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when both assignedTo and teamId are set", async () => {
+    mockSelectLimitResult = [{ id: "00000000-0000-0000-0000-000000000001" }];
+
+    const res = await makeApp().request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: validBody({
+        assignedTo: "u-target",
+        teamId: "00000000-0000-0000-0000-000000000001",
       }),
     });
 
     expect(res.status).toBe(400);
-    expect(mockListUserIdsWithRole).not.toHaveBeenCalled();
+    expect(mockCreateEntity).not.toHaveBeenCalled();
+  });
+
+  it("returns 422 when teamId doesn't resolve to a real team in this tenant", async () => {
+    mockSelectLimitResult = [];
+
+    const res = await makeApp().request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: validBody({
+        assignedTo: undefined,
+        teamId: "00000000-0000-0000-0000-0000000000ff",
+      }),
+    });
+
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.fields.teamId).toBeDefined();
+    expect(mockCreateEntity).not.toHaveBeenCalled();
+  });
+
+  it("succeeds with teamId alone, writing it into fields.team_id (not assignedTo)", async () => {
+    mockSelectLimitResult = [{ id: "00000000-0000-0000-0000-000000000001" }];
+    mockCreateEntity.mockResolvedValue(fakeInstance);
+
+    const res = await makeApp().request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: validBody({
+        assignedTo: undefined,
+        teamId: "00000000-0000-0000-0000-000000000001",
+        fields: { subject: "hello" },
+      }),
+    });
+
+    expect(res.status).toBe(201);
+    expect(mockCreateEntity).toHaveBeenCalledWith(
+      expect.any(Object),
+      "t-aaa",
+      expect.objectContaining({
+        fields: {
+          subject: "hello",
+          team_id: "00000000-0000-0000-0000-000000000001",
+        },
+      }),
+    );
+    expect(mockCreateEntity.mock.calls[0]?.[2]).not.toHaveProperty(
+      "assignedTo",
+    );
   });
 });
 
@@ -432,8 +463,9 @@ describe("POST /entities — linking file/files custom-field values (#289 follow
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockListUserIdsWithRole.mockResolvedValue(new Set([DEFAULT_ASSIGNED_TO]));
+    mockListUserIdsWithRole.mockResolvedValue(new Set(["u-target"]));
     mockCreateEntity.mockResolvedValue(fakeInstance);
+    mockSelectLimitResult = [];
   });
 
   it("links a file id from a single-value file field to the new entity", async () => {
@@ -489,10 +521,12 @@ describe("POST /entities — linking file/files custom-field values (#289 follow
 describe("POST /entities — wiring ensureUserRefsKnown (first-login-cache gap fix)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockListUserIdsWithRole.mockResolvedValue(new Set(["u-target"]));
     mockCreateEntity.mockResolvedValue(fakeInstance);
+    mockSelectLimitResult = [];
   });
 
-  it("calls ensureUserRefsKnown before createEntity, with the entity type/fields/org/token", async () => {
+  it("calls ensureUserRefsKnown before createEntity, with the entity type/fields/org", async () => {
     const order: string[] = [];
     mockEnsureUserRefsKnown.mockImplementation(() => {
       order.push("ensureUserRefsKnown");
@@ -505,10 +539,7 @@ describe("POST /entities — wiring ensureUserRefsKnown (first-login-cache gap f
 
     await makeApp().request("/", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: "Bearer test-token-123",
-      },
+      headers: { "Content-Type": "application/json" },
       body: validBody({ fields: { technical_reviewer: "u-reviewer" } }),
     });
 
@@ -518,7 +549,7 @@ describe("POST /entities — wiring ensureUserRefsKnown (first-login-cache gap f
       TYPE_ID,
       { technical_reviewer: "u-reviewer" },
       "org-ccc",
-      "test-token-123",
+      "",
     );
     expect(order).toEqual(["ensureUserRefsKnown", "createEntity"]);
   });

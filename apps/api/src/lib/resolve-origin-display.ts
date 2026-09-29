@@ -1,4 +1,4 @@
-import { inArray, eq, desc, sql } from "drizzle-orm";
+import { inArray, eq, desc, sql, and } from "drizzle-orm";
 import { apiKeys, withTenantContext } from "@platform/db";
 import { getUserById } from "./authnexus-management.js";
 
@@ -40,6 +40,10 @@ export async function resolveOriginDisplay(
     lookupPerformerDisplayName(row.originPerformerUserId, bearerToken),
   ]);
   return {
+    // Drizzle infers this text() column as string | null; the null case was
+    // already ruled out by the guard above. Migration 0093's CHECK
+    // constraint guarantees only these two literals (or null) are ever
+    // stored, so the type system can't infer it but the DB does enforce it.
     mechanism: row.originMechanism as "api" | "handoff",
     appName,
     performerUserId: row.originPerformerUserId ?? "",
@@ -63,6 +67,20 @@ async function lookupPerformerDisplayName(
   return (name ?? user.loginName) || performerUserId;
 }
 
+// PR #556 review (PrabhuVijit) — filtered by tenantId, matching security.md
+// rule 1's explicit-filter requirement. api_keys.oidcClientId is not
+// guaranteed globally unique across tenants (each tenant mints its own
+// application), so an unfiltered lookup could resolve to a different
+// tenant's application name if two tenants' client ids ever collided.
+//
+// Also routed through withTenantContext (not the bare `db` client) — api_keys
+// has RLS gated on app.tenant_id, and requireAuth() always runs its own
+// withTenantContext block first on every authenticated request, which
+// "poisons" that backend connection's app.tenant_id GUC into the ''-then-NULL
+// reset state for any later bare query reusing the same pooled connection.
+// Without this, the explicit tenantId filter above never even matters — RLS
+// silently returns zero rows first, so every lookup fell back to "Unknown
+// application" regardless of tenant.
 async function lookupApplicationName(
   tenantId: string,
   oidcClientId: string,
@@ -73,15 +91,21 @@ async function lookupApplicationName(
   // the active row, not its now-revoked predecessors). Falls back to the
   // most recently created row if every one has since been revoked (edge
   // case: the whole lineage was decommissioned but old tickets still
-  // reference it). Scoped by tenantId (via withTenantContext, RLS-enforced)
-  // -- api_keys.oidc_client_id is only unique among ACTIVE keys, so a
-  // revoked lineage could otherwise resolve against a different tenant's
-  // reclaimed client id (see api-key-mint-client-id-reclaim.isolation.test.ts).
+  // reference it). Scoped by tenantId (via withTenantContext, RLS-enforced,
+  // plus the explicit filter below) -- api_keys.oidc_client_id is only
+  // unique among ACTIVE keys, so a revoked lineage could otherwise resolve
+  // against a different tenant's reclaimed client id (see
+  // api-key-mint-client-id-reclaim.isolation.test.ts).
   const [key] = await withTenantContext(tenantId, (tx) =>
     tx
       .select({ applicationName: apiKeys.applicationName })
       .from(apiKeys)
-      .where(eq(apiKeys.oidcClientId, oidcClientId))
+      .where(
+        and(
+          eq(apiKeys.tenantId, tenantId),
+          eq(apiKeys.oidcClientId, oidcClientId),
+        ),
+      )
       .orderBy(sql`${apiKeys.revokedAt} IS NULL DESC`, desc(apiKeys.createdAt))
       .limit(1),
   );
@@ -110,8 +134,9 @@ export async function batchLookupApplicationNames(
   // Same active-row-first, most-recent-fallback ordering as
   // lookupApplicationName above — first-wins below only picks the "best"
   // row per client id because this order guarantees it arrives first.
-  // Scoped by tenantId (via withTenantContext) for the same reason as
-  // lookupApplicationName above.
+  // PR #556 review (PrabhuVijit) — explicit tenantId filter, same reasoning
+  // as lookupApplicationName's single-row version above. Also routed through
+  // withTenantContext for the same RLS-poisoning reason documented there.
   const keys = await withTenantContext(tenantId, (tx) =>
     tx
       .select({
@@ -119,7 +144,12 @@ export async function batchLookupApplicationNames(
         applicationName: apiKeys.applicationName,
       })
       .from(apiKeys)
-      .where(inArray(apiKeys.oidcClientId, clientIds))
+      .where(
+        and(
+          eq(apiKeys.tenantId, tenantId),
+          inArray(apiKeys.oidcClientId, clientIds),
+        ),
+      )
       .orderBy(sql`${apiKeys.revokedAt} IS NULL DESC`, desc(apiKeys.createdAt)),
   );
 
@@ -168,6 +198,10 @@ export function toOriginDisplay(
   if (!row.originMechanism || !row.originOidcClientId) return null;
   const performerUserId = row.originPerformerUserId ?? "";
   return {
+    // Drizzle infers this text() column as string | null; the null case was
+    // already ruled out by the guard above. Migration 0093's CHECK
+    // constraint guarantees only these two literals (or null) are ever
+    // stored, so the type system can't infer it but the DB does enforce it.
     mechanism: row.originMechanism as "api" | "handoff",
     appName:
       nameByClientId.get(row.originOidcClientId) ?? "Unknown application",

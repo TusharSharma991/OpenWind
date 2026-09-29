@@ -1,17 +1,123 @@
 import { Hono } from "hono";
 import { requireAuth, requireRole } from "@platform/auth";
-import { db, tenantUsers, withTenantContext } from "@platform/db";
-import { eq } from "drizzle-orm";
+import {
+  db,
+  tenantUsers,
+  withTenantContext,
+  savedViews,
+  notificationRecipients,
+  ticketAlerts,
+  accessRequests,
+  apiKeys,
+  entityInstances,
+  workflows,
+  workflowEvents,
+  attachments,
+  idempotencyKeys,
+} from "@platform/db";
+import { eq, and, or, sql } from "drizzle-orm";
 import {
   listOrgUsers,
   listUserRolesByUserId,
   invalidateUserCache,
 } from "../../lib/authnexus-management.js";
 import type { AuthContext } from "@platform/auth";
+import { writeAuditEntry } from "@platform/audit";
+import { logger } from "@platform/logger";
 
 type AppVars = { Variables: { auth: AuthContext } };
 
 export const usersRouter = new Hono<AppVars>();
+
+export interface MergedOrgUser {
+  userId: string;
+  email: string;
+  displayName: string;
+  loginName: string;
+  roles: string[];
+}
+
+/**
+ * Shared AuthNexus-org-users + tenant_users merge, parameterized by which
+ * roles to include. Extracted so /users (customers only) and /admin/members
+ * (agents+admins, for on-call assignment -- PR #602 review) apply the same
+ * merge/dedup/sort logic with a different role filter, rather than each
+ * re-implementing it.
+ */
+export async function listMergedOrgUsersByRole(
+  tenantId: string,
+  orgId: string | undefined,
+  allowedRoles: readonly string[],
+  bust: boolean,
+): Promise<MergedOrgUser[]> {
+  if (bust) invalidateUserCache();
+
+  const hasAllowedRole = (roles: string[]): boolean =>
+    roles.some((r) => allowedRoles.includes(r));
+
+  const [orgUsersList, rolesByUserId, dbRows] = await Promise.all([
+    orgId ? listOrgUsers(orgId) : Promise.resolve([]),
+    orgId
+      ? listUserRolesByUserId(orgId)
+      : Promise.resolve(new Map<string, string[]>()),
+    withTenantContext(tenantId, (tx) =>
+      tx
+        .select({
+          userId: tenantUsers.userId,
+          email: tenantUsers.email,
+          displayName: tenantUsers.displayName,
+        })
+        .from(tenantUsers)
+        .where(eq(tenantUsers.tenantId, tenantId)),
+    ),
+  ]);
+
+  // Build a lookup of DB-enriched display names (set on login)
+  const dbByUserId = new Map(dbRows.map((r) => [r.userId, r]));
+
+  // Merge: AuthNexus is source of truth for names; DB only enriches when it has
+  // a *real* display name (not the userId placeholder stored when JWT has no claims).
+  const orgUsersByUserId = new Map(orgUsersList.map((u) => [u.userId, u]));
+  const merged: MergedOrgUser[] = orgUsersList
+    .filter((u) => hasAllowedRole(rolesByUserId.get(u.userId) ?? []))
+    .map((u) => {
+      const dbRow = dbByUserId.get(u.userId);
+      // DB display name is only useful when it differs from the userId (i.e. a real name was stored)
+      const dbDisplayName =
+        dbRow?.displayName && dbRow.displayName !== u.userId
+          ? dbRow.displayName
+          : null;
+      return {
+        userId: u.userId,
+        email: dbRow?.email ?? u.email ?? "",
+        displayName: dbDisplayName ?? u.displayName,
+        loginName: u.loginName,
+        roles: rolesByUserId.get(u.userId) ?? [],
+      };
+    });
+
+  // Also include DB users not returned by AuthNexus (e.g. instance admin in default org).
+  // Skip ghost entries: service accounts or stale rows with no email and no real display name.
+  for (const r of dbRows) {
+    const roles = rolesByUserId.get(r.userId) ?? [];
+    if (!orgUsersByUserId.has(r.userId) && hasAllowedRole(roles)) {
+      const realName =
+        r.displayName && r.displayName !== r.userId ? r.displayName : null;
+      // If there's neither a real name nor an email this is a service account / stale entry — skip it
+      if (!realName && !r.email) continue;
+      merged.push({
+        userId: r.userId,
+        email: r.email ?? "",
+        displayName: realName ?? r.email ?? r.userId,
+        loginName: r.email ?? r.userId,
+        roles,
+      });
+    }
+  }
+
+  merged.sort((a, b) => a.displayName.localeCompare(b.displayName));
+  return merged;
+}
 
 // GET /users — returns org users holding the "user" role (customers), alphabetically
 // by display name. Feeds both the users page and the @mention picker — neither should
@@ -24,80 +130,230 @@ usersRouter.get(
   requireRole("admin", "agent", "user"),
   async (c) => {
     const { tenantId, orgId } = c.get("auth");
-    const bearerToken = c.req.header("Authorization")?.slice(7) ?? "";
-
-    // ?bust=1 clears the in-memory AuthNexus user cache for fresh data
-    if (c.req.query("bust") === "1") invalidateUserCache();
-
-    const [orgUsers, rolesByUserId, dbRows] = await Promise.all([
-      orgId ? listOrgUsers(orgId, bearerToken) : Promise.resolve([]),
-      orgId
-        ? listUserRolesByUserId(orgId, bearerToken)
-        : Promise.resolve(new Map<string, string[]>()),
-      withTenantContext(tenantId, (tx) =>
-        tx
-          .select({
-            userId: tenantUsers.userId,
-            email: tenantUsers.email,
-            displayName: tenantUsers.displayName,
-          })
-          .from(tenantUsers)
-          .where(eq(tenantUsers.tenantId, tenantId)),
-      ),
-    ]);
-
-    // Build a lookup of DB-enriched display names (set on login)
-    const dbByUserId = new Map(dbRows.map((r) => [r.userId, r]));
-
-    // Merge: AuthNexus is source of truth for names; DB only enriches when it has
-    // a *real* display name (not the userId placeholder stored when JWT has no claims).
-    const orgUsersByUserId = new Map(orgUsers.map((u) => [u.userId, u]));
-    // Only surface users holding the "user" role — agents/admins must never appear
-    // on the users page or the @mention picker (both consume this endpoint).
-    const merged = orgUsers
-      .filter((u) => (rolesByUserId.get(u.userId) ?? []).includes("user"))
-      .map((u) => {
-        const dbRow = dbByUserId.get(u.userId);
-        // DB display name is only useful when it differs from the userId (i.e. a real name was stored)
-        const dbDisplayName =
-          dbRow?.displayName && dbRow.displayName !== u.userId
-            ? dbRow.displayName
-            : null;
-        return {
-          userId: u.userId,
-          email: dbRow?.email ?? u.email,
-          displayName: dbDisplayName ?? u.displayName,
-          loginName: u.loginName,
-          roles: rolesByUserId.get(u.userId) ?? [],
-          // AuthNexus's listOrgUsers doesn't return per-user metadata (unlike
-          // the Zitadel Management API this replaced) — empty placeholder,
-          // consistent with the DB-only fallback below.
-          metadata: {},
-        };
-      });
-
-    // Also include DB users not returned by AuthNexus (e.g. instance admin in default org).
-    // Skip ghost entries: service accounts or stale rows with no email and no real display name.
-    for (const r of dbRows) {
-      const roles = rolesByUserId.get(r.userId) ?? [];
-      if (!orgUsersByUserId.has(r.userId) && roles.includes("user")) {
-        const realName =
-          r.displayName && r.displayName !== r.userId ? r.displayName : null;
-        // If there's neither a real name nor an email this is a service account / stale entry — skip it
-        if (!realName && !r.email) continue;
-        merged.push({
-          userId: r.userId,
-          email: r.email ?? "",
-          displayName: realName ?? r.email ?? r.userId,
-          loginName: r.email ?? r.userId,
-          roles,
-          metadata: {},
-        });
-      }
-    }
-
-    merged.sort((a, b) => a.displayName.localeCompare(b.displayName));
-
+    const merged = await listMergedOrgUsersByRole(
+      tenantId,
+      orgId,
+      ["user"],
+      c.req.query("bust") === "1",
+    );
     return c.json({ data: merged });
+  },
+);
+
+// DELETE /users/:userId — GDPR per-user erasure endpoint, admin-only
+usersRouter.delete(
+  "/:userId",
+  requireAuth(db),
+  requireRole("admin"),
+  async (c) => {
+    const { tenantId, userId: adminUserId } = c.get("auth");
+    const targetUserId = c.req.param("userId");
+
+    await withTenantContext(tenantId, async (tx) => {
+      // 1. Delete saved_views
+      await tx
+        .delete(savedViews)
+        .where(
+          and(
+            eq(savedViews.tenantId, tenantId),
+            eq(savedViews.userId, targetUserId),
+          ),
+        );
+
+      // 2. Delete notification_recipients
+      await tx
+        .delete(notificationRecipients)
+        .where(
+          and(
+            eq(notificationRecipients.tenantId, tenantId),
+            eq(notificationRecipients.userId, targetUserId),
+          ),
+        );
+
+      // 3. Delete ticket_alerts created by target user
+      await tx
+        .delete(ticketAlerts)
+        .where(
+          and(
+            eq(ticketAlerts.tenantId, tenantId),
+            eq(ticketAlerts.createdBy, targetUserId),
+          ),
+        );
+
+      // 4. Handle access_requests
+      await tx
+        .delete(accessRequests)
+        .where(
+          and(
+            eq(accessRequests.tenantId, tenantId),
+            eq(accessRequests.requesterId, targetUserId),
+          ),
+        );
+
+      await tx
+        .update(accessRequests)
+        .set({ resolvedBy: "[REDACTED]" })
+        .where(
+          and(
+            eq(accessRequests.tenantId, tenantId),
+            eq(accessRequests.resolvedBy, targetUserId),
+          ),
+        );
+
+      // 5. Delete api_keys created by target user (Finding 6)
+      await tx
+        .delete(apiKeys)
+        .where(
+          and(
+            eq(apiKeys.tenantId, tenantId),
+            eq(apiKeys.createdBy, targetUserId),
+          ),
+        );
+
+      // 5b. Anonymize api_keys revoked by target user (Finding 6)
+      await tx
+        .update(apiKeys)
+        .set({ revokedBy: "[REDACTED]" })
+        .where(
+          and(
+            eq(apiKeys.tenantId, tenantId),
+            eq(apiKeys.revokedBy, targetUserId),
+          ),
+        );
+
+      // 6. Nullify entity_instances references
+      await tx
+        .update(entityInstances)
+        .set({ createdBy: null })
+        .where(
+          and(
+            eq(entityInstances.tenantId, tenantId),
+            eq(entityInstances.createdBy, targetUserId),
+          ),
+        );
+
+      await tx
+        .update(entityInstances)
+        .set({ assignedTo: null })
+        .where(
+          and(
+            eq(entityInstances.tenantId, tenantId),
+            eq(entityInstances.assignedTo, targetUserId),
+          ),
+        );
+
+      // 7. Handle workflows references
+      await tx
+        .update(workflows)
+        .set({ createdBy: null })
+        .where(
+          and(
+            eq(workflows.tenantId, tenantId),
+            eq(workflows.createdBy, targetUserId),
+          ),
+        );
+
+      await tx
+        .update(workflows)
+        .set({
+          assignedTo: sql`array_remove(${workflows.assignedTo}, ${targetUserId})`,
+        })
+        .where(
+          and(
+            eq(workflows.tenantId, tenantId),
+            sql`${targetUserId} = ANY(${workflows.assignedTo})`,
+          ),
+        );
+
+      // 8. Anonymize workflow_events references
+      await tx
+        .update(workflowEvents)
+        .set({ triggeredBy: "[REDACTED]" })
+        .where(
+          and(
+            eq(workflowEvents.tenantId, tenantId),
+            eq(workflowEvents.triggeredBy, targetUserId),
+          ),
+        );
+
+      await tx
+        .update(workflowEvents)
+        .set({
+          actorId: sql`CASE WHEN ${workflowEvents.actorId} = ${targetUserId} THEN '[REDACTED]' ELSE ${workflowEvents.actorId} END`,
+        })
+        .where(
+          and(
+            eq(workflowEvents.tenantId, tenantId),
+            eq(workflowEvents.actorId, targetUserId),
+          ),
+        );
+
+      // 8b. Anonymize attachments references (Finding 5)
+      await tx
+        .update(attachments)
+        .set({ uploadedBy: "[REDACTED]", actingPersonId: "[REDACTED]" })
+        .where(
+          and(
+            eq(attachments.tenantId, tenantId),
+            or(
+              eq(attachments.uploadedBy, targetUserId),
+              eq(attachments.actingPersonId, targetUserId),
+            ),
+          ),
+        );
+
+      // 9. Delete tenant_users association
+      await tx
+        .delete(tenantUsers)
+        .where(
+          and(
+            eq(tenantUsers.tenantId, tenantId),
+            eq(tenantUsers.userId, targetUserId),
+          ),
+        );
+
+      // 9b. Delete idempotency_keys associated with target user (Finding 10)
+      await tx
+        .delete(idempotencyKeys)
+        .where(
+          and(
+            eq(idempotencyKeys.tenantId, tenantId),
+            eq(idempotencyKeys.actingPersonId, targetUserId),
+          ),
+        );
+
+      // 10. Audit log entry for erasure
+      // NOTE ON adminAuditLog (GDPR Finding 8):
+      // The adminAuditLog table is not anonymized or deleted here because:
+      // (a) It has a database-level INSERT+SELECT only permission structure for security hardening,
+      //     making updates to historical audit logs impossible for the application database role.
+      // (b) It is exempt from GDPR Article 17 erasure requests under Article 17(3)(b)
+      //     (for compliance with a legal obligation or execution of public interest tasks,
+      //     specifically maintaining an unalterable security audit trail of administrative actions).
+      await writeAuditEntry(tx, {
+        tenantId,
+        actorId: adminUserId,
+        actorType: "user",
+        resourceType: "user",
+        resourceId: targetUserId,
+        action: "deleted",
+      });
+    });
+
+    // GDPR erasure (Finding 7 & Finding 9) — AuthNexus-side account action.
+    // spec §R6 (docs/specs/tushar-authnexus-merge.md): no `deleteUser`
+    // equivalent is confirmed to exist in authnexus-management.ts yet (T8,
+    // pending a human decision on whether AuthNexus exposes an account
+    // deactivate/disable call). Logging this distinctly rather than silently
+    // treating platform-side purge alone as a complete erasure, so the gap
+    // is visible in monitoring instead of masquerading as done.
+    logger.error(
+      { targetUserId },
+      "GDPR erasure: platform-side data purged, but no AuthNexus-side account action was taken (T8 unresolved — see docs/specs/tushar-authnexus-merge.md §R6)",
+    );
+
+    invalidateUserCache();
+
+    return c.json({ success: true });
   },
 );

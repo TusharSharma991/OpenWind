@@ -1,62 +1,42 @@
 import { z } from "zod";
 import { eq, and, isNull } from "drizzle-orm";
 import { requireAuth, requireActingPerson } from "@platform/auth";
-import {
-  withTenantContext,
-  db,
-  entityInstances,
-  workflowEvents,
-  outboxEvents,
-} from "@platform/db";
+import { withTenantContext, db, entityInstances } from "@platform/db";
 import { createChildRelation, EntityError } from "@platform/entity-engine";
-import { isWorkflowAdminOnly } from "@platform/workflow-engine";
 import { zValidator } from "../../lib/validator.js";
 import { factory } from "./factory.js";
 import { requireTicketScope } from "./require-ticket-scope.js";
+import { forwardResponseHeaders } from "./utils.js";
 import { hasEntityAccess } from "../../lib/entity-access.js";
 import { handleEntityError } from "../../lib/handle-entity-error.js";
-import {
-  validateFieldsPayload,
-  FORBIDDEN_CHAR_PATTERN,
-} from "./validate-fields-payload.js";
+import { validateFieldsPayload } from "./validate-fields-payload.js";
 import { notFound } from "./not-found.js";
-import { withIdempotency } from "../../lib/idempotency.js";
+import { withIdempotency, isIdempotencyStatus } from "../../lib/idempotency.js";
 import { writeAuditEntry } from "@platform/audit";
 import { logger } from "@platform/logger";
 import { applicationActorIdFromUserId } from "../../lib/application-actor-id.js";
 import { resolveOriginOidcClientId } from "../../lib/resolve-origin-oidc-client-id.js";
 import { resolveOrgMemberUserId } from "../../lib/resolve-org-member.js";
 import { postSystemComment } from "../../lib/post-system-comment.js";
+import { postRemarkComment } from "../../lib/post-remark-comment.js";
 import { redactEntityFieldsForThirdParty } from "../../lib/redact-entity-fields.js";
 import { stripInternalFields } from "../../lib/strip-internal-fields.js";
 
-// Mandatory-baseline-fields policy (2026-09-07) -- see tickets.ts's own
-// CreateThirdPartyTicketSchema comment for the full rationale. Sub-tickets
-// follow the identical rule: assignedTo/dueDate/remark are required, no
-// exceptions, same as any top-level ticket.
 const CreateThirdPartyChildSchema = z.object({
   entityTypeId: z.string().uuid(),
   fields: z.record(z.unknown()).default({}),
-  // Control-character guard required here too (security review, 2026-09-08):
-  // an unresolved assignedTo is now echoed verbatim into a system-generated
-  // comment's text -- the same sink remark's own guard protects.
-  assignedTo: z
-    .string()
-    .min(1)
-    .refine((v) => !FORBIDDEN_CHAR_PATTERN.test(v), {
-      message: "assignedTo contains a null byte or control character",
-    }),
+  // Mandatory platform-wide invariant on every creation path (this route,
+  // entities/create.ts, third-party/tickets.ts) -- title, assignedTo, and
+  // dueDate are required on every ticket, on every workflow, no exceptions.
+  // Previously assignedTo was optional here and dueDate didn't exist on
+  // this schema at all -- trivially bypassed by any direct API call. Not a
+  // per-workflow toggle like a workflow's own custom entity_fields.
+  //
+  // PR #576 review (PrabhuVijit, F2/M4) -- bounded + trimmed, same rationale
+  // as tickets.ts's identical schema field.
+  assignedTo: z.string().trim().min(1).max(256),
   dueDate: z.string().datetime(),
-  // Same control-character guard as tickets.ts's identical field -- remark
-  // is inserted as the sub-ticket's first comment, landing in the same
-  // workflow_events.metadata.text sink comments.ts's own `text` guards
-  // (found in security review, 2026-09-08).
-  remark: z
-    .string()
-    .max(4000)
-    .refine((v) => !FORBIDDEN_CHAR_PATTERN.test(v), {
-      message: "remark contains a null byte or control character",
-    }),
+  remark: z.string().trim().min(1).max(4000),
   // No state/currentState field, same rationale as Phase B's ticket-create
   // schema (spec R6 pattern) — a sub-ticket is always created into its own
   // "open" child_status, never a caller-supplied value.
@@ -91,10 +71,10 @@ export const createThirdPartyChildHandler = factory.createHandlers(
     const parentId = c.req.param("id") ?? "";
     const { tenantId, orgId, userId: authUserId } = c.get("auth");
     const { userId: actingPersonId } = c.get("actingPerson");
+    const actingPersonToken = c.req.header("X-Acting-Person-Token") ?? "";
     const input = c.req.valid("json");
     const applicationActorId = applicationActorIdFromUserId(authUserId);
     const idempotencyKey = c.req.header("Idempotency-Key");
-    const actingPersonToken = c.req.header("X-Acting-Person-Token") ?? "";
 
     const fieldsCheck = validateFieldsPayload(input.fields);
     if (!fieldsCheck.ok) {
@@ -150,19 +130,6 @@ export const createThirdPartyChildHandler = factory.createHandlers(
       return notFound(c);
     }
 
-    // Admin-only workflows are hidden from every third-party caller, no
-    // exceptions -- see workflows.adminOnly's doc comment. This route
-    // doesn't otherwise go through getWorkflow (unlike tickets.ts/
-    // list-tickets.ts), so it needs this explicit check.
-    if (parent.workflowId) {
-      const adminOnly = await withTenantContext(tenantId, (tx) =>
-        isWorkflowAdminOnly(tx, tenantId, parent.workflowId as string),
-      );
-      if (adminOnly) {
-        return notFound(c);
-      }
-    }
-
     const allowed = await withTenantContext(tenantId, (tx) =>
       hasEntityAccess(tx, tenantId, parent, actingPersonId, []),
     );
@@ -193,26 +160,43 @@ export const createThirdPartyChildHandler = factory.createHandlers(
 
     // assignedTo resolution -- same rationale/behavior as tickets.ts's
     // identical check (accepts either a raw user id or a username). Runs
-    // only after the parent-access check above (moved here in security
-    // review, 2026-09-08) so this org-lookup -- and the accepted
-    // real-org-member oracle it exposes -- can't be probed via a
-    // nonexistent or inaccessible parent ticket id.
-    //
-    // Policy (2026-09-08, revised from an earlier 422-on-failure design):
-    // an unresolvable assignedTo no longer blocks sub-ticket creation --
-    // see tickets.ts's identical comment for the full rationale (this was a
-    // deliberate reversal of the same-day 422 design once the security
-    // review flagged it as a fast, scriptable existence oracle). The
-    // sub-ticket is always created (unassigned if resolution failed), and
-    // the failure is reported only via a system comment notification below.
-    const assignedToResolution = await resolveOrgMemberUserId(
-      orgId,
-      actingPersonToken,
-      input.assignedTo,
-    );
-    const resolvedAssignedTo = assignedToResolution.ok
-      ? assignedToResolution.userId
-      : undefined;
+    // only after the parent-access check above -- ported alongside the
+    // sibling AuthNexus fork's own security-review fix, which moved this
+    // here specifically so the org-lookup (and the accepted real-org-member
+    // oracle it exposes) can't be probed via a nonexistent or inaccessible
+    // parent ticket id.
+    // Policy (ported from the sibling AuthNexus fork, revised from an
+    // earlier 422-on-failure design tried the same day): an unresolvable
+    // assignedTo no longer blocks sub-ticket creation. The sub-ticket is
+    // always created (unassigned if resolution failed), and the caller
+    // learns about the failure only via a system-generated comment
+    // notification below, never via a synchronous 422. assignedTo is
+    // mandatory (CreateThirdPartyChildSchema) but that only means the
+    // caller must send something -- resolution can still fail, orthogonally.
+    let resolvedAssignedTo: string | undefined;
+    let assignedToUnresolved = false;
+    // PR #576 review (PrabhuVijit, F3) -- same guard as tickets.ts's
+    // identical check: orgId is optional on AuthContext, and without this
+    // guard an absent orgId would silently treat every assignedTo as
+    // unresolved rather than skipping resolution outright.
+    if (!orgId) {
+      logger.warn(
+        { tenantId },
+        "third-party sub-ticket create: assignedTo resolution skipped -- orgId absent from auth context",
+      );
+      resolvedAssignedTo = input.assignedTo;
+    } else {
+      const assignedToResolution = await resolveOrgMemberUserId(
+        orgId,
+        actingPersonToken,
+        input.assignedTo,
+      );
+      if (assignedToResolution.ok) {
+        resolvedAssignedTo = assignedToResolution.userId;
+      } else {
+        assignedToUnresolved = true;
+      }
+    }
 
     const response = await withIdempotency(
       {
@@ -225,7 +209,7 @@ export const createThirdPartyChildHandler = factory.createHandlers(
         parentId,
         entityTypeId: input.entityTypeId,
         fields: input.fields,
-        assignedTo: resolvedAssignedTo,
+        assignedTo: resolvedAssignedTo ?? null,
         dueDate: input.dueDate,
         remark: input.remark,
       },
@@ -257,88 +241,6 @@ export const createThirdPartyChildHandler = factory.createHandlers(
               action: "child.created",
               metadata: { parentId },
             });
-
-            // Matches entities/create.ts's and tickets.ts's own
-            // remark-as-first-comment behavior -- see tickets.ts's identical
-            // block for the full rationale. Best-effort: a failure here must
-            // never fail sub-ticket creation itself.
-            const remark = input.remark.trim();
-            let remarkCommentEventId: string | undefined;
-            if (remark && created.instance.workflowId) {
-              try {
-                const [commentEvent] = await tx
-                  .insert(workflowEvents)
-                  .values({
-                    tenantId,
-                    instanceId: created.instance.id,
-                    workflowId: created.instance.workflowId,
-                    fromState: created.instance.currentState,
-                    toState: created.instance.currentState,
-                    triggeredBy: "api_key",
-                    actorId: actingPersonId,
-                    comment: null,
-                    metadata: {
-                      type: "comment",
-                      text: remark,
-                      actorType: "api_key",
-                      actingPersonId,
-                    },
-                    originMechanism: "api",
-                    originOidcClientId,
-                    originPerformerUserId: actingPersonId,
-                  })
-                  .returning();
-                if (commentEvent) {
-                  remarkCommentEventId = commentEvent.id;
-                  await tx.insert(outboxEvents).values({
-                    tenantId,
-                    eventType: "comment.created",
-                    version: 1,
-                    payload: {
-                      eventType: "comment.created",
-                      version: 1,
-                      tenantId,
-                      instanceId: created.instance.id,
-                      actorId: actingPersonId,
-                      commentId: commentEvent.id,
-                    },
-                  });
-                }
-              } catch (remarkErr) {
-                logger.error(
-                  { remarkErr, tenantId, instanceId: created.instance.id },
-                  "third-party sub-ticket create: failed to post remark as first comment",
-                );
-              }
-            }
-
-            // See resolveOrgMemberUserId call above and post-system-comment.ts
-            // -- notify the creator that assignedTo didn't resolve via a
-            // system comment, never via the API response itself.
-            // Best-effort: must never fail sub-ticket creation itself.
-            if (!assignedToResolution.ok && created.instance.workflowId) {
-              try {
-                await postSystemComment(tx, {
-                  tenantId,
-                  instanceId: created.instance.id,
-                  workflowId: created.instance.workflowId,
-                  currentState: created.instance.currentState,
-                  text: `assignedTo "${input.assignedTo}" could not be resolved to an org member -- this sub-ticket was created unassigned.`,
-                  replyToEventId: remarkCommentEventId,
-                  notifyUserId: actingPersonId,
-                });
-              } catch (systemCommentErr) {
-                logger.error(
-                  {
-                    systemCommentErr,
-                    tenantId,
-                    instanceId: created.instance.id,
-                  },
-                  "third-party sub-ticket create: failed to post assignedTo-unresolved system comment",
-                );
-              }
-            }
-
             // ADR-012 Phase G, spec R7 -- same redact-then-strip pass the
             // GET routes apply, so a create response is never a second,
             // unfiltered path to the same ticket data (pii/financial values,
@@ -358,6 +260,83 @@ export const createThirdPartyChildHandler = factory.createHandlers(
               },
             };
           });
+
+          // Best-effort, outside the create transaction (already committed
+          // by this point) -- a failure here must never surface as a failed
+          // sub-ticket creation. See post-remark-comment.ts.
+          if (result.instance.workflowId) {
+            try {
+              await withTenantContext(tenantId, (tx) =>
+                postRemarkComment(tx, {
+                  tenantId,
+                  instanceId: result.instance.id,
+                  workflowId: result.instance.workflowId as string,
+                  currentState: result.instance.currentState,
+                  actorId: applicationActorId,
+                  text: input.remark,
+                }),
+              );
+            } catch (remarkErr) {
+              logger.error(
+                { remarkErr, tenantId, instanceId: result.instance.id },
+                "third-party sub-ticket create: failed to post remark as first comment",
+              );
+            }
+          } else {
+            // PR #659 review (Vijit), G9: remark is mandatory in
+            // CreateThirdPartyChildSchema, so a null workflowId here means
+            // it's silently dropped with no trace -- log it rather than
+            // return 201 with no signal anything was skipped.
+            logger.warn(
+              { tenantId, instanceId: result.instance.id },
+              "third-party sub-ticket create: remark not posted -- no workflowId on newly created child",
+            );
+          }
+
+          // PR #576 review (PrabhuVijit, F1) -- deliberately OUTSIDE the
+          // transaction above, in its own withTenantContext call. See
+          // tickets.ts's identical fix for the full rationale: running this
+          // inside the main transaction meant any failure in
+          // postSystemComment's inserts left Postgres in an aborted-
+          // transaction state that the try/catch could not undo, so the
+          // subsequent COMMIT would fail and roll back the sub-ticket
+          // creation too. See resolveOrgMemberUserId call above and
+          // post-system-comment.ts -- notify the creator that assignedTo
+          // didn't resolve via a system comment, never via the API response
+          // itself. Top-level (no replyTo) -- could reply to the remark
+          // comment just posted above, but that coupling is deliberately
+          // not made here.
+          if (assignedToUnresolved && result.instance.workflowId) {
+            try {
+              await withTenantContext(tenantId, (tx) =>
+                postSystemComment(tx, {
+                  tenantId,
+                  instanceId: result.instance.id,
+                  // TS discards the outer `if` guard's narrowing of
+                  // result.instance.workflowId once it's read inside this
+                  // nested arrow function -- the guard above already
+                  // ensures it's truthy here.
+                  workflowId: result.instance.workflowId as string,
+                  currentState: result.instance.currentState,
+                  // PR #576 review (PrabhuVijit, F2) -- same rationale as
+                  // tickets.ts's identical fix: never echo the caller-
+                  // supplied assignedTo value into a System-attributed
+                  // record.
+                  text: "The assignedTo value you provided could not be resolved to an org member -- this sub-ticket was created unassigned.",
+                  notifyUserId: actingPersonId,
+                }),
+              );
+            } catch (systemCommentErr) {
+              logger.error(
+                {
+                  systemCommentErr,
+                  tenantId,
+                  instanceId: result.instance.id,
+                },
+                "third-party sub-ticket create: failed to post assignedTo-unresolved system comment",
+              );
+            }
+          }
           return { status: 201, body: { data: result.instance } };
         } catch (err) {
           if (
@@ -375,14 +354,20 @@ export const createThirdPartyChildHandler = factory.createHandlers(
             };
           }
           const errResponse = handleEntityError(c, err);
+          const status = isIdempotencyStatus(errResponse.status)
+            ? errResponse.status
+            : 500;
           return {
-            status: errResponse.status,
+            status,
             body: (await errResponse.json()) as unknown,
+            doNotCache: status >= 500,
           };
         }
       },
     );
 
-    return c.json(response.body as object, response.status as never);
+    forwardResponseHeaders(c, response);
+
+    return c.json(response.body as object, response.status);
   },
 );

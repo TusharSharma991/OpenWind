@@ -105,20 +105,33 @@ export const getThirdPartyWorkflowFieldsHandler = factory.createHandlers(
             type: field.fieldType,
             required: field.isRequired,
             sensitivity: field.sensitivity,
+            // Passed through raw and unvalidated. Safe today because
+            // `config`'s shape per field type (options/min-max/currencies
+            // etc.) never carries anything sensitive or internal-only --
+            // but if a future field type's config ever grows a field that
+            // shouldn't cross the third-party boundary, it needs an
+            // explicit allow-list/strip step here, not an implicit "it's
+            // always been fine" assumption.
             config: field.config,
           })),
-          // Mandatory-baseline-fields policy (2026-09-07): assignedTo/
-          // dueDate/remark are required on every ticket create (tickets.ts's
-          // CreateThirdPartyTicketSchema), but they are NOT entity_fields
-          // rows -- they're fixed columns every entity_instances row has,
-          // so `fields` above (sourced from listEntityFields) never mentions
-          // them. Without this, an integration following this endpoint's own
-          // documented purpose (build your create form from this response)
-          // would have no way to discover these three exist at all, and
-          // every create would 400 unexplained. Listed separately from
-          // `fields` -- unlike those, these are TOP-LEVEL request body keys
-          // (POST /tickets's `assignedTo`/`dueDate`/`remark`, sibling to
-          // `fields`), never nested inside the `fields` object.
+          // Mandatory-baseline-fields policy (2026-09-07, updated for
+          // docs/specs/ticket-severity-and-tags.md R1): assignedTo/dueDate/
+          // remark are required on every ticket create (tickets.ts's
+          // CreateThirdPartyTicketSchema); severity is optional (defaults to
+          // medium). Unlike entities/create.ts (admin-ui path), the
+          // third-party API does not yet support teamId as an alternative to
+          // assignedTo -- team-assign-oncall-fallback.md's R1 is scoped to
+          // the admin-ui create form only, not this surface. None of these
+          // are entity_fields rows -- they're fixed columns every
+          // entity_instances row has, so `fields` above (sourced from
+          // listEntityFields) never mentions them. Without this, an
+          // integration following this endpoint's own documented purpose
+          // (build your create form from this response) would have no way
+          // to discover these exist at all, and every create would 400
+          // unexplained. Listed separately from `fields` -- unlike those,
+          // these are TOP-LEVEL request body keys (POST /tickets's own
+          // fields, sibling to `fields`), never nested inside the `fields`
+          // object.
           baselineFields: [
             {
               name: "assignedTo",
@@ -137,6 +150,12 @@ export const getThirdPartyWorkflowFieldsHandler = factory.createHandlers(
               label: "Remark",
               type: "longtext",
               required: true,
+            },
+            {
+              name: "severity",
+              label: "Severity",
+              type: "enum",
+              required: false,
             },
           ],
         },

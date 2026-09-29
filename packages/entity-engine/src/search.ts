@@ -84,6 +84,7 @@ export async function searchEntities(
       originMechanism: entityInstances.originMechanism,
       originOidcClientId: entityInstances.originOidcClientId,
       originPerformerUserId: entityInstances.originPerformerUserId,
+      severity: entityInstances.severity,
       rank: rankExpr,
     })
     .from(entityInstances)
@@ -126,8 +127,13 @@ function rowToInstance(
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     deletedAt: row.deletedAt ?? null,
+    // Drizzle infers this text() column as string | null, not the narrower
+    // union — migration 0093's CHECK constraint guarantees only these two
+    // values (or null) are ever stored, so the type system can't infer it
+    // but the DB does enforce it.
     originMechanism: row.originMechanism as "api" | "handoff" | null,
     originOidcClientId: row.originOidcClientId ?? null,
     originPerformerUserId: row.originPerformerUserId ?? null,
+    severity: row.severity ?? null,
   };
 }

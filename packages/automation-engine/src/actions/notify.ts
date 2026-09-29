@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Redis } from "ioredis";
-import { Queue } from "bullmq";
+import { Queue } from "@platform/telemetry";
 import type { DbOrTx } from "@platform/db";
 import {
   notifications,
@@ -180,18 +180,22 @@ export async function executeNotifyAction(
       // consumes — jobId dedupes at the queue level if this exact call somehow
       // ran twice with the same notificationId.
       const queue = new Queue("notify-outbound", { connection: redis });
-      await queue
-        .add(
-          "dispatch",
-          { notificationId, tenantId },
-          { jobId: notificationId },
-        )
-        .catch((err: unknown) => {
-          logger.error(
-            { err, tenantId, notificationId },
-            "Automation: failed to enqueue outbound handoff for notify action",
-          );
-        });
+      try {
+        await queue
+          .add(
+            "dispatch",
+            { notificationId, tenantId },
+            { jobId: notificationId },
+          )
+          .catch((err: unknown) => {
+            logger.error(
+              { err, tenantId, notificationId },
+              "Automation: failed to enqueue outbound handoff for notify action",
+            );
+          });
+      } finally {
+        await queue.close();
+      }
     } else {
       logger.info(
         { tenantId, notificationId },

@@ -24,6 +24,7 @@ vi.mock("./notification-bell.js", () => ({
   NotificationBell: () => null,
 }));
 
+const TEST_PROJECT_ID = "test-project";
 const mockGetUser = vi.fn(
   (): Promise<{ profile: Record<string, unknown> }> =>
     Promise.resolve({ profile: {} }),
@@ -32,6 +33,18 @@ vi.mock("../authProvider.js", () => ({
   userManager: {
     getUser: () => mockGetUser(),
     events: { addUserLoaded: vi.fn(), removeUserLoaded: vi.fn() },
+  },
+  // Mirrors authProvider.ts's own getRolesFromProfile — AuthNexus's real
+  // claim shape (nexus_projects[].roles), not Zitadel's namespaced claim.
+  getRolesFromProfile: (
+    profile: Record<string, unknown> | undefined,
+  ): string[] => {
+    if (!profile) return [];
+    const nexusProjects = (profile["nexus_projects"] ?? []) as Array<{
+      id: string;
+      roles: string[];
+    }>;
+    return nexusProjects.find((p) => p.id === TEST_PROJECT_ID)?.roles ?? [];
   },
 }));
 
@@ -48,9 +61,8 @@ function renderLayout(): ReturnType<typeof render> {
 }
 
 function mockUserWithRoles(roles: string[]): void {
-  const rolesMap = Object.fromEntries(roles.map((r) => [r, {}]));
   mockGetUser.mockResolvedValue({
-    profile: { "urn:zitadel:iam:org:project:roles": rolesMap },
+    profile: { nexus_projects: [{ id: TEST_PROJECT_ID, roles }] },
   });
 }
 
@@ -67,6 +79,7 @@ describe("Layout sidebar — workspace vs admin-only sections", () => {
     expect(screen.getByText("Automations")).not.toBeNull();
     expect(screen.getByText("System Logs")).not.toBeNull();
     expect(screen.getByText("API Keys")).not.toBeNull();
+    expect(screen.getByText("On-Call")).not.toBeNull();
     // API Access Logs has no nav entry of its own anymore — its data is
     // already reachable via the API Keys page's own internal view.
     expect(screen.queryByText("API Access Logs")).toBeNull();
@@ -75,6 +88,8 @@ describe("Layout sidebar — workspace vs admin-only sections", () => {
     expect(screen.getByText("Users")).not.toBeNull();
   });
 
+  // Workflows is admin-only (moved out of the all-roles workspace nav, see
+  // layout.tsx's WORKFLOWS_NAV comment) -- an agent must not see it here.
   it("hides the 'Admin' section entirely for an agent (no admin role), but still shows workspace nav including Users", async () => {
     mockUserWithRoles(["agent"]);
     renderLayout();
@@ -82,15 +97,17 @@ describe("Layout sidebar — workspace vs admin-only sections", () => {
     // Dashboard (workspace nav) still renders once roles resolve — used as
     // the "identity has loaded" signal before asserting the negative below.
     await waitFor(() => expect(screen.getByText("Dashboard")).not.toBeNull());
+    expect(screen.getByText("Records")).not.toBeNull();
+    expect(screen.getByText("Users")).not.toBeNull();
 
     expect(screen.queryByText("Admin")).toBeNull();
+    expect(screen.queryByText("Workflows")).toBeNull();
     expect(screen.queryByText("Analytics")).toBeNull();
     expect(screen.queryByText("Templates")).toBeNull();
     expect(screen.queryByText("Automations")).toBeNull();
     expect(screen.queryByText("System Logs")).toBeNull();
     expect(screen.queryByText("API Keys")).toBeNull();
+    expect(screen.queryByText("On-Call")).toBeNull();
     expect(screen.queryByText("API Access Logs")).toBeNull();
-    // Users moved into the all-roles workspace section — an agent sees it.
-    expect(screen.getByText("Users")).not.toBeNull();
   });
 });

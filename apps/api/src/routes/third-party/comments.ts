@@ -15,6 +15,7 @@ import { resolveOriginOidcClientId } from "../../lib/resolve-origin-oidc-client-
 import { zValidator } from "../../lib/validator.js";
 import { factory } from "./factory.js";
 import { requireTicketScope } from "./require-ticket-scope.js";
+import { forwardResponseHeaders } from "./utils.js";
 import { hasEntityCommentAccessFull } from "../../lib/entity-access.js";
 import { mentionResolutionQueue } from "../../lib/mention-resolution-queue.js";
 import {
@@ -23,7 +24,7 @@ import {
   MAX_ATTACHMENTS_PER_TICKET,
 } from "./attachments-reference.js";
 import { notFound } from "./not-found.js";
-import { withIdempotency } from "../../lib/idempotency.js";
+import { withIdempotency, isIdempotencyStatus } from "../../lib/idempotency.js";
 import { FORBIDDEN_CHAR_PATTERN } from "./validate-fields-payload.js";
 
 const CreateThirdPartyCommentSchema = z.object({
@@ -35,11 +36,11 @@ const CreateThirdPartyCommentSchema = z.object({
       message: "text contains a null byte or control character",
     }),
   // Accepts a userId, email, or username (loginName) -- widened from the
-  // original spec R4 wording ("email or Zitadel org user ID") on 2026-09-08:
-  // a real person composing an @mention naturally has a username on hand,
-  // never an opaque userId, matching how the platform's own admin-ui
-  // @mention picker already works. Never a free-text display name, though
-  // (still no fuzzy/display-name matching -- see resolveIdentifier in
+  // original spec R4 wording ("email or org user ID") on 2026-09-08: a real
+  // person composing an @mention naturally has a username on hand, never an
+  // opaque userId, matching how the platform's own admin-ui @mention picker
+  // already works. Never a free-text display name, though (still no
+  // fuzzy/display-name matching -- see resolveIdentifier in
   // mention-resolution-worker.ts for the exact three-way match). Resolution
   // happens fully async, after this response is
   // already sent (spec R5/R6) — see mention-resolution-worker.ts. An
@@ -55,11 +56,15 @@ const CreateThirdPartyCommentSchema = z.object({
   // system-generated reply's text (mention-resolution-worker.ts's outcome-3
   // branch) -- the same workflow_events.metadata.text sink `text` above
   // guards.
+  // PR #576 review (PrabhuVijit, F2/M4) -- per-item length bound, same
+  // rationale as tickets.ts/children.ts's assignedTo field.
   mentions: z
     .array(
       z
         .string()
+        .trim()
         .min(1)
+        .max(256)
         .refine((v) => !FORBIDDEN_CHAR_PATTERN.test(v), {
           message: "mentions entry contains a null byte or control character",
         }),
@@ -215,7 +220,12 @@ export const createThirdPartyCommentHandler = factory.createHandlers(
           );
         } catch (err) {
           if (err instanceof AttachmentReferenceError) {
-            return { status: err.status, body: err.body };
+            const status = isIdempotencyStatus(err.status) ? err.status : 500;
+            return {
+              status,
+              body: err.body,
+              doNotCache: status >= 500,
+            };
           }
           throw err;
         }
@@ -270,6 +280,7 @@ export const createThirdPartyCommentHandler = factory.createHandlers(
               error: "INTERNAL_ERROR",
               message: "Failed to record comment",
             },
+            doNotCache: true,
           };
         }
 
@@ -331,6 +342,8 @@ export const createThirdPartyCommentHandler = factory.createHandlers(
       },
     );
 
-    return c.json(response.body as object, response.status as never);
+    forwardResponseHeaders(c, response);
+
+    return c.json(response.body as object, response.status);
   },
 );

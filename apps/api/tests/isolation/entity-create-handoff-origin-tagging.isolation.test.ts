@@ -16,20 +16,18 @@ import { createEntityType } from "@platform/entity-engine";
 import { hashApiKey } from "@platform/auth";
 import type { AuthContext } from "@platform/auth";
 import { createEntityHandler } from "../../src/routes/entities/create.js";
-import type * as AuthnexusManagement from "../../src/lib/authnexus-management.js";
 
-// Mandatory-baseline-fields policy (2026-09-07): assignedTo is now required
-// on every create, and create.ts validates it resolves to a real tenant
-// member with the "user" role via AuthNexus's admin API (an external
-// service call, not the database -- mocking it here follows
-// testing-conventions.md's "mock at service boundaries, never the DB"
-// rule; this is still a real-Postgres isolation test otherwise).
-const ASSIGNED_TO = "handoff-origin-test-assignee";
+// assignedTo is now mandatory (platform-wide invariant) and resolves against
+// a real AuthNexus role lookup -- mocked at the service boundary per
+// testing-conventions.md, same pattern as third-party-ticket-create's own
+// listOrgUsers mock. "handoff-origin-test-assignee" is the only fixture
+// this file's request bodies ever assign to.
+import type * as AuthnexusManagement from "../../src/lib/authnexus-management.js";
 vi.mock("../../src/lib/authnexus-management.js", async (importOriginal) => {
   const real = await importOriginal<typeof AuthnexusManagement>();
   return {
     ...real,
-    listUserIdsWithRole: async () => new Set([ASSIGNED_TO]),
+    listUserIdsWithRole: async () => new Set(["handoff-origin-test-assignee"]),
   };
 });
 
@@ -38,6 +36,14 @@ const ACTIVE_KEY_ID = "90000000-9000-4000-9000-000000000001";
 const REVOKED_KEY_ID = "90000000-9000-4000-9000-000000000002";
 const ACTIVE_CLIENT_ID = "handoff-origin-test-active-client";
 const REVOKED_CLIENT_ID = "handoff-origin-test-revoked-client";
+
+// PR #556 review (PrabhuVijit, follow-up) — a second tenant with its own
+// active key, used to prove isValidActiveAppClientId (create.ts) rejects an
+// appClientId that resolves to a real, active key belonging to a DIFFERENT
+// tenant than the caller's own.
+const OTHER_TENANT = "aabbccdd-0000-4000-a000-000000000091";
+const OTHER_TENANT_KEY_ID = "90000000-9000-4000-9000-000000000003";
+const OTHER_TENANT_CLIENT_ID = "handoff-origin-test-other-tenant-client";
 
 let entityTypeId: string;
 const createdInstanceIds: string[] = [];
@@ -55,6 +61,12 @@ beforeAll(async () => {
     allowCustomFields: true,
   });
   entityTypeId = entityType.id;
+
+  await db.insert(tenants).values({
+    id: OTHER_TENANT,
+    name: "Handoff Origin Tagging Test — Other Tenant",
+    slug: `handoff-origin-tagging-other-${OTHER_TENANT}`,
+  });
 
   await db.insert(apiKeys).values([
     {
@@ -76,6 +88,15 @@ beforeAll(async () => {
       oidcClientId: REVOKED_CLIENT_ID,
       revokedAt: new Date(),
     },
+    {
+      id: OTHER_TENANT_KEY_ID,
+      tenantId: OTHER_TENANT,
+      name: "Handoff Origin Test Other-Tenant Active Key",
+      keyHash: hashApiKey(`sk_handoff_origin_other_tenant_${OTHER_TENANT}`),
+      scopesFormat: "action",
+      scopes: ["entity:ticket:create"],
+      oidcClientId: OTHER_TENANT_CLIENT_ID,
+    },
   ]);
 });
 
@@ -85,7 +106,9 @@ afterAll(async () => {
   }
   await db.delete(apiKeys).where(eq(apiKeys.id, ACTIVE_KEY_ID));
   await db.delete(apiKeys).where(eq(apiKeys.id, REVOKED_KEY_ID));
+  await db.delete(apiKeys).where(eq(apiKeys.id, OTHER_TENANT_KEY_ID));
   await db.delete(tenants).where(eq(tenants.id, TENANT));
+  await db.delete(tenants).where(eq(tenants.id, OTHER_TENANT));
 });
 
 type Vars = { Variables: { auth: AuthContext } };
@@ -115,10 +138,10 @@ describe("POST /entities appClientId validation (docs/specs/hosted-ticket-create
       body: JSON.stringify({
         entityTypeId,
         fields: {},
+        assignedTo: "handoff-origin-test-assignee",
+        dueDate: "2026-01-01T00:00:00.000Z",
+        remark: "a remark",
         appClientId: ACTIVE_CLIENT_ID,
-        assignedTo: ASSIGNED_TO,
-        dueDate: "2026-12-01T00:00:00.000Z",
-        remark: "test remark",
       }),
     });
     expect(res.status).toBe(201);
@@ -146,9 +169,9 @@ describe("POST /entities appClientId validation (docs/specs/hosted-ticket-create
       body: JSON.stringify({
         entityTypeId,
         fields: {},
-        assignedTo: ASSIGNED_TO,
-        dueDate: "2026-12-01T00:00:00.000Z",
-        remark: "test remark",
+        assignedTo: "handoff-origin-test-assignee",
+        dueDate: "2026-01-01T00:00:00.000Z",
+        remark: "a remark",
       }),
     });
     expect(res.status).toBe(201);
@@ -175,10 +198,10 @@ describe("POST /entities appClientId validation (docs/specs/hosted-ticket-create
       body: JSON.stringify({
         entityTypeId,
         fields: {},
+        assignedTo: "handoff-origin-test-assignee",
+        dueDate: "2026-01-01T00:00:00.000Z",
+        remark: "a remark",
         appClientId: "not-a-real-registered-client-id",
-        assignedTo: ASSIGNED_TO,
-        dueDate: "2026-12-01T00:00:00.000Z",
-        remark: "test remark",
       }),
     });
     expect(res.status).toBe(422);
@@ -197,12 +220,45 @@ describe("POST /entities appClientId validation (docs/specs/hosted-ticket-create
       body: JSON.stringify({
         entityTypeId,
         fields: {},
+        assignedTo: "handoff-origin-test-assignee",
+        dueDate: "2026-01-01T00:00:00.000Z",
+        remark: "a remark",
         appClientId: REVOKED_CLIENT_ID,
-        assignedTo: ASSIGNED_TO,
-        dueDate: "2026-12-01T00:00:00.000Z",
-        remark: "test remark",
       }),
     });
     expect(res.status).toBe(422);
+  });
+
+  // PR #556 review (PrabhuVijit, follow-up) — proves isValidActiveAppClientId
+  // (create.ts) rejects an appClientId that resolves to a real, active key,
+  // but one belonging to a DIFFERENT tenant than the caller's own. Without
+  // the tenantId filter this test guards, a Tenant A caller who knew Tenant
+  // B's oidcClientId could pass validation and falsely attribute their own
+  // ticket to Tenant B's application.
+  it("rejects appClientId belonging to a different tenant — no entity row is created", async () => {
+    const before = await db
+      .select({ id: entityInstances.id })
+      .from(entityInstances)
+      .where(eq(entityInstances.entityTypeId, entityTypeId));
+
+    const res = await makeApp().request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        entityTypeId,
+        fields: {},
+        assignedTo: "handoff-origin-test-assignee",
+        dueDate: "2026-01-01T00:00:00.000Z",
+        remark: "a remark",
+        appClientId: OTHER_TENANT_CLIENT_ID,
+      }),
+    });
+    expect(res.status).toBe(422);
+
+    const after = await db
+      .select({ id: entityInstances.id })
+      .from(entityInstances)
+      .where(eq(entityInstances.entityTypeId, entityTypeId));
+    expect(after.length).toBe(before.length);
   });
 });

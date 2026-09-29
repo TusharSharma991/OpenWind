@@ -7,9 +7,17 @@ export {
   lookupOrgIdByTenantId,
   API_KEY_DEFAULT_TTL_DAYS,
   API_KEY_ROTATION_OVERLAP_HOURS,
+  billingGate,
+  resolveTenantPlan,
+  resolveTenantIpAllowlist,
+  checkIpInAllowlist,
 } from "./middleware.js";
 export {
   invalidateTenantStatusCache,
+  getCachedTenantPlan,
+  setCachedTenantPlan,
+  getCachedTenantIpAllowlist,
+  setCachedTenantIpAllowlist,
   startTenantStatusInvalidationSubscriber,
   stopTenantStatusInvalidationSubscriber,
 } from "./tenant-status-cache.js";

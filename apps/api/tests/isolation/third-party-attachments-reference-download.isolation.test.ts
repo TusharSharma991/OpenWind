@@ -28,6 +28,19 @@ import type { AuthContext, ActingPersonContext } from "@platform/auth";
 import { presignAttachmentHandler } from "../../src/routes/third-party/attachments-presign.js";
 import { uploadAttachmentHandler } from "../../src/routes/third-party/attachments-upload.js";
 import { downloadAttachmentHandler } from "../../src/routes/third-party/attachments-download.js";
+
+// assignedTo is now mandatory (platform-wide invariant) on ticket create.
+// Its *resolution* isn't what this file tests, so mock listOrgUsers empty --
+// resolveOrgMemberUserId then cleanly reports unresolved and the ticket is
+// still created (unassigned), same graceful-degradation policy covered by
+// third-party-ticket-create.isolation.test.ts. Mocked at the service
+// boundary per testing-conventions.md, not left to hit a real Zitadel org
+// that doesn't exist for this test's fake orgId.
+import type * as ZitadelManagement from "../../src/lib/zitadel-management.js";
+vi.mock("../../src/lib/zitadel-management.js", async (importOriginal) => {
+  const real = await importOriginal<typeof ZitadelManagement>();
+  return { ...real, listOrgUsers: async () => [] };
+});
 import { createThirdPartyCommentHandler } from "../../src/routes/third-party/comments.js";
 import { createThirdPartyTicketHandler } from "../../src/routes/third-party/tickets.js";
 

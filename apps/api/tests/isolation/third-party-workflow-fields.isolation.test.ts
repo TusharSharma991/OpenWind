@@ -299,6 +299,12 @@ describe("GET /api/v1/workflows/:workflowId/fields", () => {
       },
       { name: "dueDate", label: "Due Date", type: "datetime", required: true },
       { name: "remark", label: "Remark", type: "longtext", required: true },
+      {
+        name: "severity",
+        label: "Severity",
+        type: "enum",
+        required: false,
+      },
     ]);
   });
 

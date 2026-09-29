@@ -54,6 +54,16 @@ const EnvSchema = z
     // per-user; 100/min collapsed under completely normal 2-user concurrent
     // browsing, not abuse. See security.md for the current documented value.
     RATE_LIMIT_TENANT_PER_MIN: z.coerce.number().int().positive().default(600),
+    // docs/temporal-scheduler-design.md §3.1/§3.5 — the scheduler tick's poll
+    // interval and its cap on missed fires executed in one catch-up run
+    // (SCHEDULE_CATCH_UP_MAX exists specifically so a long worker outage on a
+    // frequent rule can't flood the tenant with hundreds of retroactive tickets).
+    SCHEDULE_TICK_INTERVAL_SECONDS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(60),
+    SCHEDULE_CATCH_UP_MAX: z.coerce.number().int().min(1).max(100).default(24),
     // ADR-012 Phase G, ADR-013 — two more tiers on top of the tenant one
     // above, specific to third-party API-key traffic: aggregate per-key
     // (this key's total request volume, regardless of which acting person)
@@ -204,7 +214,33 @@ const EnvSchema = z
     // AppRole auth (production) — both required together when OPENBAO_TOKEN is absent
     OPENBAO_ROLE_ID: z.string().optional(),
     OPENBAO_SECRET_ID: z.string().optional(),
+    // Telemetry and Tracing (Stage 0)
+    TELEMETRY_ENABLED: z
+      .string()
+      .transform((v) => v === "true")
+      .default("false"),
+    OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
+    OTEL_SERVICE_NAME: z.string().optional(),
+    METRICS_TOKEN: z.string().default("dev-metrics-token-12345"),
+    OTEL_TRACE_SAMPLE_RATIO: z
+      .string()
+      .transform((v) => parseFloat(v))
+      .default("0.01"),
+    // Error Tracking (Stage 1)
+    ERROR_TRACKING_PROVIDER: z
+      .enum(["sentry", "glitchtip", "bugsink", "none"])
+      .default("none"),
+    SENTRY_DSN: z.string().url().optional(),
+    // Trusted Proxies Configuration (e.g. "true", "false", or comma-separated IPs/CIDRs)
+    TRUST_PROXY: z.string().default("false"),
   })
+  .refine(
+    (v) => v.ERROR_TRACKING_PROVIDER === "none" || v.SENTRY_DSN !== undefined,
+    {
+      message:
+        "SENTRY_DSN is required when ERROR_TRACKING_PROVIDER is set to a provider",
+    },
+  )
   .refine(
     (v) => v.SECRETS_PROVIDER !== "openbao" || v.OPENBAO_ADDR !== undefined,
     {
@@ -244,3 +280,27 @@ export type Env = z.infer<typeof EnvSchema>;
 // parse a minimal env object directly instead of mutating process.env before
 // this module's top-level `env.parse(process.env)` side effect has already run.
 export { EnvSchema };
+
+export interface PlanLimits {
+  apiCallsPerDay: number;
+  storageBytes: number;
+  aiTokensPerDay: number;
+}
+
+export const PLAN_LIMITS: Record<string, PlanLimits> = {
+  standard: {
+    apiCallsPerDay: 10_000,
+    storageBytes: 10 * 1024 * 1024 * 1024, // 10 GB
+    aiTokensPerDay: 50_000,
+  },
+  premium: {
+    apiCallsPerDay: 100_000,
+    storageBytes: 100 * 1024 * 1024 * 1024, // 100 GB
+    aiTokensPerDay: 500_000,
+  },
+  enterprise: {
+    apiCallsPerDay: 1_000_000,
+    storageBytes: 1000 * 1024 * 1024 * 1024, // 1 TB
+    aiTokensPerDay: 5_000_000,
+  },
+};

@@ -22,15 +22,28 @@ vi.mock("../../lib/api.js", () => ({
   fetchWithAuth: (url: string) => mockFetchWithAuth(url),
 }));
 
+const TEST_PROJECT_ID = "test-project";
 vi.mock("../../authProvider.js", () => ({
   userManager: {
     getUser: () =>
       Promise.resolve({
         profile: {
           sub: "admin-1",
-          "urn:zitadel:iam:org:project:roles": { admin: {} },
+          nexus_projects: [{ id: TEST_PROJECT_ID, roles: ["admin"] }],
         },
       } as unknown),
+  },
+  // Mirrors authProvider.ts's own getRolesFromProfile — AuthNexus's real
+  // claim shape (nexus_projects[].roles), not Zitadel's namespaced claim.
+  getRolesFromProfile: (
+    profile: Record<string, unknown> | undefined,
+  ): string[] => {
+    if (!profile) return [];
+    const nexusProjects = (profile["nexus_projects"] ?? []) as Array<{
+      id: string;
+      roles: string[];
+    }>;
+    return nexusProjects.find((p) => p.id === TEST_PROJECT_ID)?.roles ?? [];
   },
 }));
 
@@ -63,44 +76,58 @@ function mockRoutes(): void {
       return Promise.resolve({ data: [] });
     }
     if (url.includes(`/entities?entityTypeId=${ENTITY_TYPE_ID}`)) {
-      return Promise.resolve({
-        data: [
-          {
-            id: "internal-ticket",
-            currentState: null,
-            fields: {},
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            origin: null,
+      const allTickets = [
+        {
+          id: "internal-ticket",
+          currentState: null,
+          fields: {},
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          origin: null,
+        },
+        {
+          id: "api-ticket",
+          currentState: null,
+          fields: {},
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          origin: {
+            mechanism: "api",
+            appName: "Acme Sync",
+            performerUserId: "u1",
+            performerDisplayName: "Jane Doe",
           },
-          {
-            id: "api-ticket",
-            currentState: null,
-            fields: {},
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            origin: {
-              mechanism: "api",
-              appName: "Acme Sync",
-              performerUserId: "u1",
-              performerDisplayName: "Jane Doe",
-            },
+        },
+        {
+          id: "handoff-ticket",
+          currentState: null,
+          fields: {},
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          origin: {
+            mechanism: "handoff",
+            appName: "Acme Portal",
+            performerUserId: "u2",
+            performerDisplayName: "Real User",
           },
-          {
-            id: "handoff-ticket",
-            currentState: null,
-            fields: {},
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            origin: {
-              mechanism: "handoff",
-              appName: "Acme Portal",
-              performerUserId: "u2",
-              performerDisplayName: "Real User",
-            },
-          },
-        ],
-      });
+        },
+      ];
+      // Origin (Source) filtering moved server-side (workflow-records.tsx's
+      // fetch effect sends `origin` as a query param instead of filtering
+      // client-side) -- this mock must apply the same filter itself, or
+      // every "Source" selection is a no-op against the real component.
+      const origin = new URL(url, "http://localhost").searchParams.get(
+        "origin",
+      );
+      const filtered =
+        origin === "internal"
+          ? allTickets.filter((t) => !t.origin)
+          : origin === "external"
+            ? allTickets.filter((t) => t.origin?.mechanism === "api")
+            : origin === "redirected"
+              ? allTickets.filter((t) => t.origin?.mechanism === "handoff")
+              : allTickets;
+      return Promise.resolve({ data: filtered });
     }
     if (url.includes("/users")) {
       return Promise.resolve({ data: [] });

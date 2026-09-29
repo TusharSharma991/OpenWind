@@ -47,8 +47,14 @@ describe("bulkCreateEntities outbox emission (#126)", () => {
 
     const { created, errors } = await withTenantContext(TENANT, (tx) =>
       bulkCreateEntities(tx, TENANT, [
-        { entityTypeId: entityType.id, fields: { ssn: "111-11-1111" } },
-        { entityTypeId: entityType.id, fields: { ssn: "222-22-2222" } },
+        {
+          entityTypeId: entityType.id,
+          fields: { title: "Bulk create ticket 1", ssn: "111-11-1111" },
+        },
+        {
+          entityTypeId: entityType.id,
+          fields: { title: "Bulk create ticket 2", ssn: "222-22-2222" },
+        },
       ]),
     );
     expect(errors).toHaveLength(0);
@@ -99,8 +105,15 @@ describe("bulkUpdateEntities outbox emission (#126)", () => {
 
     const { created } = await withTenantContext(TENANT, (tx) =>
       bulkCreateEntities(tx, TENANT, [
-        { entityTypeId: entityType.id, fields: {}, assignedTo: ASSIGNEE_ID },
-        { entityTypeId: entityType.id, fields: {} },
+        {
+          entityTypeId: entityType.id,
+          fields: { title: "Bulk update pre-assigned ticket" },
+          assignedTo: ASSIGNEE_ID,
+        },
+        {
+          entityTypeId: entityType.id,
+          fields: { title: "Bulk update unassigned ticket" },
+        },
       ]),
     );
     const [alreadyAssigned, unassigned] = created;

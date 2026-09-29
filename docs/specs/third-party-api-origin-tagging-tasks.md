@@ -2,7 +2,9 @@
 
 **Spec:** docs/specs/third-party-api-origin-tagging.md
 **Generated:** 2026-09-02
-**Status:** not started
+**Status:** Phases 1-3 done (T1-T21); T22 (manual OWTesterUI e2e pass) still todo. PR #556
+review (PrabhuVijit) — this status line was stale, still reading "not started" after
+implementation completed.
 
 ---
 
@@ -14,7 +16,7 @@
 | task                                                                                                                                                                                                                                                                                                                                                                                               | requirement | status |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ------ |
 | T1: Confirm `api_keys.oidcClientId` as the stable per-application anchor (verified in `rotate.ts` — carried forward on every rotation); no code change, decision recorded in spec §C                                                                                                                                                                                                               | R7          | done   |
-| T2: Migration 0090 — added `origin_mechanism` (`api`\|`handoff`\|nullable), `origin_oidc_client_id` (nullable, no FK — see migration's own comment), `origin_performer_user_id` (nullable) to `entity_instances` and `workflow_events` (comments are workflow_events rows, not a separate table — corrected from this task's original wording). All-or-nothing DB CHECK constraint on both tables. | R1–R5, §V   | done   |
+| T2: Migration 0093 — added `origin_mechanism` (`api`\|`handoff`\|nullable), `origin_oidc_client_id` (nullable, no FK — see migration's own comment), `origin_performer_user_id` (nullable) to `entity_instances` and `workflow_events` (comments are workflow_events rows, not a separate table — corrected from this task's original wording). All-or-nothing DB CHECK constraint on both tables. | R1–R5, §V   | done   |
 | T3: Extended the hosted handoff URL contract (`docs/specs/hosted-ticket-create-handoff.md`) with a required `appClientId` param; updated that spec (new R7, new §V invariant) + `docs/third-party-api-design.md`'s partner-facing description                                                                                                                                                      | R2, §V      | done   |
 | T4: Isolation test (`apps/api/tests/isolation/origin-tagging-columns.isolation.test.ts`) — proves the DB-level all-or-nothing CHECK constraint on both tables, 7/7 passing against real Postgres                                                                                                                                                                                                   | §V          | done   |
 
@@ -72,12 +74,15 @@ phase gate: all unit + integration tests pass before advancing to next phase
 
 ## Kick-Off Prompt
 
-Copy this into your Claude Code / AntiGravity session to start implementation:
+Phases 1-3 (T1-T21) are done — this prompt is a stale artifact from spec generation, kept
+only as a template for the one remaining task. To pick up T22 (manual OWTesterUI e2e pass):
 
 ```
 Read docs/specs/third-party-api-origin-tagging.md and docs/specs/third-party-api-origin-tagging-tasks.md.
 
-Implement Phase 1 tasks only (T1–T4).
+Run T22: a full end-to-end pass through OWTesterUI (all 4 environment presets) — create a
+ticket via direct API, via handoff, post a comment, verify all four tag surfaces render
+correctly against a real deployment.
 
 Rules:
 - Do not begin Phase 2 until all Phase 1 tests pass

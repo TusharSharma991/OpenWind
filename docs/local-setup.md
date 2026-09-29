@@ -38,7 +38,7 @@ no other tooling — the one-time setup itself runs entirely inside containers.
 | -------------- | --------------- | ---------------------------------- |
 | Docker Desktop | 24              | https://docs.docker.com/get-docker |
 
-(Node 22 / pnpm 9 are only needed if you want `pnpm dev` hot-reload outside
+(Node 22 / pnpm 11+ are only needed if you want `pnpm dev` hot-reload outside
 Docker — see [Day-to-day commands](#day-to-day-commands). The setup script
 itself doesn't need them.)
 
@@ -190,8 +190,11 @@ to `/` doesn't actually matter, but keeping them together above it reads
 clearer):
 
 ```nginx
+    # 3002 below is the API_HOST_PORT default -- if you overrode that env var,
+    # substitute your actual value in BOTH proxy_pass lines; nginx doesn't
+    # read the .env file, so there's no way to keep these in sync automatically.
     location /api/v1/ {
-        proxy_pass http://127.0.0.1:3002;   # API_HOST_PORT, if you overrode it
+        proxy_pass http://127.0.0.1:3002;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         # OVERWRITE, not $proxy_add_x_forwarded_for (which APPENDS to
@@ -214,6 +217,15 @@ clearer):
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_set_header Host $host;
+        # Same reasoning as /api/v1/ above -- without these, nginx proxies the
+        # WebSocket upgrade as a plain TCP connection from 127.0.0.1, and the
+        # rate limiter's getConnInfo() fallback collapses every real client
+        # into one shared bucket keyed on that loopback address. $remote_addr
+        # (overwrite), not $proxy_add_x_forwarded_for, for the same spoofing
+        # reason as the /api/v1/ block.
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 ```
 
@@ -317,20 +329,28 @@ new ones.
 
 ### This repo's containers (`docker-compose.yml`)
 
-| Container       | Internal port | Host port  | URL                                                              |
-| --------------- | ------------- | ---------- | ---------------------------------------------------------------- |
-| ow-database     | 5432          | 5432       | `localhost:5432` (host-mode `pnpm db:migrate` only)              |
-| ow-pgbouncer    | 5432          | 6432       | `localhost:6432`                                                 |
-| ow-cache        | 6379          | 6379       | `redis://localhost:6379` (host-mode `pnpm test`/`pnpm dev` only) |
-| ow-backend      | 3000          | —          | Internal only (proxied)                                          |
-| ow-frontend     | 3001          | 3001       | `http://localhost:3001`                                          |
-| ow-bootstrap    | —             | —          | One-shot, `profile: bootstrap`                                   |
-| ow-secrets      | 8200          | 8200       | `http://localhost:8200`                                          |
-| ow-secrets-init | —             | —          | One-shot, initializes OpenBao (idempotent — see below)           |
-| ow-storage      | 9000, 9001    | 9000, 9001 | `http://localhost:9000` (API), `http://localhost:9001` (console) |
-| ow-storage-init | —             | —          | One-shot, creates the `platform-files` bucket (idempotent)       |
+| Container       | Internal port | Host port | URL                                                                                                                                             |
+| --------------- | ------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| ow-database     | 5432          | 5432      | `localhost:5432` (host-mode `pnpm db:migrate` only)                                                                                             |
+| ow-pgbouncer    | 5432          | 6432      | `localhost:6432`                                                                                                                                |
+| ow-cache        | 6379          | 6379      | `redis://localhost:6379` (host-mode `pnpm test`/`pnpm dev` only)                                                                                |
+| ow-backend      | 3000          | —         | Internal only (proxied)                                                                                                                         |
+| ow-frontend     | 3001          | 3001      | `http://localhost:3001`                                                                                                                         |
+| ow-worker       | —             | —         | No HTTP surface — outbox poller, automation execution, SLA/notification/retention jobs. Without it, BullMQ jobs queue but nothing consumes them |
+| ow-clamav       | —             | —         | No public port — file-attachment malware scanning, used by `ow-worker`/`ow-backend` internally                                                  |
+| ow-bootstrap    | —             | —         | One-shot, `profile: bootstrap`                                                                                                                  |
+| ow-secrets      | 8200          | 8200      | `http://localhost:8200`                                                                                                                         |
+| ow-secrets-init | —             | —         | One-shot, initializes OpenBao (idempotent — see below)                                                                                          |
 
-OpenBao and MinIO start automatically with `docker compose up -d` — no profile
+**Corrected (was previously wrong here): there is no MinIO/`ow-storage` container.**
+`packages/files` stores uploads on local disk (bind-mounted via
+`FILES_STORAGE_PATH_HOST`, default `../openwind-files` — see the Backup section
+below), not in an S3-compatible bucket. MinIO is present in `docker-compose.yml`
+only as a fully commented-out block kept for reference (PR #340 replaced the
+earlier S3/MinIO presigned-URL design with local-disk storage + async ClamAV
+scanning) — it never starts, with or without a profile.
+
+OpenBao starts automatically with `docker compose up -d` — no profile
 required, unlike the optional services below.
 
 **OpenBao** (`@platform/secrets` backing store) runs in `-dev` mode: an
@@ -347,12 +367,6 @@ failure and still exits `0` (idempotency fix, PR #178, follow-up to #128/#173).
 **If you see a "transit engine already enabled" message in
 `ow-secrets-init`'s logs, that's expected — not a failure to debug.**
 
-**MinIO** (`@platform/files` backing store) exposes the S3 API on `:9000` and
-a web console on `:9001`. Dev credentials (hardcoded in `docker-compose.yml`):
-`platform_access_key` / `platform_secret_key_dev_only`. `ow-storage-init` runs
-`mc mb --ignore-existing` to create the `platform-files` bucket, so it's
-already safe to re-run.
-
 ### The Zitadel compose project (`../zitadel/docker-compose.yml`)
 
 Separate project, created and started by `setup.sh`/`setup.bat` — not part of
@@ -368,10 +382,11 @@ this repo's `docker compose up -d`.
 
 Start with `docker compose --profile <name> up -d`:
 
-| Profile         | Services                                                              |
-| --------------- | --------------------------------------------------------------------- |
-| `notifications` | Novu API, worker, web UI, MongoDB                                     |
-| `tools`         | MailHog (email trap port 8025), BullBoard (queue dashboard port 3099) |
+| Profile         | Services                                                                                                |
+| --------------- | ------------------------------------------------------------------------------------------------------- |
+| `notifications` | Novu API, worker, web UI, MongoDB                                                                       |
+| `tools`         | MailHog (email trap port 8025), BullBoard (queue dashboard port 3099)                                   |
+| `observability` | Prometheus (port 9090), Grafana (port 3005), Alertmanager (port 9093), OTel Collector (ports 4317/4318) |
 
 ### Image version pinning policy
 
@@ -392,6 +407,32 @@ are not on a matched release line upstream — `novu-api`/`novu-worker`'s `:late
 2026-07-08, but `novu-web`'s hadn't moved since 2025-03-21 as of the pin date. Pinning captured
 what was actually running rather than forcing an artificial sync; if Novu compatibility issues
 ever surface, this is the first place to look.
+
+### Novu channel wiring (docs/specs/oncall-routing.md T29)
+
+`dispatch_severity_notification` (packages/automation-engine) writes one in-app `notifications`
+row per (channel, recipient) pair, tagged with `channel` — `email`, `sms`, `whatsapp`, or `call`
+(migration `0105_notifications_severity_channel.sql`). Today only `email` has a working delivery
+path: `apps/worker/src/notification-outbound-worker.ts`'s own header comment notes `sms`/
+`whatsapp` are hardcoded `false` in its outbound payload pending the external provider contract
+being settled — `call` has no delivery path at all yet. This is a known, tracked gap, not an
+oversight: the per-channel `channel` column exists specifically so the outbound worker can branch
+per-channel once each provider is wired, without another schema change.
+
+When wiring a real provider, each channel needs its own Novu workflow (one Novu "workflow" =
+templateId per channel, not one multi-step workflow covering all four — see
+`packages/notifications/src/index.ts`'s header comment on why templates live in Novu, not
+TypeScript) plus the provider's own credentials, configured as Novu integrations (Novu Web UI,
+`http://localhost:2022` when the `notifications` profile is running) rather than platform env
+vars for the credentials themselves. The platform-side env vars this repo owns are:
+
+| Variable       | Purpose                                                                                                                                   |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `NOVU_API_KEY` | Already required (`packages/config/src/env.ts`) — the Novu SDK client authenticates with this for every channel, not one key per channel. |
+
+No new platform env var is needed per-channel — SMS/WhatsApp/voice provider credentials (Twilio
+Account SID/Auth Token, WhatsApp Business API token, etc.) are entered directly into Novu's own
+integration store, not `.env`, so they're never in this repo's environment surface at all.
 
 ---
 
@@ -416,6 +457,11 @@ refuses to start if any required variable is missing or malformed.
 | `VITE_ZITADEL_ISSUER`                 | bootstrap         | Same issuer, prefixed for Vite (browser-accessible)                             |
 | `VITE_ZITADEL_OIDC_CLIENT_ID`         | bootstrap         | Same client ID for Vite                                                         |
 | `ANTHROPIC_API_KEY`                   | manual            | AI features only — rest of platform works without it                            |
+| `TELEMETRY_ENABLED`                   | `.env.example`    | Flag to enable/disable OpenTelemetry and Prometheus collection                  |
+| `OTEL_EXPORTER_OTLP_ENDPOINT`         | `.env.example`    | HTTP endpoint for trace export (e.g., http://localhost:4318/v1/traces)          |
+| `OTEL_SERVICE_NAME`                   | `.env.example`    | Service name for distributed trace grouping                                     |
+| `SCHEDULE_TICK_INTERVAL_SECONDS`      | `.env.example`    | Temporal scheduler tick poll interval, seconds. Optional — defaults to 60.      |
+| `SCHEDULE_CATCH_UP_MAX`               | `.env.example`    | Cap on missed fires executed in one catch-up run. Optional — defaults to 24.    |
 
 **Why two database URLs?**
 `app_user` connects via PgBouncer in transaction mode, which is required for

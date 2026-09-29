@@ -6,6 +6,8 @@ import { logger } from "@platform/logger";
 import { requireAuth, requireRole } from "@platform/auth";
 import type { AuthContext } from "@platform/auth";
 import { correlationId } from "./middleware/correlation-id.js";
+import { telemetry } from "./middleware/telemetry.js";
+import { getSerializedMetrics } from "@platform/telemetry";
 import { handleError } from "./middleware/error-handler.js";
 import { rateLimit } from "./middleware/rate-limit.js";
 import { httpsEnforcement } from "./middleware/https-enforcement.js";
@@ -17,6 +19,13 @@ import { apiKeysRouter } from "./routes/api-keys/index.js";
 import { modulesRouter } from "./routes/modules/index.js";
 import { pluginsRouter } from "./routes/plugins/index.js";
 import { viewConfigsRouter } from "./routes/view-configs/index.js";
+import { teamsRouter } from "./routes/admin/teams.js";
+import { servicesRouter } from "./routes/admin/services.js";
+import { onCallSchedulesRouter } from "./routes/admin/on-call-schedules.js";
+import { scheduleRulesRouter } from "./routes/admin/schedule-rules.js";
+import { labelsRouter } from "./routes/admin/labels.js";
+import { notificationPoliciesRouter } from "./routes/admin/notification-policies.js";
+import { membersRouter } from "./routes/admin/members.js";
 import { rolesRouter } from "./routes/platform/roles.js";
 import { usersRouter } from "./routes/platform/users.js";
 import { filesRouter } from "./routes/files/index.js";
@@ -97,6 +106,8 @@ export function createApp(): Hono<AppVars> {
   // 3. Correlation ID — must be early so all downstream logs carry the request ID
   app.use("*", correlationId());
 
+  app.use("*", telemetry());
+
   app.use("*", httpsEnforcement());
   // 4. Hono request logger
   app.use("*", honoLogger());
@@ -106,6 +117,21 @@ export function createApp(): Hono<AppVars> {
   app.onError(handleError);
 
   app.get("/health", (c) => c.json({ status: "ok" }));
+
+  app.get("/metrics", async (c) => {
+    const authHeader = c.req.header("Authorization");
+    if (!env.METRICS_TOKEN || authHeader !== `Bearer ${env.METRICS_TOKEN}`) {
+      return c.text("Unauthorized", 401);
+    }
+    try {
+      const data = await getSerializedMetrics();
+      c.header("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
+      return c.text(data);
+    } catch (err) {
+      logger.error({ err }, "Failed to serialize metrics");
+      return c.text("Error generating metrics", 500);
+    }
+  });
 
   // OpenAPI spec — unauthenticated, served from generated static object
   app.get("/openapi.json", (c) => c.json(openApiSpec));
@@ -127,6 +153,13 @@ export function createApp(): Hono<AppVars> {
   app.route("/modules", modulesRouter);
   app.route("/plugins", pluginsRouter);
   app.route("/admin/view-configs", viewConfigsRouter);
+  app.route("/admin/teams", teamsRouter);
+  app.route("/admin/services", servicesRouter);
+  app.route("/admin/on-call-schedules", onCallSchedulesRouter);
+  app.route("/admin/schedule-rules", scheduleRulesRouter);
+  app.route("/admin/labels", labelsRouter);
+  app.route("/admin/notification-policies", notificationPoliciesRouter);
+  app.route("/admin/members", membersRouter);
   app.route("/roles", rolesRouter);
   app.route("/users", usersRouter);
   app.route("/files", filesRouter);

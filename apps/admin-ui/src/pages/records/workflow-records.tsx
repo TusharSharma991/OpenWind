@@ -1915,7 +1915,7 @@ export function WorkflowRecords(): React.ReactElement {
         }
         .kb-board {
           display: flex; gap: 12px; align-items: stretch;
-          height: calc(100vh - 185px);
+          height: 100%;
           width: max-content;
           transition: opacity .15s ease;
         }

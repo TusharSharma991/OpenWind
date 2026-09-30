@@ -1914,8 +1914,8 @@ export function WorkflowRecords(): React.ReactElement {
           position: relative;
         }
         .kb-board {
-          display: flex; gap: 12px; align-items: flex-start;
-          min-height: calc(100vh - 185px);
+          display: flex; gap: 12px; align-items: stretch;
+          height: calc(100vh - 185px);
           width: max-content;
           transition: opacity .15s ease;
         }
@@ -1937,8 +1937,7 @@ export function WorkflowRecords(): React.ReactElement {
           border: 1px solid var(--border-color);
           border-radius: var(--radius-md);
           transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
-          min-height: 50vh;
-          max-height: calc(100vh - 185px);
+          height: 100%;
         }
         .kb-col--valid {
           border-color: var(--accent-primary);
@@ -1983,8 +1982,8 @@ export function WorkflowRecords(): React.ReactElement {
         }
 
         .kb-col-body {
-          flex: 1; overflow-y: auto;
-          padding: 10px 10px 4px;
+          flex: 1; overflow-y: auto; min-height: 0;
+          padding: 10px 10px 12px;
           display: flex; flex-direction: column; gap: 7px;
           scrollbar-width: thin;
           scrollbar-color: var(--border-color) transparent;

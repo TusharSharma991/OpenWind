@@ -16,6 +16,7 @@ import { Login } from "./pages/login.js";
 import { AuthCallback } from "./pages/callback.js";
 import { Dashboard } from "./pages/dashboard.js";
 import { Analytics } from "./pages/analytics.js";
+import { ReportingPage } from "./pages/reporting.js";
 import { Modules } from "./pages/modules.js";
 import { Plugins } from "./pages/plugins.js";
 import { EntityTypeDetail } from "./pages/entity-types/detail.js";
@@ -27,6 +28,7 @@ import { AdminRecords } from "./pages/records/index.js";
 import { WorkflowRecords } from "./pages/records/workflow-records.js";
 import { Settings } from "./pages/settings.js";
 import { UsersPage } from "./pages/users.js";
+import { OrgDirectoryPage } from "./pages/org-directory.js";
 import { CustomerRecordCreate } from "./pages/customer/record-create.js";
 import { CustomerRecordDetail } from "./pages/customer/record-detail.js";
 import { Automations } from "./pages/automations/index.js";
@@ -100,6 +102,11 @@ export function App(): React.ReactElement {
             show: "/workflows/:id",
             meta: { label: "Workflows" },
           },
+          {
+            name: "org-directory",
+            list: "/org-directory",
+            meta: { label: "Org Chart" },
+          },
         ]}
       >
         <Routes>
@@ -128,6 +135,7 @@ export function App(): React.ReactElement {
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/analytics" element={<Analytics />} />
+            <Route path="/reporting" element={<ReportingPage />} />
             <Route path="/records" element={<AdminRecords />} />
             <Route
               path="/workflows/:workflowSlug/records"
@@ -173,6 +181,12 @@ export function App(): React.ReactElement {
                 customer); the API already allows the "user" role since
                 customers need it to resolve assignee display names. */}
             <Route path="/users" element={<UsersPage />} />
+
+            {/* Org chart — any authenticated user can view (docs/specs/
+                org-directory.md R7); the manual sync button inside is
+                admin-gated client-side, and the sync route itself is
+                admin-only server-side. */}
+            <Route path="/org-directory" element={<OrgDirectoryPage />} />
 
             {/* Admin-only routes */}
             <Route element={<RequireAdmin />}>

@@ -1,7 +1,9 @@
 # `.claude/` — Agent guardrails for OpenWind
 
 This directory configures **Claude Code** for this repo: rules, context docs, prompt scaffolds,
-skills, and a set of **hooks that guide a disciplined delivery flow** (Plan → Code → Review → Ship).
+skills, and a set of **hooks that guide a disciplined delivery flow** (Plan → Code → Review → Docs → Ship).
+This file is the single reference for the flow; `CLAUDE.md` and `rules/agent-behaviour.md` link here
+rather than restating it.
 
 > ### These are guardrails, not barricades
 >
@@ -10,12 +12,12 @@ skills, and a set of **hooks that guide a disciplined delivery flow** (Plan → 
 > (write its own state files directly, write files via `Bash` instead of the Write tool, or run a
 > wrapper script the per-command hooks don't see). They are deliberately best-effort.
 >
-> **The real enforcement lives outside these scripts — and most of it must be enabled in GitHub
-> settings, not here:** **CI** is active today and runs on every PR (the only currently-binding gate).
-> **Branch protection + required PR review** are what make the human approval un-fakeable, and a
-> `.github/CODEOWNERS` (for `.claude/` · `scripts/` · `.github/`) is included — but CODEOWNERS only
-> has teeth once a branch-protection rule requires code-owner review, which is **not yet configured.**
-> Until then, treat the hooks as a seatbelt, not a vault, and CI as the floor.
+> **The real enforcement lives outside these scripts, in GitHub:** `main`'s branch protection
+> requires the CI checks (`CI complete`, `Claude hooks unit tests`, `Gate-equivalent PR checks`)
+> and 1 approving review, dismisses stale approvals, and requires **code-owner review**. Any PR
+> touching `.claude/`, `scripts/` or `.github/` therefore needs an approval from a
+> `.github/CODEOWNERS` owner other than its author. Admins are not included in the protection, so an
+> admin can still bypass it. Treat the hooks as a seatbelt and the PR review as the vault.
 
 > **Not using Claude Code? This does not affect you.** Every hook here fires _only_ inside a Claude
 > Code session. Plain `git`, the Husky `pre-commit`/`commit-msg` hooks, and GitHub Actions CI are
@@ -60,8 +62,12 @@ The intent is that a human approves twice — `approve-plan` (unlock edits) and 
 the commit) — via the `approval-gate` hook, which fires on _your_ chat message rather than agent
 output. That makes **accidental** self-approval unlikely. It is **not** a hard guarantee: the approval
 state is a plain file, so a determined agent can still write it. The approval that genuinely cannot be
-faked is the **human review on the pull request** — _once branch protection requires it_. Keep that
-as the real gate. `OPENWIND_AUTOPASS=1` skips the ship checkpoint.
+faked is the **human review on the pull request**, which branch protection requires. Keep that as
+the real gate.
+
+Both keypresses can be graduated to standing trust by the owner: `OPENWIND_PLAN_AUTOPASS=1` skips
+`approve-plan` and `OPENWIND_AUTOPASS=1` skips `approve-ship`. The plan-lock, review, docs marker
+and ship marker are all still required, so neither is logged as a bypass.
 
 1. **Approve the freeze** (start) — the agent drafts `plan.json`; you type `approve-plan` in chat to
    unlock source edits. The agent's `write-plan.sh approve` is refused (it must ask you).
@@ -70,19 +76,19 @@ as the real gate. `OPENWIND_AUTOPASS=1` skips the ship checkpoint.
 
 ## Hooks
 
-| Hook                   | Event / matcher          | What it does                                                                                                                                    | Block?      | Bypass (logged)                                        |
-| ---------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------ |
-| `edit-gate.sh`         | PreToolUse `Write\|Edit` | no edits to `apps/`·`packages/`·`modules/` without an **approved** `plan.json`                                                                  | hard        | `OPENWIND_GATE=off`                                    |
-| `commit-gate.sh`       | PreToolUse `Bash`        | no `git commit` without a fresh marker, a review matching the diff, a docs marker matching the diff, **and** the human `approve-ship`           | hard        | `SHIP_BYPASS=1`                                        |
-| `ship-cleanup.sh`      | PostToolUse `Bash`       | deletes the marker + docs marker + done-sentinel after a commit (one-shot)                                                                      | —           | —                                                      |
-| `destructive-guard.sh` | PreToolUse `Bash`        | blocks `rm -rf` on risky paths, `DROP`/`TRUNCATE TABLE`, `--no-verify`, `push --force`                                                          | default     | subshell/wrapper (like all hooks)                      |
-| `protected-paths.sh`   | PreToolUse `Write\|Edit` | blocks edits on `main`/`develop`, `modules/*.ts`, ADRs, `.github/workflows/*`, `.env*`                                                          | hard        | `OPENWIND_OFFLIMITS=ack`, `OPENWIND_ALLOW_MODULE_TS=1` |
-| `verify-stop.sh`       | Stop                     | only when a `claimed-done` sentinel exists: blocks a _false_ "done" if the pipeline did not finish (cheap check; does **not** re-run typecheck) | conditional | clear the sentinel                                     |
-| `session-start.sh`     | SessionStart             | injects the rules into context each session                                                                                                     | —           | —                                                      |
-| `write-plan.sh`        | helper                   | drafts `plan.json` (Plan stage); approval is human-only via `approve-plan`                                                                      | —           | —                                                      |
-| `write-review.sh`      | helper                   | writes `review.json` after `/review` (enforces plan+diff+tests)                                                                                 | —           | —                                                      |
-| `write-docs-marker.sh` | helper                   | writes `docs-updated.json` (Docs stage) — `--touched` records doc files in the diff, `--skip "<reason>"` justifies none                         | —           | —                                                      |
-| `write-ship-marker.sh` | helper                   | writes `ship-ready.json` right before commit                                                                                                    | —           | —                                                      |
+| Hook                   | Event / matcher          | What it does                                                                                                                                                          | Block?      | Bypass (logged)                                        |
+| ---------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------ |
+| `edit-gate.sh`         | PreToolUse `Write\|Edit` | no edits to `apps/`·`packages/`·`modules/` without an **approved** `plan.json`                                                                                        | hard        | `OPENWIND_GATE=off`                                    |
+| `commit-gate.sh`       | PreToolUse `Bash`        | no `git commit` without a fresh marker, a review matching the diff, a docs marker matching the diff, **and** the human `approve-ship`                                 | hard        | `SHIP_BYPASS=1`                                        |
+| `ship-cleanup.sh`      | PostToolUse `Bash`       | deletes the marker + docs marker + done-sentinel after a commit (one-shot)                                                                                            | —           | —                                                      |
+| `destructive-guard.sh` | PreToolUse `Bash`        | blocks `rm -rf` on risky paths, `DROP`/`TRUNCATE TABLE`, `--no-verify`, `push --force`                                                                                | default     | subshell/wrapper (like all hooks)                      |
+| `protected-paths.sh`   | PreToolUse `Write\|Edit` | blocks edits on `main`/`develop` (the edited file's own worktree branch), `modules/*.ts`, ADRs, `.github/workflows/*`, `.env*`; files outside the repo are ungoverned | hard        | `OPENWIND_OFFLIMITS=ack`, `OPENWIND_ALLOW_MODULE_TS=1` |
+| `verify-stop.sh`       | Stop                     | only when a `claimed-done` sentinel exists: blocks a _false_ "done" if the pipeline did not finish (cheap check; does **not** re-run typecheck)                       | conditional | clear the sentinel                                     |
+| `session-start.sh`     | SessionStart             | injects the rules into context each session                                                                                                                           | —           | —                                                      |
+| `write-plan.sh`        | helper                   | drafts `plan.json` (Plan stage); approval is human-only via `approve-plan`                                                                                            | —           | —                                                      |
+| `write-review.sh`      | helper                   | writes `review.json` after `/review` (enforces plan+diff+tests)                                                                                                       | —           | —                                                      |
+| `write-docs-marker.sh` | helper                   | writes `docs-updated.json` (Docs stage) — `--touched` records doc files in the diff, `--skip "<reason>"` justifies none                                               | —           | —                                                      |
+| `write-ship-marker.sh` | helper                   | writes `ship-ready.json` right before commit                                                                                                                          | —           | —                                                      |
 
 Plus `approval-gate.sh` (UserPromptSubmit) — the human-only approval path (`approve-plan` /
 `approve-ship`) — and `mark-done.sh` — the helper the agent runs to assert completion (writes the
@@ -118,14 +124,17 @@ subshell's git process), and the SHIP_BYPASS audit log, but worth knowing.
 ## Known limitations
 
 **Worktrees are supported, not just tolerated.** State is keyed by branch, and `edit-gate`,
-`commit-gate`, `ship-cleanup`, `approval-gate`, and `verify-stop` all resolve the repo/worktree a
+`protected-paths`, `commit-gate`, `ship-cleanup`, `approval-gate`, and `verify-stop` all resolve the repo/worktree a
 given tool call actually targets — from the file path for `Write`/`Edit`, from an explicit
 `cd <dir> &&` / `git -C <dir>` in a `Bash` command, or (for the two hooks with no such anchor,
 `approval-gate` and `verify-stop`) by scanning the main checkout plus every `git worktree` for the
 one location with a matching pending item. This means running parallel branches across separate
 worktrees from the same Claude Code session works correctly. If a scan finds **more than one**
 matching pending plan/marker across locations, the hook reports the ambiguity (branch + path for
-each) instead of guessing — say which branch you mean.
+each) instead of guessing. Name the branch in the directive to pick one, e.g.
+`approve-plan fix/PLAT-123-foo` or `approve-ship fix/PLAT-123-foo`. The word after the directive
+counts as a branch only if it contains a `/` or exactly matches a pending branch, and a name that
+matches nothing approves nothing.
 
 **State files are still not locked.** `.claude/state/` has no file locking. Two concurrent
 sessions on the _same_ branch in the _same_ worktree share that branch's `plan/`, `review/`,

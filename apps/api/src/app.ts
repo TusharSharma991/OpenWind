@@ -32,6 +32,8 @@ import { filesRouter } from "./routes/files/index.js";
 import { adminRouter } from "./routes/admin/index.js";
 import { preferencesRouter } from "./routes/preferences/index.js";
 import { savedViewsRouter } from "./routes/saved-views/index.js";
+import { reportingRouter } from "./routes/reporting/index.js";
+import { orgDirectoryRouter } from "./routes/org-directory.js";
 import { notificationsRouter } from "./routes/notifications/index.js";
 import { exportsRouter } from "./routes/exports/download.js";
 import { dashboardRouter } from "./routes/dashboard/index.js";
@@ -166,10 +168,12 @@ export function createApp(): Hono<AppVars> {
   app.route("/admin", adminRouter);
   app.route("/preferences", preferencesRouter);
   app.route("/saved-views", savedViewsRouter);
+  app.route("/superset", reportingRouter);
   app.route("/notifications", notificationsRouter);
   app.route("/exports", exportsRouter);
   app.route("/dashboard", dashboardRouter);
   app.route("/connectors", connectorsRouter);
+  app.route("/org-directory", orgDirectoryRouter);
   // ADR-012 Phase B — third-party ticket-lifecycle API, versioned separately
   // from every other route above since it's a public/partner-facing surface
   // (ADR-010) rather than the admin-ui's own internal API.

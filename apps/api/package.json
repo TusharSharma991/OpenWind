@@ -28,6 +28,7 @@
     "@platform/files": "workspace:*",
     "@platform/logger": "workspace:*",
     "@platform/notifications": "workspace:*",
+    "@platform/org-directory": "workspace:*",
     "@platform/plugin-sdk": "workspace:*",
     "@platform/redis": "workspace:*",
     "@platform/scheduler": "workspace:*",
@@ -52,6 +53,7 @@
     "@types/node": "^25.7.0",
     "@types/ws": "^8.5.12",
     "drizzle-orm": "^0.45.2",
+    "postgres": "^3.4.0",
     "tsx": "^4.22.4",
     "typescript": "^5.5.0",
     "vitest": "^4.1.10"

@@ -56,6 +56,11 @@ hook() { printf '%s' "$2" | "$H/$1" >/dev/null 2>&1; echo $?; }
 echo "syntax:"
 for f in "$H"/*.sh; do bash -n "$f" && echo "  ok    $f" || { echo "  FAIL  $f"; FAIL=$((FAIL + 1)); }; done
 
+echo "context.js (large command output, #698):"
+BIG=$((2 * 1024 * 1024))
+ck "$BIG" "shBuf returns >1 MiB output in full (not an empty buffer)" "$(node -e 'const c=require(require("path").resolve(process.argv[1],"lib/context.js"));process.stdout.write(String(c.shBuf("head -c "+process.argv[2]+" /dev/zero",".").length))' "$H" "$BIG")"
+ck "$BIG" "sh returns >1 MiB output in full (not an empty string)" "$(node -e 'const c=require(require("path").resolve(process.argv[1],"lib/context.js"));process.stdout.write(String(c.sh("head -c "+process.argv[2]+" /dev/zero | tr \"\\\\0\" x",".").length))' "$H" "$BIG")"
+
 echo "edit-gate (source-only, tests exempt):"
 ck 0 "docs under packages/ not gated" "$(hook edit-gate.sh '{"tool_name":"Write","tool_input":{"file_path":"packages/db/README.md"}}')"
 ck 2 ".ts under packages/ gated" "$(hook edit-gate.sh '{"tool_name":"Write","tool_input":{"file_path":"packages/db/x.ts"}}')"
@@ -100,6 +105,34 @@ ck 2 "prod.env (non-dotfile secret) blocked" "$(hook protected-paths.sh '{"tool_
 ck 0 ".env.example allowed" "$(hook protected-paths.sh '{"tool_name":"Write","tool_input":{"file_path":".env.example"}}')"
 ck 0 "modules stub index.ts allowed by config-first" "$(hook protected-paths.sh '{"tool_name":"Write","tool_input":{"file_path":"modules/crm/index.ts"}}')"
 ck 2 "any workflow file blocked" "$(hook protected-paths.sh '{"tool_name":"Write","tool_input":{"file_path":".github/workflows/deploy.yml"}}')"
+# pp <tool> <path>: build the JSON with printf, since a "{a,b}" literal inside $(...) gets split.
+pp() { printf '{"tool_name":"%s","tool_input":{"file_path":"%s"}}' "$1" "$2" | "$H/protected-paths.sh" >/dev/null 2>&1; echo $?; }
+PP_OUTSIDE="$(mktemp -d)/scratch.json"
+ck 0 "file outside every repo not governed" "$(pp Write "$PP_OUTSIDE")"
+rmdir "$(dirname "$PP_OUTSIDE")" 2>/dev/null
+PP_BASE="$(mktemp -d)"
+PP_WT="$PP_BASE/ow-hooktest-pp"
+if git show-ref --verify --quiet refs/heads/develop; then
+  echo "  skip  integration-branch worktree case (a local develop branch already exists)"
+elif ! git worktree add -q -b develop "$PP_WT" HEAD >/dev/null 2>&1; then
+  echo "  skip  integration-branch worktree case (could not create a develop worktree)"
+else
+  ck 2 "edit in a worktree on an integration branch blocked (branch read from the file's worktree)" "$(pp Write "$PP_WT/docs/x.md")"
+  ck 0 "main checkout on a work branch unaffected by that worktree" "$(hook protected-paths.sh '{"tool_name":"Write","tool_input":{"file_path":"docs/x.md"}}')"
+  git worktree remove --force "$PP_WT" >/dev/null 2>&1
+  git branch -q -D develop >/dev/null 2>&1
+fi
+PP_WT2="$PP_BASE/ow-hooktest-pp2"
+if git worktree add -q -b "hooktest/pp-$$" "$PP_WT2" HEAD >/dev/null 2>&1; then
+  ck 2 "ADR path rule applies inside a worktree" "$(pp Edit "$PP_WT2/docs/decisions/ADR-001-multitenancy.md")"
+  ck 2 "workflow path rule applies inside a worktree" "$(pp Write "$PP_WT2/.github/workflows/deploy.yml")"
+  ck 0 "ordinary file in a work-branch worktree allowed" "$(pp Write "$PP_WT2/docs/x.md")"
+  git worktree remove --force "$PP_WT2" >/dev/null 2>&1
+  git branch -q -D "hooktest/pp-$$" >/dev/null 2>&1
+else
+  echo "  skip  worktree path-rule cases (could not create a test worktree in this environment)"
+fi
+rmdir "$PP_BASE" 2>/dev/null
 
 echo "verify-stop (sentinel-gated):"
 ck 0 "no claimed-done sentinel -> allows stop" "$(hook verify-stop.sh '{"hook_event_name":"Stop"}')"
@@ -153,6 +186,38 @@ ck 0 "question mentioning approve-plan does NOT approve" $?
 printf '%s' '{"prompt":"approve-plan"}' | "$H/approval-gate.sh" >/dev/null 2>&1  # re-approve so the edit-gate precondition holds
 edit_after_approve=$(printf '%s' '{"tool_name":"Write","tool_input":{"file_path":"packages/db/x.ts"}}' | "$H/edit-gate.sh"; echo $?)
 ck 0 "edit-gate allows source after human plan approval" $edit_after_approve
+
+echo "approve-plan with two pending plan-locks (main + a worktree):"
+AMB_BASE="$(mktemp -d)"
+AMB_WT="$AMB_BASE/ow-hooktest-amb"
+AMB_BRANCH="hooktest/amb-$$"
+if git worktree add -q -b "$AMB_BRANCH" "$AMB_WT" HEAD >/dev/null 2>&1; then
+  AMB_PLAN="$AMB_WT/.claude/state/plan/$(node -e 'console.log(require(require("path").resolve(process.argv[1],"lib/context.js")).slug(process.argv[2]))' "$H" "$AMB_BRANCH").json"
+  draft_both() {
+    rm -f "$PLAN_JSON" "$AMB_PLAN"
+    printf '%s' '{"track":"t","acceptance_criteria":[{"text":"x"}],"scope_paths":["**"]}' | "$H/write-plan.sh" set - >/dev/null 2>&1
+    (cd "$AMB_WT" && printf '%s' '{"track":"t","acceptance_criteria":[{"text":"x"}],"scope_paths":["**"]}' | "$OLDPWD/$H/write-plan.sh" set - >/dev/null 2>&1)
+  }
+  approved() { grep -q '"approved": true' "$1" && echo yes || echo no; }
+  draft_both
+  amb_out=$(printf '%s' '{"prompt":"approve-plan"}' | "$H/approval-gate.sh" 2>&1)
+  ck "no no" "bare approve-plan with two pending approves neither" "$(approved "$PLAN_JSON") $(approved "$AMB_PLAN")"
+  printf '%s' "$amb_out" | grep -q "approve-plan <branch>"
+  ck 0 "ambiguity message says how to name the branch" $?
+  printf '%s' "{\"prompt\":\"approve-plan $AMB_BRANCH\"}" | "$H/approval-gate.sh" >/dev/null 2>&1
+  ck "no yes" "approve-plan <branch> approves only the named worktree branch" "$(approved "$PLAN_JSON") $(approved "$AMB_PLAN")"
+  draft_both
+  printf '%s' '{"prompt":"approve-plan hooktest/no-such-branch"}' | "$H/approval-gate.sh" >/dev/null 2>&1
+  ck "no no" "approve-plan naming an unknown branch approves nothing" "$(approved "$PLAN_JSON") $(approved "$AMB_PLAN")"
+  printf '%s' '{"prompt":"approve-plan now"}' | "$H/approval-gate.sh" >/dev/null 2>&1
+  ck "no no" "a non-branch word after approve-plan does not pick one" "$(approved "$PLAN_JSON") $(approved "$AMB_PLAN")"
+  git worktree remove --force "$AMB_WT" >/dev/null 2>&1
+  git branch -q -D "$AMB_BRANCH" >/dev/null 2>&1
+  rmdir "$AMB_BASE" 2>/dev/null
+  printf '%s' '{"prompt":"approve-plan"}' | "$H/approval-gate.sh" >/dev/null 2>&1  # single pending again: restore the approved main plan-lock
+else
+  echo "  skip  two-pending approve-plan (could not create a test worktree in this environment)"
+fi
 
 echo "approve-ship guard (no marker = no pass-approved written):"
 rm -f "$SHIP_READY_JSON" "$PASS_APPROVED_JSON"

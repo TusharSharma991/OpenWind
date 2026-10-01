@@ -218,6 +218,30 @@ describe("ScheduleRulesPage", () => {
     expect(daySelect.value).toBe("1");
     const timeInput = screen.getByLabelText("Time") as HTMLInputElement;
     expect(timeInput.value).toBe("09:00");
+    expect(
+      screen.queryByText(/cannot be represented by this picker/),
+    ).toBeNull();
+  });
+
+  it("warns when an existing cron expression cannot be represented by the picker", async () => {
+    const advancedRule = {
+      ...RULE_A,
+      cronExpr: "0 9 * * 1,3,5",
+      cronHuman: "At 09:00 on Monday, Wednesday, and Friday",
+    };
+    queueRefresh([advancedRule]);
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByText("Weekly Standup")).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByLabelText("Edit rule"));
+
+    const warning = await screen.findByRole("alert");
+    expect(warning.textContent).toContain("0 9 * * 1,3,5");
+    expect(warning.textContent).toContain(
+      "cannot be represented by this picker and will be replaced on save",
+    );
   });
 
   it("computes a weekly cron expression from the frequency picker on save", async () => {
@@ -259,6 +283,75 @@ describe("ScheduleRulesPage", () => {
     );
   });
 
+  it.each([
+    ["fractional", "1.5"],
+    ["negative", "-1"],
+    ["above the maximum", "3651"],
+  ])("rejects a %s due-days value before saving", async (_case, value) => {
+    queueRefresh([RULE_A]);
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByText("Weekly Standup")).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByLabelText("Edit rule"));
+    await waitFor(() => expect(screen.getByLabelText("Day")).toBeTruthy());
+    fireEvent.click(screen.getByText("Next: Ticket template →"));
+
+    const dueDaysInput = screen.getByLabelText(
+      /Due — days after creation/,
+    ) as HTMLInputElement;
+    expect(dueDaysInput.step).toBe("1");
+    expect(dueDaysInput.max).toBe("3650");
+    fireEvent.change(dueDaysInput, { target: { value } });
+
+    expect(
+      screen.getByText(
+        "Due after (days) must be a whole number between 0 and 3650.",
+      ),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByText("Save changes"));
+    expect(
+      mockFetchWithAuth.mock.calls.some(
+        (call) =>
+          call[0] === "/api/admin/schedule-rules/rule-1" &&
+          (call[1] as { method?: string } | undefined)?.method === "PATCH",
+      ),
+    ).toBe(false);
+  });
+
+  it("submits a valid due-days value in the PATCH request", async () => {
+    queueRefresh([RULE_A]);
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByText("Weekly Standup")).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByLabelText("Edit rule"));
+    await waitFor(() => expect(screen.getByLabelText("Day")).toBeTruthy());
+    fireEvent.click(screen.getByText("Next: Ticket template →"));
+
+    fireEvent.change(screen.getByLabelText(/Due — days after creation/), {
+      target: { value: "5" },
+    });
+    mockFetchWithAuth.mockResolvedValueOnce({ data: RULE_A });
+    queueRefresh([RULE_A]);
+    fireEvent.click(screen.getByText("Save changes"));
+
+    const findPatchCall = (): unknown[] | undefined =>
+      mockFetchWithAuth.mock.calls.find(
+        (call) =>
+          call[0] === "/api/admin/schedule-rules/rule-1" &&
+          (call[1] as { method?: string } | undefined)?.method === "PATCH",
+      );
+    await waitFor(() => expect(findPatchCall()).toBeTruthy());
+    const patchInit = findPatchCall()?.[1] as { body: string };
+    const patchBody = JSON.parse(patchInit.body) as {
+      template: { due_days: number };
+    };
+    expect(patchBody.template.due_days).toBe(5);
+  });
+
   it("lets you search and pick a workflow from a searchable dropdown", async () => {
     queueRefresh([]);
     renderPage();
@@ -289,6 +382,41 @@ describe("ScheduleRulesPage", () => {
     expect(tzSelect.tagName).toBe("SELECT");
     fireEvent.change(tzSelect, { target: { value: "Asia/Kolkata" } });
     expect(tzSelect.value).toBe("Asia/Kolkata");
+  });
+
+  it("preserves an existing timezone that is not in the picker options", async () => {
+    const customTimezoneRule = {
+      ...RULE_A,
+      timezone: "Pacific/Auckland",
+    };
+    queueRefresh([customTimezoneRule]);
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByText("Weekly Standup")).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByLabelText("Edit rule"));
+    const timezoneSelect = (await screen.findByLabelText(
+      /Timezone/,
+    )) as HTMLSelectElement;
+    expect(timezoneSelect.value).toBe("Pacific/Auckland");
+
+    fireEvent.click(screen.getByText("Next: Ticket template →"));
+    mockFetchWithAuth.mockResolvedValueOnce({ data: customTimezoneRule });
+    queueRefresh([customTimezoneRule]);
+    fireEvent.click(await screen.findByText("Save changes"));
+
+    const findPatchCall = (): unknown[] | undefined =>
+      mockFetchWithAuth.mock.calls.find(
+        (call) =>
+          call[0] === "/api/admin/schedule-rules/rule-1" &&
+          (call[1] as { method?: string } | undefined)?.method === "PATCH",
+      );
+    await waitFor(() => expect(findPatchCall()).toBeTruthy());
+    const patchInit = findPatchCall()?.[1] as { body: string };
+    expect((JSON.parse(patchInit.body) as { timezone: string }).timezone).toBe(
+      "Pacific/Auckland",
+    );
   });
 
   it("toggles pause/resume on a rule", async () => {

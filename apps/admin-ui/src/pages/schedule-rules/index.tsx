@@ -27,6 +27,8 @@ import { showAlert } from "../../components/global-alert-dialog.js";
 const SEVERITIES = ["critical", "high", "medium", "low"] as const;
 type Severity = (typeof SEVERITIES)[number];
 type RuleStatus = "active" | "paused" | "archived";
+const DUE_DAYS_INTEGER_ERROR =
+  "Due after (days) must be a whole number between 0 and 3650.";
 
 // Cron expressions are still what the API stores and the worker reads
 // (docs/decisions/ADR-017-temporal-scheduler.md: "cron as canonical
@@ -128,6 +130,34 @@ function parseCronToFrequency(cronExpr: string): {
     };
   }
   return { ...fallback, timeOfDay };
+}
+
+function isCronRepresentableByPicker(cronExpr: string): boolean {
+  const parsed = parseCronToFrequency(cronExpr);
+  const [hourStr, minuteStr] = parsed.timeOfDay.split(":");
+  const hour = Number(hourStr);
+  const minute = Number(minuteStr);
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return false;
+  if (
+    parsed.frequency === "weekly" &&
+    (parsed.dayOfWeek < 0 || parsed.dayOfWeek > 6)
+  ) {
+    return false;
+  }
+  if (
+    parsed.frequency === "monthly" &&
+    (parsed.dayOfMonth < 1 || parsed.dayOfMonth > 31)
+  ) {
+    return false;
+  }
+  return (
+    buildCronExpr(
+      parsed.frequency,
+      parsed.timeOfDay,
+      parsed.dayOfWeek,
+      parsed.dayOfMonth,
+    ) === cronExpr.trim()
+  );
 }
 
 // Generic searchable, single-select dropdown -- same click-outside/search-
@@ -644,6 +674,8 @@ function RuleFormModal({
   const [remark, setRemark] = useState(rule?.template.remark ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const unsupportedCronExpr =
+    rule && !isCronRepresentableByPicker(rule.cronExpr) ? rule.cronExpr : null;
 
   useEffect(() => {
     if (open) {
@@ -695,6 +727,15 @@ function RuleFormModal({
       );
       return;
     }
+    const dueDaysValue = Number(dueDays);
+    if (
+      !Number.isInteger(dueDaysValue) ||
+      dueDaysValue < 0 ||
+      dueDaysValue > 3650
+    ) {
+      setError(DUE_DAYS_INTEGER_ERROR);
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -709,7 +750,7 @@ function RuleFormModal({
         severity: (templateSeverity || undefined) as Severity | undefined,
         assignedTo: assignMode === "user" ? assignedTo : undefined,
         teamId: assignMode === "team" ? teamId : undefined,
-        due_days: Number(dueDays),
+        due_days: dueDaysValue,
         remark: remark.trim(),
       };
       const cronExpr = buildCronExpr(
@@ -795,6 +836,23 @@ function RuleFormModal({
 
         {step === 1 ? (
           <form onSubmit={handleNext}>
+            {unsupportedCronExpr && (
+              <div
+                role="alert"
+                style={{
+                  padding: "10px 12px",
+                  marginBottom: 16,
+                  border: "1px solid var(--warning)",
+                  borderRadius: 8,
+                  color: "var(--text-primary)",
+                  background:
+                    "color-mix(in srgb, var(--warning) 12%, transparent)",
+                }}
+              >
+                Your stored schedule (<code>{unsupportedCronExpr}</code>) cannot
+                be represented by this picker and will be replaced on save.
+              </div>
+            )}
             <div className="form-group">
               <label className="form-label">Name *</label>
               <input
@@ -1072,9 +1130,25 @@ function RuleFormModal({
                 id="rule-due-days"
                 className="form-input"
                 type="number"
+                step={1}
                 min={0}
+                max={3650}
                 value={dueDays}
-                onChange={(e) => setDueDays(e.target.value)}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setDueDays(value);
+                  const numericValue = Number(value);
+                  if (
+                    value !== "" &&
+                    (!Number.isInteger(numericValue) ||
+                      numericValue < 0 ||
+                      numericValue > 3650)
+                  ) {
+                    setError(DUE_DAYS_INTEGER_ERROR);
+                  } else if (error === DUE_DAYS_INTEGER_ERROR) {
+                    setError(null);
+                  }
+                }}
                 required
               />
             </div>

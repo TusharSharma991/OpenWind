@@ -79,6 +79,22 @@ const ALL_AUDIT_ACTIONS_EXHAUSTIVE: Record<AuditAction, true> = {
   "schedule.rule_paused": true,
   "schedule.rule_resumed": true,
   "schedule.rule_archived": true,
+  // Both record something that happened. Superset's role checks run before a
+  // query or export, so a refusal never reaches the audit table as one of
+  // these.
+  "reporting.query_executed": true,
+  "reporting.exported": true,
+  "reporting.guest_token_issued": true,
+  "reporting.guest_token_denied": true,
+  // #638 entity-list exports. None is a denial: a refused export (unknown type,
+  // too many rows) returns before anything is audited.
+  "export.requested": true,
+  "export.completed": true,
+  "export.failed": true,
+  // A sync the admin was entitled to trigger (requireRole("admin") already
+  // passed) that then failed mid-run -- a worker/upstream-provider outcome,
+  // not a denied caller request, same reasoning as schedule.execution_failed.
+  sync_failed: true,
 };
 
 // Object.keys() widens to string[] -- safe to narrow back since
@@ -101,6 +117,8 @@ const DENIED_ACTIONS: ReadonlySet<AuditAction> = new Set<AuditAction>([
   "attachment.reference_denied",
   "ticket.view_denied",
   "attachment.download_denied",
+  // A dashboard the caller's role does not entitle them to.
+  "reporting.guest_token_denied",
 ]);
 
 /**

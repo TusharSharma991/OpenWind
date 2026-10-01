@@ -34,8 +34,10 @@ that's the difference between the two halves of this list.
 ## Already has a tracked issue — just needs a person
 
 **Reconciled 2026-08-19:** #143 (automation-triggered transitions absent from outbox) closed —
-both phases done per `docs/tracker/week-log.md`'s 2026-08-12 entries (PR #372, #380); row
+both phases done per `docs/tracker/week-log/archive/week-log.md`'s 2026-08-12 entries (PR #372, #380); row
 removed per this doc's own rule below.
+
+**Added 2026-09-27:** #678 and #679, both found while building #606 (`docs/specs/vendor-approval.md` §B).
 
 **Added 2026-08-31:** #540 (rate-limit.ts trusts first X-Forwarded-For hop, spoofable if a
 fronting proxy appends instead of overwrites) — found during a security review of the fix that
@@ -59,10 +61,22 @@ requirements more likely to surface, not less. Row updated below, not removed.
 | No accessibility floor on modals — waves 1 & 2 shipped (PR #285, PR #298); 2 items deliberately deferred (workflow-canvas slide-in panel, access-denied overlay) — **decided 2026-09-18: keep open**, not a maintainer-decision gap anymore, just unstaffed work | [#198](../../issues/198) | Unassigned |
 | Zero internationalization — scaffolding shipped (PR #272), ~55 of 57 files still hardcoded English                                                                                                                                                               | [#200](../../issues/200) | Unassigned |
 | `rate-limit.ts` trusts the first `X-Forwarded-For` hop with no enforcement that a fronting proxy overwrites (not appends) it — spoofable rate-limit bypass if misconfigured                                                                                      | [#540](../../issues/540) | Unassigned |
+| Per-user erasure misses user ids inside tenant-defined `user_ref` custom fields and free-text mentions in `entity_instances.fields` (found during #635)                                                                                                          | [#688](../../issues/688) | Unassigned |
 
 ---
 
 ## No tracked issue yet — file before picking up
+
+### Found during #678 (automation trigger_config scoping, 2026-09-27)
+
+- **System-template entity types are protected from tenant renames by RLS alone.**
+  `updateEntityType` (`packages/entity-engine/src/entity-types.ts` ~197–235) explicitly includes
+  `tenant_id IS NULL` rows in its SELECT and UPDATE. Only the `tenant_type_write` RLS policy
+  (migration 0037) stops a tenant admin from renaming one; the explicit-filter layer doesn't. The
+  comment there saying `entity_types` has no RLS is stale. Since #678, rules scoped by
+  `{"entityType": name}` match system templates by name, so a regression here would let one
+  tenant change what every tenant's name-scoped rules match. Fix: exclude NULL-tenant rows from
+  the tenant update path explicitly.
 
 ### ADR backlog (all from the 2026-06-29 consulting review, still open)
 
@@ -84,5 +98,5 @@ filed as GitHub issues; they're tracked here and via `CLAUDE.md`'s Phase 3 table
    untouched for a month while the security findings from the same review session got fixed.
    (As of 2026-07-24, every non-ADR finding here now has one — see the table above.)
 3. When something here is closed, delete its row (don't mark it done in place) — this doc's
-   entire value is being _only_ the pending list, not a history. `week-log.md` is where closures
+   entire value is being _only_ the pending list, not a history. `docs/tracker/week-log/` is where closures
    get logged.

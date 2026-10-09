@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { buildZodSchema, transformZodErrors } from "./schema-builder.js";
+import {
+  buildZodSchema,
+  transformZodErrors,
+  isReservedFieldName,
+  validateReservedFieldNames,
+} from "./schema-builder.js";
+import { ValidationError } from "../errors.js";
 import type { EntityField } from "../types.js";
 
 function makeField(
@@ -148,6 +154,64 @@ describe("buildZodSchema", () => {
     });
   });
 
+  // Regression coverage for the bug found via manual testing of the
+  // helpdesk module's real seed data (modules/helpdesk/seed/001_entity_types.sql):
+  // "select" is a real, on-disk field_type, but was previously unrecognized
+  // by buildFieldSchema's switch statement, falling through to z.unknown()
+  // -- which silently accepted ANY value, including a missing one, defeating
+  // is_required entirely for every "select" field.
+  describe("select field (alias for enum)", () => {
+    it("is required when isRequired is true, same as any other type", () => {
+      const schema = buildZodSchema(
+        [
+          makeField({
+            name: "priority",
+            fieldType: "select",
+            isRequired: true,
+            config: { options: ["low", "medium", "high", "urgent"] },
+          }),
+        ],
+        "create",
+      );
+      expect(schema.safeParse({}).success).toBe(false);
+      expect(schema.safeParse({ priority: "low" }).success).toBe(true);
+    });
+
+    it("accepts the plain string[] options shape (as seeded by modules/helpdesk)", () => {
+      const schema = buildZodSchema(
+        [
+          makeField({
+            name: "category",
+            fieldType: "select",
+            config: { options: ["technical", "billing", "general"] },
+          }),
+        ],
+        "create",
+      );
+      expect(schema.safeParse({ category: "technical" }).success).toBe(true);
+      expect(schema.safeParse({ category: "not-an-option" }).success).toBe(
+        false,
+      );
+    });
+
+    it("also accepts the {value,label}[] options shape (as used by every other module)", () => {
+      const schema = buildZodSchema(
+        [
+          makeField({
+            name: "priority",
+            fieldType: "select",
+            config: {
+              options: [{ value: "low" }, { value: "high" }],
+            },
+          }),
+        ],
+        "create",
+      );
+      expect(schema.safeParse({ priority: "low" }).success).toBe(true);
+      expect(schema.safeParse({ priority: "medium" }).success).toBe(false);
+    });
+  });
+
   describe("multi_enum field", () => {
     const field = makeField({
       name: "tags",
@@ -165,6 +229,40 @@ describe("buildZodSchema", () => {
       expect(schema.safeParse({ tags: ["bug", "invalid"] }).success).toBe(
         false,
       );
+    });
+
+    // PR #574 review (VijitP, S2) -- extractOptionValues (shared with the
+    // select/enum fix above) also handles multi_enum's options; cover the
+    // plain string[] shape here too, not just {value,label}[].
+    it("accepts the plain string[] options shape", () => {
+      const schema = buildZodSchema(
+        [
+          makeField({
+            name: "tags",
+            fieldType: "multi_enum",
+            config: { options: ["bug", "feature"] },
+          }),
+        ],
+        "create",
+      );
+      expect(schema.safeParse({ tags: ["bug", "feature"] }).success).toBe(true);
+      expect(schema.safeParse({ tags: ["bug", "invalid"] }).success).toBe(
+        false,
+      );
+    });
+
+    it("falls back to an unconstrained string array when options is empty/invalid", () => {
+      const schema = buildZodSchema(
+        [
+          makeField({
+            name: "tags",
+            fieldType: "multi_enum",
+            config: { options: [] },
+          }),
+        ],
+        "create",
+      );
+      expect(schema.safeParse({ tags: ["anything"] }).success).toBe(true);
     });
   });
 
@@ -453,6 +551,84 @@ describe("transformZodErrors", () => {
       const errors = transformZodErrors(result.error);
       expect(errors[0]?.code).toBe("INVALID_ENUM");
       expect(errors[0]?.meta?.options).toEqual(["low", "high"]);
+    }
+  });
+});
+
+describe("isReservedFieldName", () => {
+  it("returns true for internal engine keys prefixed with __", () => {
+    expect(isReservedFieldName("__accessUsers")).toBe(true);
+    expect(isReservedFieldName("__workflowState")).toBe(true);
+    expect(isReservedFieldName("__anything")).toBe(true);
+  });
+
+  it("returns true for prototype pollution keys prototype and constructor", () => {
+    expect(isReservedFieldName("prototype")).toBe(true);
+    expect(isReservedFieldName("constructor")).toBe(true);
+    expect(isReservedFieldName("__proto__")).toBe(true);
+  });
+
+  it("returns false for standard and single-underscore field names", () => {
+    expect(isReservedFieldName("title")).toBe(false);
+    expect(isReservedFieldName("custom_field")).toBe(false);
+    expect(isReservedFieldName("_private_field")).toBe(false);
+    expect(isReservedFieldName("accessUsers")).toBe(false);
+    expect(isReservedFieldName("Prototype")).toBe(false);
+    expect(isReservedFieldName("Constructor")).toBe(false);
+  });
+});
+
+describe("validateReservedFieldNames", () => {
+  it("does nothing for undefined, null, or objects without reserved keys", () => {
+    expect(() => validateReservedFieldNames(undefined)).not.toThrow();
+    expect(() => validateReservedFieldNames(null)).not.toThrow();
+    expect(() =>
+      validateReservedFieldNames({ title: "My Ticket", priority: "high" }),
+    ).not.toThrow();
+  });
+
+  it("throws ValidationError when fields contain __accessUsers", () => {
+    expect.assertions(3);
+    expect(() =>
+      validateReservedFieldNames({
+        title: "Test",
+        __accessUsers: { "attacker-id": { level: "read_write" } },
+      }),
+    ).toThrowError(ValidationError);
+
+    try {
+      validateReservedFieldNames({
+        __accessUsers: { "attacker-id": { level: "read_write" } },
+      });
+    } catch (err) {
+      expect(err).toBeInstanceOf(ValidationError);
+      const valErr = err as ValidationError;
+      expect(valErr.fields).toEqual([
+        {
+          field: "__accessUsers",
+          code: "RESERVED_FIELD",
+          message:
+            "Field '__accessUsers' is reserved for internal engine use and cannot be set directly",
+        },
+      ]);
+    }
+  });
+
+  it("identifies all reserved keys when multiple are supplied", () => {
+    expect.assertions(2);
+    try {
+      validateReservedFieldNames({
+        __accessUsers: {},
+        title: "Valid",
+        __internal_flag: true,
+      });
+    } catch (err) {
+      expect(err).toBeInstanceOf(ValidationError);
+      const valErr = err as ValidationError;
+      expect(valErr.fields.map((f) => f.field)).toEqual([
+        "__accessUsers",
+        "__internal_flag",
+      ]);
     }
   });
 });

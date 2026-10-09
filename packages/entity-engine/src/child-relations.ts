@@ -14,7 +14,8 @@ import {
   MAX_PAGE_SIZE,
 } from "./pagination.js";
 import { logger } from "@platform/logger";
-import { EntityError } from "./errors.js";
+import { EntityError, ValidationError } from "./errors.js";
+import { validateReservedFieldNames } from "./validation/index.js";
 import {
   buildEntityAssignedPayload,
   buildEntityCreatedPayload,
@@ -190,6 +191,9 @@ export async function createChildRelation(
     actorType,
     actingPersonId,
     maxAncestorDepth,
+    originMechanism,
+    originOidcClientId,
+    originPerformerUserId,
   } = input;
 
   // Load parent — lock row to prevent concurrent race on cap/depth
@@ -212,6 +216,23 @@ export async function createChildRelation(
 
   if (!parent || parent.deletedAt) {
     throw new EntityError("ENTITY_NOT_FOUND", { instanceId: parentId });
+  }
+
+  try {
+    validateReservedFieldNames(childFields);
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      logger.warn(
+        {
+          tenantId,
+          parentId,
+          actorId: createdBy,
+          reservedFields: err.fields.map((f) => f.field),
+        },
+        "Security: attempt to create child ticket with reserved field blocked",
+      );
+    }
+    throw err;
   }
 
   // Workflow limits — parent must have a workflow_id (top-level ticket)
@@ -325,6 +346,9 @@ export async function createChildRelation(
       createdBy: createdBy ?? null,
       currentState: "open",
       dueDate: dueDate ? new Date(dueDate) : null,
+      originMechanism: originMechanism ?? null,
+      originOidcClientId: originOidcClientId ?? null,
+      originPerformerUserId: originPerformerUserId ?? null,
     })
     .returning();
 
@@ -358,6 +382,13 @@ export async function createChildRelation(
       ...(actorType && { actorType }),
       ...(actingPersonId && { actingPersonId }),
     },
+    // Mirrors the identical fields written to entity_instances above --
+    // ported from the sibling AuthNexus fork's same-day fix: previously
+    // omitted here entirely, so a sub-ticket's own creation event carried no
+    // app/person attribution even though the sub-ticket row itself did.
+    originMechanism: originMechanism ?? null,
+    originOidcClientId: originOidcClientId ?? null,
+    originPerformerUserId: originPerformerUserId ?? null,
   });
 
   // Outbox events for entity.created/entity.assigned automations (#126) —
@@ -780,6 +811,13 @@ function rowToInstance(
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     deletedAt: row.deletedAt,
+    // Drizzle infers this text() column as string | null, not the narrower
+    // union — migration 0091's CHECK constraint guarantees only these two
+    // values (or null) are ever stored, so the type system can't infer it
+    // but the DB does enforce it.
+    originMechanism: row.originMechanism as "api" | "handoff" | null,
+    originOidcClientId: row.originOidcClientId,
+    originPerformerUserId: row.originPerformerUserId,
   };
 }
 

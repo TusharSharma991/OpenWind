@@ -11,6 +11,7 @@ import {
 import { logger } from "@platform/logger";
 import { writeAuditEntry } from "@platform/audit";
 import { applicationActorIdFromUserId } from "../../lib/application-actor-id.js";
+import { resolveOriginOidcClientId } from "../../lib/resolve-origin-oidc-client-id.js";
 import { zValidator } from "../../lib/validator.js";
 import { factory } from "./factory.js";
 import { requireTicketScope } from "./require-ticket-scope.js";
@@ -40,10 +41,20 @@ const CreateThirdPartyCommentSchema = z.object({
     .refine((v) => !FORBIDDEN_CHAR_PATTERN.test(v), {
       message: "text contains a null byte or control character",
     }),
-  // Stable identifiers only (email or Zitadel org user ID) — never a display
-  // name (spec R4). Resolution happens fully async, after this response is
-  // already sent (spec R5/R6) — see mention-resolution-worker.ts.
-  mentions: z.array(z.string().min(1)).max(20).default([]),
+  // Accepts a userId, email, or username (loginName) -- never a free-text
+  // display name (spec R4; see resolveIdentifier in
+  // mention-resolution-worker.ts for the exact three-way match). Resolution
+  // happens fully async, after this response is already sent (spec R5/R6).
+  // An identifier that fails to resolve never blocks or changes this
+  // response (a same-day 422-on-failure design was tried and reverted once
+  // security review flagged it as a fast, scriptable "does this identifier
+  // exist" oracle) -- instead the worker's outcome-3 branch posts a "System
+  // Agent" reply comment notifying the original commenter, so the failure
+  // is only ever visible to the one person who submitted it, through a real
+  // notification, never through the API response itself.
+  // PR #576 review (PrabhuVijit, F2/M4) -- per-item length bound, same
+  // rationale as tickets.ts/children.ts's assignedTo field.
+  mentions: z.array(z.string().trim().min(1).max(256)).max(20).default([]),
   // ADR-012 Phase D, spec R3 -- references completed attachment uploads;
   // never file content itself (spec R2, see attachments-presign.ts).
   attachmentIds: z
@@ -103,6 +114,17 @@ export const createThirdPartyCommentHandler = factory.createHandlers(
       return notFound(c);
     }
     const workflowId = instance.workflowId;
+
+    // docs/specs/third-party-api-origin-tagging.md §V -- same fail-closed
+    // rationale as tickets.ts's identical check (the key just authenticated
+    // this request; a null here means it was revoked/deleted in between).
+    const originOidcClientId = await resolveOriginOidcClientId(
+      tenantId,
+      applicationActorId,
+    );
+    if (!originOidcClientId) {
+      return c.json({ error: "UNAUTHORIZED", message: "Invalid API key" }, 401);
+    }
 
     // hasEntityCommentAccessFull does an internal getWorkflow lookup, which
     // can throw WORKFLOW_NOT_FOUND if the workflow is deleted between the
@@ -215,6 +237,9 @@ export const createThirdPartyCommentHandler = factory.createHandlers(
                 actorType: "api_key",
                 actingPersonId,
               },
+              originMechanism: "api",
+              originOidcClientId,
+              originPerformerUserId: actingPersonId,
             })
             .returning();
           if (inserted) {

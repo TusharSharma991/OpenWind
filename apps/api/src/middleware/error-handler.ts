@@ -9,6 +9,10 @@ import { captureException } from "@platform/telemetry";
 // Postgres error code 55P03 = lock_not_available (raised by FOR UPDATE NOWAIT)
 function isLockNotAvailableError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
+  // postgres-js attaches `.code` directly on the error object at runtime;
+  // TypeScript types Error as lacking `code`, so the assertion is required.
+  // The second branch handles Drizzle's wrapping pattern where the pg error
+  // is nested in `.cause` (same runtime origin; Error.cause is typed unknown).
   const code =
     (err as { code?: unknown }).code ??
     (err as { cause?: { code?: unknown } }).cause?.code;
@@ -175,6 +179,21 @@ export function handleError(err: unknown, c: Context): Response {
       requestId,
       error: err instanceof Error ? err.message : String(err),
       stack: err instanceof Error ? err.stack : undefined,
+      // Drizzle/postgres-js wrap the real Postgres error (code, detail,
+      // routine) in .cause — without it, every DB failure logs only the
+      // generic "Failed query: ..." wrapper text, losing the one field
+      // (code) that actually says what went wrong. Real incident: this gap
+      // turned a 5-minute RLS/GUC diagnosis into a much longer one.
+      cause:
+        err instanceof Error && err.cause instanceof Error
+          ? {
+              message: err.cause.message,
+              // postgres-js sets cause.code at runtime; Error.cause is typed
+              // unknown so the assertion is necessary but safe: if code is not
+              // present the value is simply undefined and the field is omitted.
+              code: (err.cause as { code?: unknown }).code,
+            }
+          : undefined,
     },
     "Unhandled error",
   );

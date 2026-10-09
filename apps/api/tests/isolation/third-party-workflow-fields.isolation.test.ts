@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { Hono } from "hono";
 import type { Context, Next } from "hono";
-import { inArray } from "drizzle-orm";
+import { inArray, eq, and } from "drizzle-orm";
 import {
   db,
   tenants,
@@ -16,16 +16,22 @@ import {
   entityFields,
   workflows,
   workflowStates,
+  adminAuditLog,
+  apiKeys,
+  withTenantContext,
 } from "@platform/db";
 import { createEntityType, addEntityField } from "@platform/entity-engine";
 import type { EntityType } from "@platform/entity-engine";
 import { createWorkflow } from "@platform/workflow-engine";
+import { hashApiKey } from "@platform/auth";
 import type { AuthContext, ActingPersonContext } from "@platform/auth";
 import { getThirdPartyWorkflowFieldsHandler } from "../../src/routes/third-party/workflow-fields.js";
 import { createThirdPartyTicketHandler } from "../../src/routes/third-party/tickets.js";
 
 const TENANT = "ffffffff-0000-4000-f000-000000000f01";
 const OTHER_TENANT = "ffffffff-0000-4000-f000-000000000f02";
+const API_KEY_ID = "77777777-7777-4777-7777-777777777777";
+const ORIGIN_OIDC_CLIENT_ID = "workflow-fields-test-client";
 
 let entityType: EntityType;
 let workflowId: string;
@@ -45,6 +51,19 @@ beforeAll(async () => {
       slug: `3p-fields-other-${OTHER_TENANT}`,
     },
   ]);
+
+  // docs/specs/third-party-api-origin-tagging.md -- the ticket-create route
+  // used below now resolves the authenticating key's oidcClientId via a
+  // real DB lookup. Matches the "apikey:77777777-..." stub id.
+  await db.insert(apiKeys).values({
+    id: API_KEY_ID,
+    tenantId: TENANT,
+    name: "Workflow Fields Test Key",
+    keyHash: hashApiKey(`sk_workflow_fields_test_${TENANT}`),
+    scopesFormat: "action",
+    scopes: ["entity:ticket:create"],
+    oidcClientId: ORIGIN_OIDC_CLIENT_ID,
+  });
 
   // Global entity type (tenantId null) so a tenant-specific field can be
   // layered on top -- proves the response unions both, per spec R1.
@@ -121,6 +140,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await db.delete(apiKeys).where(eq(apiKeys.id, API_KEY_ID));
   const tenantIds = [TENANT, OTHER_TENANT];
 
   // Entity types (and the global field on them) created with tenantId: null
@@ -344,5 +364,34 @@ describe("GET /api/v1/workflows/:workflowId/fields", () => {
     expect(res.headers.get("x-ratelimit-key-person-limit")).not.toBeNull();
     expect(res.headers.get("x-ratelimit-key-person-remaining")).not.toBeNull();
     expect(res.headers.get("x-ratelimit-key-person-reset")).not.toBeNull();
+  });
+
+  // Phase F follow-up: this describe call previously wrote no audit trail
+  // at all -- prove-it pattern, would fail against the pre-fix code.
+  it("writes a workflow_fields.listed audit entry", async () => {
+    const app = makeApp();
+    const res = await getFields(app, workflowId);
+    expect(res.status).toBe(200);
+
+    const [entry] = await withTenantContext(TENANT, (tx) =>
+      tx
+        .select({
+          actorId: adminAuditLog.actorId,
+          actorType: adminAuditLog.actorType,
+          resourceType: adminAuditLog.resourceType,
+        })
+        .from(adminAuditLog)
+        .where(
+          and(
+            eq(adminAuditLog.resourceId, workflowId),
+            eq(adminAuditLog.action, "workflow_fields.listed"),
+          ),
+        )
+        .limit(1),
+    );
+    expect(entry).toBeDefined();
+    expect(entry?.actorType).toBe("api_key");
+    expect(entry?.actorId).toBe("77777777-7777-4777-7777-777777777777");
+    expect(entry?.resourceType).toBe("workflow");
   });
 });

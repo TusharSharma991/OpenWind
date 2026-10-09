@@ -5,3 +5,7 @@ export * from "./platform.js";
 export * from "./view-configs.js";
 export * from "./saved-views.js";
 export * from "./notifications.js";
+export * from "./teams.js";
+export * from "./labels.js";
+export * from "./notification-policies.js";
+export * from "./schedules.js";

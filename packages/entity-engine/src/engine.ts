@@ -53,6 +53,8 @@ import {
   applyFormulaFields,
   validateEntityRefs,
   validateUserRefs,
+  isReservedFieldName,
+  validateReservedFieldNames,
 } from "./validation/index.js";
 import {
   resolveLookupFields,
@@ -230,6 +232,23 @@ export async function createEntity(
 ): Promise<EntityInstance> {
   const entityType = await loadEntityType(db, input.entityTypeId, tenantId);
 
+  try {
+    validateReservedFieldNames(input.fields);
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      logger.warn(
+        {
+          tenantId,
+          entityTypeId: input.entityTypeId,
+          actorId: input.actorId ?? input.createdBy,
+          reservedFields: err.fields.map((f) => f.field),
+        },
+        "Security: attempt to write reserved internal field blocked",
+      );
+    }
+    throw err;
+  }
+
   const schema = await getValidationSchema(
     db,
     input.entityTypeId,
@@ -316,6 +335,9 @@ export async function createEntity(
       createdBy: input.createdBy ?? null,
       assignedTo: input.assignedTo ?? null,
       dueDate: input.dueDate ? new Date(input.dueDate) : null,
+      originMechanism: input.originMechanism ?? null,
+      originOidcClientId: input.originOidcClientId ?? null,
+      originPerformerUserId: input.originPerformerUserId ?? null,
     })
     .returning();
 
@@ -350,7 +372,21 @@ export async function createEntity(
       workflowId: row.workflowId,
       fromState: null,
       toState: row.currentState,
-      triggeredBy: "user",
+      // Was hardcoded "user" regardless of who/what actually created the
+      // record -- ported from the sibling AuthNexus fork's same-day fix: a
+      // third-party API-created ticket's own creation history entry showed
+      // as if a human had created it, and (see origin fields below) carried
+      // no app/person attribution at all, unlike every other API-originated
+      // event on the same ticket. workflow_events.triggered_by's canonical
+      // vocabulary (user|automation|api|system) is distinct from actorType's
+      // (user|api_key|system) -- "api_key" is never a valid triggered_by
+      // value, so it's mapped to "api" here (matching child-relations.ts's
+      // identical mapping for sub-ticket creation).
+      triggeredBy:
+        input.actorType === "api_key"
+          ? "api"
+          : (input.actorType ??
+            (input.createdBy !== undefined ? "user" : "system")),
       actorId: input.actorId ?? input.createdBy ?? null,
       comment: "Record created",
       metadata: {
@@ -358,6 +394,12 @@ export async function createEntity(
         fields: redactedFieldsForEvents,
         actorName: input.actorName ?? null,
       },
+      // Mirrors the identical fields already written to entity_instances a
+      // few lines above -- previously omitted here entirely, so the create
+      // event's own OriginTag never had anything to render from.
+      originMechanism: input.originMechanism ?? null,
+      originOidcClientId: input.originOidcClientId ?? null,
+      originPerformerUserId: input.originPerformerUserId ?? null,
     });
   }
 
@@ -408,7 +450,7 @@ export async function createEntity(
   await fireEntityAuditHook({
     db,
     tenantId,
-    actorId: input.createdBy ?? "system",
+    actorId: input.actorId ?? input.createdBy ?? "system",
     actorType:
       input.actorType ?? (input.createdBy !== undefined ? "user" : "system"),
     actingPersonId: input.actingPersonId,
@@ -486,6 +528,23 @@ export async function updateEntity(
   if (!existing) throw new EntityError("ENTITY_NOT_FOUND", { instanceId });
 
   if (input.fields !== undefined) {
+    try {
+      validateReservedFieldNames(input.fields);
+    } catch (err) {
+      if (err instanceof ValidationError) {
+        logger.warn(
+          {
+            tenantId,
+            instanceId,
+            actorId: input.actorId,
+            reservedFields: err.fields.map((f) => f.field),
+          },
+          "Security: attempt to update reserved internal field blocked",
+        );
+      }
+      throw err;
+    }
+
     // Step 1: validate only the provided fields (type/format checks)
     const partialSchema = await getValidationSchema(
       db,
@@ -791,7 +850,14 @@ export async function updateEntity(
             version: 1,
             tenantId,
             instanceId,
+            entityTypeId: existing.entityTypeId,
             actorId: input.actorId ?? null,
+            // docs/specs/oncall-routing.md T13/T28 — resolve_oncall and
+            // dispatch_severity_notification need to know WHICH fields
+            // changed (and their old/new values), not just that something
+            // did. `changed` is already computed above for the
+            // workflowEvents "Record updated" entry -- reused as-is here.
+            changed,
           },
         });
       }
@@ -1199,6 +1265,16 @@ export async function addEntityField(
   entityTypeId: string,
   field: Omit<EntityField, "id" | "tenantId">,
 ): Promise<EntityField> {
+  if (isReservedFieldName(field.name)) {
+    throw new ValidationError([
+      {
+        field: "name",
+        code: "RESERVED_FIELD",
+        message: `Field name '${field.name}' is reserved for internal engine use`,
+      },
+    ]);
+  }
+
   const entityType = await loadEntityType(db, entityTypeId, tenantId);
 
   if (!entityType.allowCustomFields && entityType.tenantId !== null) {
@@ -1326,6 +1402,13 @@ function rowToInstance(
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     deletedAt: row.deletedAt ?? null,
+    // Drizzle infers this text() column as string | null, not the narrower
+    // union — migration 0091's CHECK constraint guarantees only these two
+    // values (or null) are ever stored, so the type system can't infer it
+    // but the DB does enforce it.
+    originMechanism: row.originMechanism as "api" | "handoff" | null,
+    originOidcClientId: row.originOidcClientId ?? null,
+    originPerformerUserId: row.originPerformerUserId ?? null,
   };
 }
 
@@ -1370,6 +1453,26 @@ export async function bulkCreateEntities(
   }
 
   for (const [i, input] of inputs.entries()) {
+    try {
+      validateReservedFieldNames(input.fields);
+    } catch (err) {
+      if (err instanceof ValidationError) {
+        logger.warn(
+          {
+            tenantId,
+            entityTypeId: input.entityTypeId,
+            actorId: input.actorId ?? input.createdBy,
+            index: i,
+            reservedFields: err.fields.map((f) => f.field),
+          },
+          "Security: attempt to bulk create reserved internal field blocked",
+        );
+        errors.push({ index: i, fields: err.fields });
+        continue;
+      }
+      throw err;
+    }
+
     const schema = await getValidationSchema(
       db,
       input.entityTypeId,
@@ -1619,6 +1722,31 @@ export async function bulkUpdateEntities(
       }
 
       if (input.fields !== undefined) {
+        try {
+          validateReservedFieldNames(input.fields);
+        } catch (err) {
+          if (err instanceof ValidationError) {
+            logger.warn(
+              {
+                tenantId,
+                instanceId: id,
+                actorId: input.actorId,
+                index: i,
+                reservedFields: err.fields.map((f) => f.field),
+              },
+              "Security: attempt to bulk update reserved internal field blocked",
+            );
+            errors.push({
+              index: i,
+              id,
+              code: "VALIDATION_ERROR",
+              fields: err.fields,
+            });
+            return;
+          }
+          throw err;
+        }
+
         const partialSchema = await getValidationSchema(
           db,
           existing.entityTypeId,

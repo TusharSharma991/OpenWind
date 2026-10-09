@@ -7,7 +7,7 @@
  * (the bug fix in createChildRelation), and the 1-level API nesting cap.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { Hono } from "hono";
 import type { Context, Next } from "hono";
 import { inArray, eq, sql } from "drizzle-orm";
@@ -17,13 +17,47 @@ import {
   workflows,
   workflowStates,
   entityInstances,
+  apiKeys,
+  workflowEvents,
+  outboxEvents,
+  withTenantContext,
 } from "@platform/db";
 import { createEntityType, createEntity } from "@platform/entity-engine";
+import { hashApiKey } from "@platform/auth";
 import type { AuthContext, ActingPersonContext } from "@platform/auth";
 import { createThirdPartyChildHandler } from "../../src/routes/third-party/children.js";
 
+// assignedTo now resolves against a real Zitadel org-users lookup (an
+// external service call, not the database -- mocking it here follows
+// testing-conventions.md's "mock at service boundaries, never the DB" rule).
+import type * as ZitadelManagement from "../../src/lib/zitadel-management.js";
+vi.mock("../../src/lib/zitadel-management.js", async (importOriginal) => {
+  const real = await importOriginal<typeof ZitadelManagement>();
+  return {
+    ...real,
+    listOrgUsers: async () => [
+      {
+        userId: "some-assignee",
+        email: "some-assignee@example.com",
+        displayName: "some-assignee",
+        loginName: "some-assignee",
+        phone: undefined,
+      },
+      {
+        userId: "real-user-id-999",
+        email: "bob@example.com",
+        displayName: "Bob",
+        loginName: "bob-username",
+        phone: undefined,
+      },
+    ],
+  };
+});
+
 const TENANT = "eeeeeeee-0000-4000-e000-000000000704";
 const OTHER_TENANT = "ffffffff-0000-4000-f000-000000000705";
+const API_KEY_ID = "44444444-4444-4444-4444-444444444444";
+const ORIGIN_OIDC_CLIENT_ID = "third-party-subticket-create-test-client";
 
 let entityTypeId: string;
 let workflowId: string;
@@ -72,6 +106,18 @@ beforeAll(async () => {
       slug: `3p-child-other-${OTHER_TENANT}`,
     },
   ]);
+
+  // docs/specs/third-party-api-origin-tagging.md — the child-create route now
+  // resolves the authenticating key's oidcClientId via a real DB lookup.
+  await db.insert(apiKeys).values({
+    id: API_KEY_ID,
+    tenantId: TENANT,
+    name: "3P Subticket Create Test Key",
+    keyHash: hashApiKey(`sk_3p_subticket_create_test_${TENANT}`),
+    scopesFormat: "action",
+    scopes: ["entity:ticket:subticket"],
+    oidcClientId: ORIGIN_OIDC_CLIENT_ID,
+  });
 
   const entityType = await createEntityType(db, null, {
     name: `third_party_child_test_${Date.now()}`,
@@ -178,6 +224,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await db.delete(apiKeys).where(eq(apiKeys.id, API_KEY_ID));
   await db.delete(tenants).where(inArray(tenants.id, [TENANT, OTHER_TENANT]));
 });
 
@@ -299,5 +346,70 @@ describe("POST /api/v1/tickets/:id/children", () => {
     expect(secondLevel.status).toBe(400);
     const body = (await secondLevel.json()) as { error: string };
     expect(body.error).toBe("SUBTICKET_NESTING_EXCEEDED");
+  });
+
+  it("resolves a username (loginName) assignee to its canonical userId", async () => {
+    const app = makeApp(apiKeyAuth(), actingAs(CREATOR));
+    const res = await app.request(`/${creatorTicketId}/children`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        entityTypeId,
+        fields: { title: "assignee via username" },
+        assignedTo: "bob-username",
+      }),
+    });
+    expect(res.status).toBe(201);
+    const { data } = (await res.json()) as { data: { assignedTo: string } };
+    expect(data.assignedTo).toBe("real-user-id-999");
+  });
+
+  // Policy (ported from the sibling AuthNexus fork, revised from an earlier
+  // 422-on-failure design tried the same day): an unresolvable assignedTo
+  // no longer blocks sub-ticket creation -- see
+  // third-party-ticket-create.isolation.test.ts's identical test for the
+  // full rationale.
+  it("creates the sub-ticket unassigned (never 422s) when assignedTo matches no real org member, and posts a System Agent reply notifying the creator", async () => {
+    const app = makeApp(apiKeyAuth(), actingAs(CREATOR));
+    const res = await app.request(`/${creatorTicketId}/children`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        entityTypeId,
+        fields: { title: "bad assignee" },
+        assignedTo: "totally-unknown-identifier-xyz",
+      }),
+    });
+    expect(res.status).toBe(201);
+    const { data } = (await res.json()) as {
+      data: { id: string; assignedTo: string | null };
+    };
+    expect(data.assignedTo).toBeNull();
+
+    const events = await withTenantContext(TENANT, (tx) =>
+      tx
+        .select({
+          actorId: workflowEvents.actorId,
+          metadata: workflowEvents.metadata,
+        })
+        .from(workflowEvents)
+        .where(eq(workflowEvents.instanceId, data.id)),
+    );
+    const systemReply = events.find((e) => e.actorId === "system");
+    expect(systemReply).toBeTruthy();
+    expect(
+      (systemReply?.metadata as { actorName?: string } | null)?.actorName,
+    ).toBe("System");
+
+    const [mentionOutbox] = await withTenantContext(TENANT, (tx) =>
+      tx
+        .select({ payload: outboxEvents.payload })
+        .from(outboxEvents)
+        .where(eq(outboxEvents.eventType, "comment.mentioned")),
+    );
+    expect(
+      (mentionOutbox?.payload as { mentionedUserIds?: string[] } | undefined)
+        ?.mentionedUserIds,
+    ).toEqual([CREATOR]);
   });
 });

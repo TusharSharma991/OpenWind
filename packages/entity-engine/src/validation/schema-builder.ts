@@ -1,6 +1,33 @@
 import { z } from "zod";
 import type { EntityField } from "../types.js";
-import type { FieldError } from "../errors.js";
+import { ValidationError, type FieldError } from "../errors.js";
+
+/**
+ * Internal engine keys (e.g. __accessUsers, __workflowState) are reserved
+ * for platform-internal ACL and state management and must not be written
+ * directly by callers.
+ */
+export function isReservedFieldName(name: string): boolean {
+  return (
+    name.startsWith("__") || name === "prototype" || name === "constructor"
+  );
+}
+
+export function validateReservedFieldNames(
+  fields: Record<string, unknown> | undefined | null,
+): void {
+  if (!fields || typeof fields !== "object") return;
+  const reservedKeys = Object.keys(fields).filter(isReservedFieldName);
+  if (reservedKeys.length > 0) {
+    throw new ValidationError(
+      reservedKeys.map((key) => ({
+        field: key,
+        code: "RESERVED_FIELD",
+        message: `Field '${key}' is reserved for internal engine use and cannot be set directly`,
+      })),
+    );
+  }
+}
 
 export function buildZodSchema(
   fields: EntityField[],
@@ -25,6 +52,29 @@ export function buildZodSchema(
   }
 
   return z.object(shape);
+}
+
+// A single-choice field's `config.options` has been seeded in two different
+// shapes across modules: the documented `{value,label}[]` form (most
+// modules, and what admin-ui's field builder writes), and a plain
+// `string[]` form (modules/helpdesk/seed/001_entity_types.sql's priority/
+// category fields). Both are real, on-disk, currently-in-use data -- accept
+// either rather than only the documented shape, so existing seeded fields
+// don't silently lose validation just because of which shape their options
+// happen to be stored in.
+function extractOptionValues(opts: unknown): string[] {
+  if (!Array.isArray(opts)) return [];
+  return opts
+    .map((o) =>
+      typeof o === "string"
+        ? o
+        : // PR #574 review (VijitP) -- o is `unknown` here (the string branch
+          // above is already exhausted), so TS can't infer a `.value` property
+          // exists without this assertion; the `.filter` below is what
+          // actually rejects anything where it doesn't resolve to a string.
+          (o as { value?: unknown }).value,
+    )
+    .filter((v): v is string => typeof v === "string");
 }
 
 function buildFieldSchema(field: EntityField): z.ZodTypeAny {
@@ -93,21 +143,19 @@ function buildFieldSchema(field: EntityField): z.ZodTypeAny {
     case "boolean":
       return z.boolean();
 
-    case "enum": {
-      const opts = cfg["options"];
-      const values = Array.isArray(opts)
-        ? (opts as { value: string }[]).map((o) => o.value)
-        : [];
+    // "select" is a recognized alias for "enum" (see field-types.ts's own
+    // comment) -- same schema, same options handling, just a different name
+    // some seed data/UI code uses for a single-choice field.
+    case "enum":
+    case "select": {
+      const values = extractOptionValues(cfg["options"]);
       return values.length > 0
         ? z.enum(values as [string, ...string[]])
         : z.string();
     }
 
     case "multi_enum": {
-      const opts = cfg["options"];
-      const values = Array.isArray(opts)
-        ? (opts as { value: string }[]).map((o) => o.value)
-        : [];
+      const values = extractOptionValues(cfg["options"]);
       return values.length > 0
         ? z.array(z.enum(values as [string, ...string[]]))
         : z.array(z.string());

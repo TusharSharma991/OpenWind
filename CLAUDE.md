@@ -50,9 +50,24 @@ Reference docs (read before starting work in a new area):
   `apps/api/src/middleware/rate-limit.ts`, or `packages/auth/src/middleware.ts`'s rate-limit checks.
 - `docs/decisions/ADR-014-notification-sla-retry-escalation.md` — notification retry/exhaustion
   policy; read before touching `apps/worker/src/notification-*.ts` or `alert-worker.ts`.
-- `docs/sup-docs/roadmap-tracker.md` — phase progress and track status
-- `docs/sup-docs/week-log/` — running velocity log, one file per session (see its README —
+- `docs/decisions/ADR-015-observability-compliance.md` — OTel/Prometheus/Sentry, usage metering,
+  GDPR erasure and IP allowlisting (3D); read before touching `packages/telemetry` or the
+  retention/erasure sweeps in `apps/worker`.
+- `docs/decisions/ADR-016-oncall-routing.md` — teams/services tables, on-call schedules with
+  DB-level overlap prevention, severity fields + labels, the `resolve_oncall` /
+  `dispatch_severity_notification` automation actions, and specificity-scored notification
+  policies (3E); read before touching any of those surfaces.
+- `docs/decisions/ADR-017-temporal-scheduler.md` — DB-polling scheduler, cron as canonical
+  format, closed-whitelist title templating, skip-missed-fires default, creator attribution
+  (3F); read before touching `schedule_rules`/`schedule_executions` or the worker tick.
+- `docs/tracker/roadmap-tracker.md` — phase progress and track status
+- `docs/tracker/week-log/` — running velocity log, one file per session (see its README —
   never edit `week-log.md` itself, it's frozen history as of 2026-08-13)
+- `docs/sup-docs/` — **gitignored, local-only.** Strategy/pricing/GTM/competitive-positioning
+  material the owner shares offline with a select few rather than via the repo. Never assume
+  content here is visible to the team or to a future contributor cloning the repo — do not
+  reference it from any tracked doc as if it were, and never move tracking content (roadmap,
+  phase timeline, week-log — those live in `docs/tracker/`) into this directory.
 
 ---
 
@@ -60,28 +75,32 @@ Reference docs (read before starting work in a new area):
 
 **Phase:** 3 — Scale & Extensibility (3A **in progress**, 3B **done** — ADR-008/009/010 accepted
 2026-08-06; 3A Stage 0 + Stage 1 done, Stage 2 runtime + scopes tracks landing; 3B shipped
-2026-08-13 via PR #397 (all 3 phases) — see `docs/sup-docs/roadmap-tracker.md` for the current %,
+2026-08-13 via PR #397 (all 3 phases) — see `docs/tracker/roadmap-tracker.md` for the current %,
 not repeated here since it drifts)
 **Phase 2 status:** ✅ Complete as of 2026-06-18 (all 4 tracks + pre-pilot hardening merged)
 
-Phase 3 tracks (3A in progress, 3B done; 3C/3D/3-OPS still 0% — no active work yet; starting
+Phase 3 tracks (3A in progress, 3B done, 3D done; 3E Phases 1–2 merged and 3F Phase 1 merged — both
+both governed by ADR-016/ADR-017, accepted 2026-09-16 after those phases had already merged; 3G spec in review; 3C/3-OPS still 0% — no active work yet; starting
 either is a human scope call — no ADR exists for either yet — consistent with
 `agent-behaviour.md`'s general "no phase advance without explicit sign-off" rule, not a
-3C/3D-specific one):
+3C-specific one):
 
-| ID    | Track                                               | Notes                                                                                                                                                                                                                   |
-| ----- | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 3A    | Integration layer — connector runtime, marketplace  | 🟡 In progress. Stage 0/1 done, Stage 2 runtime + scopes tracks landing. Detailed sequence + status in `.claude/context/phase-3-primer.md`; live % in `docs/sup-docs/roadmap-tracker.md` — update both there, not here. |
-| 3B    | Plugin system — Module Federation, slot registry    | ✅ Done — PR #397 (2026-08-13), all 3 phases.                                                                                                                                                                           |
-| 3C    | AI layer — automation gen, workflow suggestion, RAG | Not yet started; no ADR yet — a human scope call, not a 3B-blocked dependency                                                                                                                                           |
-| 3D    | Observability + compliance — OTel, Prometheus, GDPR | Parallel with 3A–3C possible                                                                                                                                                                                            |
-| 3-OPS | Deferred ops/infra concerns                         | See Phase 1 carry-overs in tracker                                                                                                                                                                                      |
+| ID    | Track                                                                                      | Notes                                                                                                                                                                                                                                                                                                                                                                                        |
+| ----- | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 3A    | Integration layer — connector runtime, marketplace                                         | 🟡 In progress. Stage 0/1 done, Stage 2 runtime + scopes tracks landing. Detailed sequence + status in `.claude/context/phase-3-primer.md`; live % in `docs/tracker/roadmap-tracker.md` — update both there, not here.                                                                                                                                                                       |
+| 3B    | Plugin system — Module Federation, slot registry                                           | ✅ Done — PR #397 (2026-08-13), all 3 phases.                                                                                                                                                                                                                                                                                                                                                |
+| 3C    | AI layer — automation gen, workflow suggestion, RAG                                        | Not yet started; no ADR yet — a human scope call, not a 3B-blocked dependency                                                                                                                                                                                                                                                                                                                |
+| 3D    | Observability + compliance — OTel, Prometheus, GDPR                                        | ✅ Done — PR #503–507 (all stages). Live % in `docs/tracker/roadmap-tracker.md`.                                                                                                                                                                                                                                                                                                             |
+| 3E    | On-call routing & severity-based notification                                              | 🟡 Phases 1–2 merged. Phase 1 DB (PRs #583/#585/#586, migrations 0092–0100) and Phase 2 API routes (PRs #590/#594) landed 2026-09-09/09-11; #565 closed. Phases 3–4 (automation actions, UI, dashboards) in review: #597 #600 #602 #603 #605. ADR-016 accepted 2026-09-16 — the phases merged before it, so the ADR ratifies shipped behaviour. Live % in `docs/tracker/roadmap-tracker.md`. |
+| 3F    | Temporal scheduler — auto-create tickets on schedule                                       | 🟡 Phase 1 DB merged via PR #586 (`schedule_rules`, `schedule_executions`, migrations 0101–0103; next free 0104). GH issues #578–#582 opened. Phases 2–4 in review: #595 #601 #604. ADR-017 accepted 2026-09-16 — same note as 3E. Live % in `docs/tracker/roadmap-tracker.md`.                                                                                                              |
+| 3G    | MIS reporting dashboards — embedded Superset (Stage 1), standalone + Zitadel SSO (Stage 2) | 🔴 Spec in review (PR #584). Stage 1 = fixed dashboards embedded in admin-ui; Stage 2 = Superset on its own URL with Zitadel login for analysts. Isolation ADR resolved 2026-09-09 (owner: Bikash) — Superset's `DB_CONNECTION_MUTATOR` hook stamps the platform's existing `app.tenant_id` GUC per-connection, reusing existing RLS rather than new views. GH issues: #106, #102–#105.      |
+| 3-OPS | Deferred ops/infra concerns                                                                | See Phase 1 carry-overs in tracker                                                                                                                                                                                                                                                                                                                                                           |
 
 New findings from any review go through
 [docs/reviews/pending-review-findings.md](docs/reviews/pending-review-findings.md) — file an
 issue before picking one up, not a standing checklist in this file. (The pre-Phase-3 hardening
 round and the 2026-07-16/21 reconciliation that used to be summarized here are both fully closed;
-see `docs/sup-docs/week-log/2026-08-19-claude-md-hardening-checklist-archive.md` for that history
+see `docs/tracker/week-log/2026-08-19-claude-md-hardening-checklist-archive.md` for that history
 verbatim, and ADR-005/ADR-006 above for the decisions that came out of it.)
 
 **Delivery has guardrails (Claude Code only; plain git + CI unaffected).** Every change runs
@@ -133,6 +152,8 @@ packages/
   plugin-sdk/   Plugin extension points (Phase 3)
   ui/           Shared design system (shadcn/ui + tokens)
   ai/           Anthropic SDK wrapper + RAG helpers
+  teams/        Teams/services/on-call-schedule primitives + the shared cross-tenant FK
+                validation helper reused by 3E (on-call routing) and 3F (temporal scheduler)
 modules/        Seed SQL + one-line stub index.ts per module (no domain logic TypeScript)
 tests/
   integration/  Cross-package integration tests
@@ -149,7 +170,18 @@ apps/*             → packages/*
 modules/*          → packages/*   (no cross-module imports ever)
 entity-engine      → db only
 workflow-engine    → db, entity-engine
-automation-engine  → db, workflow-engine, entity-engine
+automation-engine  → db, workflow-engine, entity-engine, teams, audit
+                                  (teams added for resolve_oncall's on-call cascade lookup,
+                                   audit added so resolve_oncall can call writeAuditEntry
+                                   directly for its oncall.* actions — same direct-call
+                                   pattern apps/api/apps/worker already use, not the hook
+                                   indirection entity-engine uses (that pattern exists
+                                   because entity-engine is held to a stricter "db only"
+                                   boundary). docs/specs/oncall-routing.md T12 — both teams
+                                   and audit depend only on db, so this is a DAG extension,
+                                   not a cycle)
+teams              → db only     (3E on-call routing + 3F temporal scheduler shared
+                                   cross-tenant FK helper — docs/specs/oncall-routing.md T44)
 ```
 
 Cross-module communication: event bus, entity engine relations API, or tRPC only.
@@ -221,7 +253,7 @@ Full setup: `docs/local-setup.md`
    gives a transitive answer grep can't — but a stale `dist/` makes it silently
    under-report, so treat an empty result as inconclusive, not "nothing depends on this",
    and cross-check with grep before trusting it — see `.claude/context/dependency-graph.md`
-5. Check `docs/sup-docs/roadmap-tracker.md` — understand the phase context before changing scope
+5. Check `docs/tracker/roadmap-tracker.md` — understand the phase context before changing scope
 6. If a decision isn't covered by an ADR, write one before implementing
 
 ---
@@ -255,12 +287,42 @@ field is no longer read). Do not remove these:
 - `undici ">=7.29.0 <8"` — GHSA-4cwx-7wf7-3272 / GHSA-m8rv-5g2x-5cg5 / GHSA-jr45-8vmc-qm54 /
   GHSA-v3r7-h72x-cjcm; bounded to `<8` so a major bump doesn't break jsdom's internal file
   imports.
-- `postcss ">=8.5.18"` — GHSA-r28c-9q8g-f849 (path traversal via sourceMappingURL
-  auto-loading); pulled in via vite (admin-ui devDep).
+- `postcss ">=8.5.23"` — GHSA-r28c-9q8g-f849 (path traversal via sourceMappingURL
+  auto-loading) + GHSA-fxqj-rqcc-2cmp (second path traversal variant, bumped from
+  `>=8.5.18` to `>=8.5.23` to close it); pulled in via vite (admin-ui devDep).
 - `nanoid ">=3.3.17 <4"` — GHSA-2v37-7h3g-55p8 (indefinite loop when size is 0);
   pulled in via postcss (vite/vitest chains in admin-ui devDeps). Bounded to `<4` —
   postcss's own package.json pins nanoid as `^3.x`, so an unbounded floor would
   silently force it onto an untested major (resolves to 6.0.1) instead of just the fix.
+- `qs ">=6.15.2"` — GHSA-q8mj-m7cp-5q26 (qs.stringify crashes on null/undefined entries in
+  comma-format arrays with encodeValuesOnly); pulled in via @refinedev/core and
+  @refinedev/react-router-v6 (admin-ui dependencies).
+- `react-router ">=6.30.4 <7"` — GHSA-2j2x-hqr9-3h42 (open redirect in 6.x); bounded
+  to `<7` — react-router 7 has breaking API changes; the two open-redirect advisories that
+  require `>=7.18.0` (GHSA-wrjc-x8rr-h8h6 / GHSA-337j-9hxr-rhxg) are deferred until a
+  coordinated v7 upgrade.
+- `react-router-dom ">=6.30.5 <7"` — GHSA-jjmj-jmhj-qwj2 (open redirect → XSS in
+  6.30.2–6.30.4); bounded to `<7` for the same reason as react-router above.
+- `"@remix-run/router" ">=1.23.3"` — GHSA-2j2x-hqr9-3h42 (same advisory; this is the
+  internal peer pulled in by react-router and react-router-dom).
+- `"@hono/node-server" ">=2.0.10"` — GHSA-frvp-7c67-39w9 (path traversal via encoded
+  backslash on Windows in serve-static) + GHSA-9mqv-5hh9-4cgg (memory-leak DoS via aborted
+  WebSocket handshake); pulled in by apps/api, apps/worker, packages/auth.
+- `browserslist ">=4.28.7"` — GHSA-c83g-rgw3-j3cx (unbounded memory growth) +
+  GHSA-73wf-gq98-2v4g (prototype write via normalizeStats); pulled in via
+  @vitejs/plugin-react → @babel/core → @babel/helper-compilation-targets.
+
+**Deferred overrides (require major-version coordination before adding):**
+
+- `uuid` GHSA-w5hq-g745-h8pq (buffer bounds check in v3/v5/v6 when `buf` is provided):
+  fix requires `>=11.1.1` but `exceljs` pins `uuid@8.x` internally — uuid 11 dropped
+  CommonJS and changed APIs, so a forced override would break exceljs at runtime. Revisit
+  when exceljs ships native uuid-v11 support.
+- `@opentelemetry/core` GHSA-8988-4f7v-96qf (unbounded memory in W3C Baggage propagation):
+  fix requires `>=2.8.0` but current version is `1.30.1` — a 1→2 major bump; `@sentry/node`
+  and all OTel instrumentation packages in `packages/telemetry` are pinned to the 1.x API
+  and are not yet compatible with OTel core 2.x. Revisit when Sentry releases a 2.x-compatible
+  SDK version.
 
 ---
 

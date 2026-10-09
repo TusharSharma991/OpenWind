@@ -19,6 +19,11 @@ import { notFound } from "./not-found.js";
 import { redactEntityFieldsForThirdParty } from "../../lib/redact-entity-fields.js";
 import { withIdempotency, isIdempotencyStatus } from "../../lib/idempotency.js";
 import { applicationActorIdFromUserId } from "../../lib/application-actor-id.js";
+import { resolveOriginOidcClientId } from "../../lib/resolve-origin-oidc-client-id.js";
+import { resolveOrgMemberUserId } from "../../lib/resolve-org-member.js";
+import { postSystemComment } from "../../lib/post-system-comment.js";
+import { writeAuditEntry } from "@platform/audit";
+import { logger } from "@platform/logger";
 
 function isEntityNotFound(err: unknown): boolean {
   return (
@@ -53,8 +58,9 @@ export const getThirdPartyTicketHandler = factory.createHandlers(
   requireTicketScope("read"),
   async (c) => {
     const id = c.req.param("id") ?? "";
-    const { tenantId } = c.get("auth");
+    const { tenantId, userId: authUserId } = c.get("auth");
     const { userId } = c.get("actingPerson");
+    const applicationActorId = applicationActorIdFromUserId(authUserId);
 
     try {
       const instance = await withTenantContext(tenantId, (tx) =>
@@ -65,6 +71,27 @@ export const getThirdPartyTicketHandler = factory.createHandlers(
         hasEntityAccess(tx, tenantId, instance, userId, []),
       );
       if (!allowed) {
+        // Best-effort: an audit-write failure must never turn a correct 404
+        // denial into a 500 -- same pattern as transitions.ts's denied
+        // branch.
+        try {
+          await withTenantContext(tenantId, (tx) =>
+            writeAuditEntry(tx, {
+              tenantId,
+              actorId: applicationActorId,
+              actorType: "api_key",
+              actingPersonId: userId,
+              resourceType: "ticket",
+              resourceId: id,
+              action: "ticket.view_denied",
+            }),
+          );
+        } catch (auditErr) {
+          logger.warn(
+            { auditErr, tenantId, instanceId: id },
+            "third-party ticket view: denied-attempt audit write failed",
+          );
+        }
         return notFound(c);
       }
 
@@ -80,6 +107,27 @@ export const getThirdPartyTicketHandler = factory.createHandlers(
         ),
       );
 
+      // Best-effort, same rationale as the denied branch above -- a logging
+      // hiccup must never turn a successful read into a 500.
+      try {
+        await withTenantContext(tenantId, (tx) =>
+          writeAuditEntry(tx, {
+            tenantId,
+            actorId: applicationActorId,
+            actorType: "api_key",
+            actingPersonId: userId,
+            resourceType: "ticket",
+            resourceId: id,
+            action: "ticket.viewed",
+          }),
+        );
+      } catch (auditErr) {
+        logger.warn(
+          { auditErr, tenantId, instanceId: id },
+          "third-party ticket view: allowed-attempt audit write failed",
+        );
+      }
+
       return c.json({ data: { ...instance, fields: redactedFields } });
     } catch (err) {
       if (isEntityNotFound(err)) {
@@ -93,7 +141,10 @@ export const getThirdPartyTicketHandler = factory.createHandlers(
 const CreateThirdPartyTicketSchema = z.object({
   workflowId: z.string().uuid(),
   fields: z.record(z.unknown()).default({}),
-  assignedTo: z.string().optional(),
+  // PR #576 review (PrabhuVijit, F2/M4) -- bounded + trimmed so an
+  // unbounded-length or whitespace-padded value never reaches
+  // resolveOrgMemberUserId or (on the unresolved path) the log line.
+  assignedTo: z.string().trim().max(256).optional(),
   // Any `state`/`currentState` field the caller sends is intentionally NOT
   // part of this schema — Zod's default "strip unknown keys" behavior drops
   // it silently, with no rejection (spec R6: force-to-initial-state
@@ -129,7 +180,7 @@ export const createThirdPartyTicketHandler = factory.createHandlers(
   requireTicketScope("create"),
   zValidator("json", CreateThirdPartyTicketSchema),
   async (c) => {
-    const { tenantId, userId: authUserId } = c.get("auth");
+    const { tenantId, orgId, userId: authUserId } = c.get("auth");
     const { userId: actingPersonId } = c.get("actingPerson");
     const input = c.req.valid("json");
     const applicationActorId = applicationActorIdFromUserId(authUserId);
@@ -147,6 +198,67 @@ export const createThirdPartyTicketHandler = factory.createHandlers(
       );
     }
 
+    // docs/specs/third-party-api-origin-tagging.md §V -- every API-originated
+    // ticket ALWAYS has a resolvable app+performer identity, never created
+    // untagged. The key just authenticated this request (requireAuth already
+    // ran), so a null here means it was revoked/deleted in the moment
+    // between auth and this line -- treat as unauthorized, not a 500, since
+    // the caller's credential is what actually became invalid.
+    const originOidcClientId = await resolveOriginOidcClientId(
+      tenantId,
+      applicationActorId,
+    );
+    if (!originOidcClientId) {
+      return c.json({ error: "UNAUTHORIZED", message: "Invalid API key" }, 401);
+    }
+
+    // assignedTo is optional on this tree's schema, but when supplied it
+    // must resolve to a real org member -- accepts either their raw Zitadel
+    // user id or their username (loginName). Previously an assignedTo value
+    // was stored verbatim with zero validation -- a caller-supplied username
+    // silently landed in assigned_to and never matched any real user in
+    // admin-ui's own lookup (which keys strictly on userId), so the ticket
+    // just looked unassigned with no error anywhere.
+    //
+    // Policy (ported from the sibling AuthNexus fork, revised from an
+    // earlier 422-on-failure design tried the same day): an unresolvable
+    // assignedTo no longer blocks ticket creation. The ticket is always
+    // created (unassigned if resolution failed), and the caller learns
+    // about the failure only via a system-generated comment notification
+    // (posted below), never via a synchronous 422 -- see
+    // post-system-comment.ts for the full rationale (a 422 here is a fast,
+    // scriptable "does this identifier exist" oracle).
+    let resolvedAssignedTo: string | undefined;
+    let assignedToUnresolved = false;
+    if (input.assignedTo) {
+      // PR #576 review (PrabhuVijit, F3) -- orgId is optional on AuthContext
+      // (absent when a tenant has no zitadel_org_id mapping); without this
+      // guard, resolveOrgMemberUserId's own `if (!orgId) return { ok: false
+      // }` would silently treat every assignedTo as unresolved for such a
+      // tenant, posting a bogus "couldn't be resolved" system comment on
+      // every ticket regardless of whether the value was actually valid.
+      // Falls back to the pre-this-feature behavior (store verbatim, no
+      // validation) for that narrow case, logged so the gap is observable
+      // rather than silently misfiring.
+      if (!orgId) {
+        logger.warn(
+          { tenantId },
+          "third-party ticket create: assignedTo resolution skipped -- orgId absent from auth context",
+        );
+        resolvedAssignedTo = input.assignedTo;
+      } else {
+        const assignedToResolution = await resolveOrgMemberUserId(
+          orgId,
+          input.assignedTo,
+        );
+        if (assignedToResolution.ok) {
+          resolvedAssignedTo = assignedToResolution.userId;
+        } else {
+          assignedToUnresolved = true;
+        }
+      }
+    }
+
     // ADR-012 Phase G, spec R3/R4/R5 -- idempotency wraps only the actual
     // mutating operation, not upstream validation, so a caller retrying a
     // request that already 422'd above re-validates fresh rather than
@@ -161,7 +273,7 @@ export const createThirdPartyTicketHandler = factory.createHandlers(
       {
         workflowId: input.workflowId,
         fields: input.fields,
-        assignedTo: input.assignedTo ?? null,
+        assignedTo: resolvedAssignedTo ?? null,
         attachmentIds: input.attachmentIds,
       },
       async () => {
@@ -175,11 +287,14 @@ export const createThirdPartyTicketHandler = factory.createHandlers(
               entityTypeId: workflow.entityTypeId,
               workflowId: workflow.id,
               fields: input.fields,
-              assignedTo: input.assignedTo,
+              assignedTo: resolvedAssignedTo,
               createdBy: actingPersonId,
-              actorId: actingPersonId,
+              actorId: applicationActorId,
               actorType: "api_key",
               actingPersonId,
+              originMechanism: "api",
+              originOidcClientId,
+              originPerformerUserId: actingPersonId,
             });
             // Same transaction as the create above -- a rejected attachment
             // reference rolls back the whole ticket creation, never leaving a
@@ -192,10 +307,57 @@ export const createThirdPartyTicketHandler = factory.createHandlers(
               actingPersonId,
               applicationActorId,
             );
-            return created;
+            return {
+              created,
+              workflowId: workflow.id,
+            };
           });
 
-          return { status: 201, body: { data: instance } };
+          // PR #576 review (PrabhuVijit, F1) -- deliberately OUTSIDE the
+          // transaction above, in its own withTenantContext call. Running
+          // this inside the main transaction meant any failure in
+          // postSystemComment's inserts left Postgres itself in an aborted-
+          // transaction state; the try/catch only swallowed the JS error,
+          // it could not un-abort Postgres, so the subsequent COMMIT would
+          // have failed and rolled back the ticket creation too -- making
+          // the "best-effort, must never fail ticket creation" comment
+          // factually wrong (nothing had committed yet at that point). Now
+          // the ticket is genuinely committed first, so this really is
+          // best-effort. See resolveOrgMemberUserId call above and
+          // post-system-comment.ts -- notify the creator that assignedTo
+          // didn't resolve via a system comment, never via the API response
+          // itself. Top-level (no replyTo) since this tree's schema has no
+          // remark field to seed a host comment from.
+          if (assignedToUnresolved) {
+            try {
+              await withTenantContext(tenantId, (tx) =>
+                postSystemComment(tx, {
+                  tenantId,
+                  instanceId: instance.created.id,
+                  workflowId: instance.workflowId,
+                  currentState: instance.created.currentState,
+                  // PR #576 review (PrabhuVijit, F2) -- deliberately does NOT
+                  // echo the caller-supplied assignedTo value back into a
+                  // System-attributed record. That value is unvalidated,
+                  // unbounded-length, third-party-controlled input; embedding
+                  // it verbatim would let a caller plant arbitrary (and
+                  // possibly misleading or PII-bearing) content inside a
+                  // comment that renders as if the platform itself wrote it.
+                  // The recipient already knows which ticket they created and
+                  // what value they supplied.
+                  text: "The assignedTo value you provided could not be resolved to an org member -- this ticket was created unassigned.",
+                  notifyUserId: actingPersonId,
+                }),
+              );
+            } catch (systemCommentErr) {
+              logger.error(
+                { systemCommentErr, tenantId, instanceId: instance.created.id },
+                "third-party ticket create: failed to post assignedTo-unresolved system comment",
+              );
+            }
+          }
+
+          return { status: 201, body: { data: instance.created } };
         } catch (err) {
           if (err instanceof AttachmentReferenceError) {
             const status = isIdempotencyStatus(err.status) ? err.status : 500;

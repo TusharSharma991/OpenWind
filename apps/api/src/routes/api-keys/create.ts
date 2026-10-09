@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { zValidator } from "../../lib/validator.js";
 import { z } from "zod";
+import { env } from "@platform/config";
 import {
   requireAuth,
   requireRole,
@@ -10,6 +11,7 @@ import {
   API_KEY_DEFAULT_TTL_DAYS,
   detectScopesFormat,
   unknownTicketActionScopes,
+  assertExternalIssuerEgressAllowed,
 } from "@platform/auth";
 import {
   db,
@@ -19,7 +21,7 @@ import {
   isCheckViolation,
 } from "@platform/db";
 import { writeAuditEntry } from "@platform/audit";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { factory } from "./factory.js";
 import { scopeCeilingError } from "./scope-ceiling.js";
 
@@ -30,13 +32,31 @@ import { scopeCeilingError } from "./scope-ceiling.js";
 const CreateApiKeySchema = z.object({
   name: z.string().min(1).max(200),
   scopes: z.array(z.string().min(1)).default([]),
-  applicationName: z.string().min(1).max(200).optional(),
+  // .trim() before .min()/.max(), same fix and same reason as
+  // externalIssuer/externalOrgId below -- a direct API caller bypassing the
+  // admin UI's own trim could otherwise store a value with stray leading/
+  // trailing whitespace, even though the uniqueness check and DB index both
+  // normalize it away for comparison purposes.
+  applicationName: z.string().trim().min(1).max(200).optional(),
   applicationDescription: z.string().max(2000).optional(),
   // 320 = RFC 5321's max total address length; matches migration 0069's
   // CHECK constraint (issue #445) so an oversized value 400s here, not at
   // the DB.
   applicationContactEmail: z.string().email().max(320).optional(),
   oidcClientId: z.string().min(1).max(200).optional(),
+  // docs/specs/third-party-key-external-org-mapping.md — only needed when
+  // this key's acting-person tokens come from a different IdP than the
+  // platform's configured primary. externalIssuer is always explicit admin
+  // input (spec §I's resolved decision) — never derived via a live
+  // discovery-document fetch during this request.
+  // PR #546 review (PrabhuVijit) -- .trim() must run before .url()/.min(1)
+  // (code-style.md's Zod-ordering invariant), not after: with .trim() last,
+  // a caller could POST " " (length 1, passes .min(1)), which is then
+  // trimmed to "" and stored empty -- the invariant is already violated at
+  // rest by the time anything downstream checks it. Trimming first means a
+  // whitespace-only externalOrgId now correctly fails .min(1) up front.
+  externalIssuer: z.string().trim().url().max(500).optional(),
+  externalOrgId: z.string().trim().min(1).max(200).optional(),
 });
 
 const THREE_MONTHS_MS = 90 * 24 * 60 * 60 * 1000;
@@ -54,8 +74,34 @@ export const createApiKeyHandler = factory.createHandlers(
       applicationDescription,
       applicationContactEmail,
       oidcClientId,
+      externalIssuer,
+      externalOrgId,
     } = c.req.valid("json");
     const { tenantId, roles, userId } = c.get("auth");
+
+    // PR #545 review (PrabhuVijit, MUST FIX) -- stored separately from the
+    // raw `externalIssuer` input. A trailing-slash variant
+    // ("https://auth.example.com/") is a valid URL that passes every
+    // validation branch below unchanged, but stored verbatim it breaks
+    // verification three ways: the discovery fetch becomes a malformed
+    // double-slash URL, the JWKS cache key differs from the no-slash form
+    // (splitting an otherwise-identical issuer's cache), and jose's
+    // `jwtVerify({ issuer })` requires an exact string match against the
+    // token's `iss` claim, which real OIDC issuers essentially never emit
+    // with a trailing slash. Because api_keys rows are immutable after
+    // creation, an un-normalized value here means a key that creates
+    // successfully (201) but 401s on every real use, fixable only by
+    // revoking and recreating it. `.href` (not `.origin`, which strips the
+    // path -- wrong for path-based issuers like Microsoft's
+    // `.../tenant-id/v2.0`) canonicalizes case/default-port/percent-encoding
+    // and drops a root-path's own trailing slash; the explicit `.replace`
+    // covers a non-root path's trailing slash too (`.href` alone leaves
+    // "https://x.com/foo/" as-is). Computed once here (before the malformed-
+    // URL branch below, which already re-parses with its own try/catch) so
+    // every later use -- the stored value -- is consistent.
+    const normalizedExternalIssuer = externalIssuer
+      ? new URL(externalIssuer).href.replace(/\/$/, "")
+      : undefined;
 
     // ADR-008 Decision #6: stamps the format of the scopes actually supplied.
     // detectScopesFormat only throws on a mixed role/action array — checked
@@ -76,12 +122,97 @@ export const createApiKeyHandler = factory.createHandlers(
 
     if (scopesFormat === "role") {
       // Pre-existing internal-key path — unchanged, per this repo's own
-      // "leave the old one as it is" decision on this feature.
+      // "leave the old one as it is" decision on this feature. A role-format
+      // key never goes through the dual-identity acting-person flow at all,
+      // so an external-org mapping has nothing to attach to here — reject
+      // rather than silently accept-and-drop the fields.
+      if (externalIssuer || externalOrgId) {
+        return c.json(
+          {
+            error: "VALIDATION_ERROR",
+            message:
+              "externalIssuer/externalOrgId only apply to action-scoped (third-party) keys",
+          },
+          422,
+        );
+      }
       const scopeError = scopeCeilingError(roles, scopes);
       if (scopeError) {
         return c.json({ error: "FORBIDDEN", message: scopeError }, 403);
       }
     } else {
+      // docs/specs/third-party-key-external-org-mapping.md §I's 4-way
+      // validation.
+      if (externalOrgId && !externalIssuer) {
+        return c.json(
+          {
+            error: "VALIDATION_ERROR",
+            message: "externalOrgId requires externalIssuer to also be set",
+          },
+          422,
+        );
+      }
+      if (externalIssuer) {
+        // Security-review finding (docs/specs/third-party-key-external-org-mapping.md
+        // Phase 2): a same-provider comparison via string/slash normalization
+        // alone let a URL variant (different case, default port, etc.) of the
+        // SAME origin slip through as "different," and — combined with no
+        // egress check at all — meant an admin-supplied issuer pointed at an
+        // internal/metadata address sailed straight into jwks.ts's discovery
+        // fetch. Compare normalized URL origins (protocol + lowercased host +
+        // port), and separately, unconditionally validate the issuer isn't a
+        // private/reserved/malformed egress target regardless of which branch
+        // below it falls into.
+        let externalIssuerOrigin: string;
+        try {
+          externalIssuerOrigin = new URL(externalIssuer).origin;
+        } catch {
+          return c.json(
+            {
+              error: "VALIDATION_ERROR",
+              message: "externalIssuer must be a valid URL",
+            },
+            422,
+          );
+        }
+        const isPrimaryIdP =
+          externalIssuerOrigin === new URL(env.ZITADEL_ISSUER).origin;
+        if (isPrimaryIdP) {
+          return c.json(
+            {
+              error: "VALIDATION_ERROR",
+              message:
+                "externalIssuer matches this platform's primary identity provider — omit externalIssuer/externalOrgId for a key that uses it",
+            },
+            422,
+          );
+        }
+        if (!externalOrgId) {
+          return c.json(
+            {
+              error: "ORG_MAPPING_REQUIRED",
+              message:
+                "This key's externalIssuer differs from the tenant's primary identity provider — externalOrgId is required so acting-person tokens from that issuer can be matched to this tenant",
+            },
+            422,
+          );
+        }
+        try {
+          await assertExternalIssuerEgressAllowed(externalIssuer);
+        } catch (err) {
+          return c.json(
+            {
+              error: "VALIDATION_ERROR",
+              message:
+                err instanceof Error
+                  ? err.message
+                  : "externalIssuer is not a permitted address",
+            },
+            422,
+          );
+        }
+      }
+
       // ADR-012 Decision #3/spec R8: third-party (action-format) keys are
       // never gated by the creator's own role ceiling — the platform's real
       // action-scope system, enforced at request time as scope ∩ person's
@@ -194,6 +325,85 @@ export const createApiKeyHandler = factory.createHandlers(
       }
     }
 
+    // Migration 0087/0088's own comment: applicationName uniqueness is
+    // tenant-scoped (unlike oidcClientId's global index above) -- two
+    // different tenants can legitimately register their own "Zapier"
+    // integration. Runs inside withTenantContext (RLS + the explicit
+    // tenant_id filter below, both required per security.md) rather than on
+    // the bare `db` client, since this check has no reason to see other
+    // tenants' rows at all. Filtered to applicationNameActive rows only --
+    // a rotation's dying predecessor keeps its applicationName and stays
+    // non-revoked through its grace window, but rotate.ts already flipped
+    // its applicationNameActive to false, so it correctly never counts as
+    // a conflict against its own successor or anything else.
+    if (scopesFormat === "action" && applicationName) {
+      // PR #546 review (PrabhuVijit) -- was an unbounded fetch-all-then-
+      // filter-in-JS scan; pushed the comparison into the same
+      // lower(btrim(...)) form migration 0088's own unique index uses, plus
+      // an explicit LIMIT, so this stays O(1) regardless of how many keys a
+      // tenant has accumulated instead of degrading with tenant size.
+      // Deliberately NOT normalizeApplicationName() here -- that also
+      // collapses internal whitespace runs (for the client's own grouping
+      // display), which lower(btrim()) does not; matching the DB's actual
+      // transform exactly is what keeps this query's notion of "conflict"
+      // consistent with the unique index that ultimately enforces it.
+      // Both sides go through Postgres's own lower(btrim(...)) -- not a JS
+      // .trim() on the right-hand side -- since JS .trim() strips a wider
+      // whitespace set (tabs, newlines, etc.) than btrim()'s space-only
+      // default, which could otherwise make this pre-check disagree with
+      // what the real unique index (migration 0088) would actually allow.
+      const [nameConflict] = await withTenantContext(tenantId, (tx) =>
+        tx
+          .select({
+            id: apiKeys.id,
+            oidcClientId: apiKeys.oidcClientId,
+            expiresAt: apiKeys.expiresAt,
+          })
+          .from(apiKeys)
+          .where(
+            and(
+              eq(apiKeys.tenantId, tenantId),
+              isNull(apiKeys.revokedAt),
+              eq(apiKeys.applicationNameActive, true),
+              sql`lower(btrim(${apiKeys.applicationName})) = lower(btrim(${applicationName}))`,
+            ),
+          )
+          .limit(1),
+      );
+
+      if (nameConflict && nameConflict.oidcClientId !== oidcClientId) {
+        const isExpired =
+          nameConflict.expiresAt !== null &&
+          nameConflict.expiresAt <= new Date();
+        if (!isExpired) {
+          return c.json(
+            {
+              error: "APPLICATION_NAME_IN_USE",
+              message: `An application named "${applicationName}" is already registered for this tenant — use a different name, or mint a new key under the existing application instead`,
+            },
+            409,
+          );
+        }
+        await withTenantContext(tenantId, (tx) =>
+          tx
+            .update(apiKeys)
+            .set({
+              revokedAt: new Date(),
+              revokedBy: "system:expiry-reclaim",
+            })
+            // PR #546 review (PrabhuVijit) -- explicit tenant_id filter is
+            // security.md rule 1's primary guard; RLS via withTenantContext
+            // is the second layer, not a substitute for it.
+            .where(
+              and(
+                eq(apiKeys.id, nameConflict.id),
+                eq(apiKeys.tenantId, tenantId),
+              ),
+            ),
+        );
+      }
+    }
+
     try {
       const created = await withTenantContext(tenantId, async (tx) => {
         let row;
@@ -215,6 +425,8 @@ export const createApiKeyHandler = factory.createHandlers(
                     applicationDescription,
                     applicationContactEmail,
                     oidcClientId,
+                    externalIssuer: normalizedExternalIssuer,
+                    externalOrgId,
                   }
                 : {}),
             })
@@ -227,6 +439,8 @@ export const createApiKeyHandler = factory.createHandlers(
               expiresAt: apiKeys.expiresAt,
               applicationName: apiKeys.applicationName,
               oidcClientId: apiKeys.oidcClientId,
+              externalIssuer: apiKeys.externalIssuer,
+              externalOrgId: apiKeys.externalOrgId,
             });
         } catch (err) {
           // Defense-in-depth for the race the pre-insert conflict check above
@@ -238,6 +452,17 @@ export const createApiKeyHandler = factory.createHandlers(
           // 500.
           if (isUniqueViolation(err, "api_keys_oidc_client_id_active_unique")) {
             throw new ClientIdInUseError();
+          }
+          // Same race the pre-insert conflict check above can't fully close
+          // (two concurrent requests for the same normalized name), closed
+          // by migration 0087's own unique index.
+          if (
+            isUniqueViolation(
+              err,
+              "api_keys_tenant_application_name_active_unique",
+            )
+          ) {
+            throw new ApplicationNameInUseError();
           }
           // Migrations 0070/0071's CHECK constraints bound application_name/
           // application_description/application_contact_email/
@@ -302,6 +527,15 @@ export const createApiKeyHandler = factory.createHandlers(
           422,
         );
       }
+      if (err instanceof ApplicationNameInUseError) {
+        return c.json(
+          {
+            error: "APPLICATION_NAME_IN_USE",
+            message: `An application named "${applicationName ?? ""}" is already registered for this tenant — use a different name, or mint a new key under the existing application instead`,
+          },
+          409,
+        );
+      }
       throw err;
     }
   },
@@ -309,3 +543,4 @@ export const createApiKeyHandler = factory.createHandlers(
 
 class ClientIdInUseError extends Error {}
 class FieldTooLongError extends Error {}
+class ApplicationNameInUseError extends Error {}

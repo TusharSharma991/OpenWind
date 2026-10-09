@@ -19,6 +19,7 @@ import {
   workflowEvents,
   adminAuditLog,
   attachments,
+  apiKeys,
 } from "@platform/db";
 import { createEntityType, createEntity } from "@platform/entity-engine";
 import {
@@ -27,11 +28,14 @@ import {
   addWorkflowTransition,
 } from "@platform/workflow-engine";
 import type { EntityType } from "@platform/entity-engine";
+import { hashApiKey } from "@platform/auth";
 import type { AuthContext, ActingPersonContext } from "@platform/auth";
 import { createThirdPartyCommentHandler } from "../../src/routes/third-party/comments.js";
 import { createThirdPartyChildHandler } from "../../src/routes/third-party/children.js";
 import { executeThirdPartyTransitionHandler } from "../../src/routes/third-party/transitions.js";
 import { getThirdPartyAccessLogsHandler } from "../../src/routes/admin/third-party-access-logs.js";
+import { writeAuditEntry } from "@platform/audit";
+import { withTenantContext } from "@platform/db";
 
 const TENANT = "bbccddee-0000-4000-b000-000000000f01";
 const OTHER_TENANT = "bbccddee-0000-4000-b000-000000000f02";
@@ -58,6 +62,19 @@ beforeAll(async () => {
       slug: `phase-f-other-${OTHER_TENANT}`,
     },
   ]);
+
+  // docs/specs/third-party-api-origin-tagging.md — comment/child creation
+  // routes now resolve the authenticating key's oidcClientId via a real DB
+  // lookup, not just the stubbed auth context (API_KEY_ID above).
+  await db.insert(apiKeys).values({
+    id: API_KEY_ID,
+    tenantId: TENANT,
+    name: "Phase F Access Logs Test Key",
+    keyHash: hashApiKey(`sk_phase_f_access_logs_test_${TENANT}`),
+    scopesFormat: "action",
+    scopes: ["entity:ticket:comment", "entity:ticket:subticket"],
+    oidcClientId: "phase-f-access-logs-test-client",
+  });
 
   entityType = await createEntityType(db, null, {
     name: `phase_f_access_logs_test_${Date.now()}`,
@@ -148,6 +165,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await db.delete(apiKeys).where(eq(apiKeys.id, API_KEY_ID));
   await db.delete(tenants).where(inArray(tenants.id, [TENANT, OTHER_TENANT]));
 });
 
@@ -359,6 +377,43 @@ describe("GET /admin/third-party-access-logs — spec AC2, tenant isolation", ()
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: unknown[] };
     expect(body.data).toHaveLength(0);
+  });
+
+  // Bug: createEntity's audit hook used to stamp actor_id with the acting
+  // person's (non-uuid, e.g. Zitadel numeric) id instead of the api key's
+  // uuid for actor_type='api_key' rows -- see engine.ts's fireEntityAuditHook
+  // fix. Legacy rows written before that fix still exist in production and
+  // must not crash this endpoint: Postgres rejects a non-uuid literal
+  // compared against api_keys.id (a uuid column) for the WHOLE query, not
+  // just that one row, so a single bad row previously 500'd the entire list.
+  it("tolerates a legacy row whose actor_id is not a valid uuid instead of 500ing", async () => {
+    await withTenantContext(TENANT, (tx) =>
+      writeAuditEntry(tx, {
+        tenantId: TENANT,
+        actorId: "378676050449661954",
+        actorType: "api_key",
+        actingPersonId: "378676050449661954",
+        resourceType: "ticket",
+        resourceId: noAccessCommentTicketId,
+        action: "comment.created",
+        beforeSnapshot: null,
+        afterSnapshot: null,
+      }),
+    );
+
+    const app = makeAdminApp(TENANT);
+    const res = await app.request(
+      `/admin/third-party-access-logs?ticketId=${noAccessCommentTicketId}`,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: Array<{ applicationName: string | null; applicationKeyId: string }>;
+    };
+    const legacyRow = body.data.find(
+      (r) => r.applicationKeyId === "378676050449661954",
+    );
+    expect(legacyRow).toBeDefined();
+    expect(legacyRow?.applicationName).toBeNull();
   });
 
   it("rejects a non-admin caller", async () => {

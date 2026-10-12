@@ -158,13 +158,38 @@ export type AuditAction =
   | "export.requested"
   | "export.completed"
   | "export.failed"
-  // docs/specs/org-directory.md — admin-triggered org-directory sync failed
+  // #693 — who fetched a finished async export's download URL, and a
+  // same-tenant poll the PII check refused. Migration 0131 extends the DB
+  // CHECK constraint in the same commit.
+  | "export.downloaded"
+  | "export.download_denied"
+  // docs/specs/org-directory.md — admin-triggered org-directory sync outcome
   // (PR722 review finding: a failed admin-triggered write needs a durable
   // audit record, not just a logger.error line). "already_running" is
   // intentionally not audited -- routine steady state, not an admin action
-  // that went wrong. Migration 0130_admin_audit_log_org_directory_actions.sql
-  // extends the DB CHECK constraint in the same commit.
-  | "sync_failed";
+  // that went wrong. Migration 0134 replaces 0130's bare "sync_failed" with
+  // these resource.verb values (#745, #754).
+  | "org_directory.sync_completed"
+  | "org_directory.sync_failed"
+  // docs/specs/multi-org-sandbox.md T7 — sandbox provisioning job outcomes,
+  // audited under the newly-created tenant's own id (job-level, like
+  // export.completed/export.failed — not one entry per seeded account).
+  // Migration 0136_admin_audit_log_sandbox_provisioning_actions.sql extends
+  // the DB CHECK constraint in the same commit.
+  | "sandbox.provisioning_completed"
+  | "sandbox.provisioning_failed"
+  // docs/specs/multi-org-sandbox.md T13 — sandbox reset job outcomes, same job-level
+  // convention as sandbox.provisioning_completed/.failed above. Migration
+  // 0138_admin_audit_log_sandbox_reset_actions.sql extends the DB CHECK constraint in the
+  // same commit.
+  | "sandbox.reset_completed"
+  | "sandbox.reset_failed"
+  // docs/specs/multi-org-sandbox.md T15 — sandbox delete job outcomes, same job-level
+  // convention as sandbox.reset_completed/.failed above. Migration
+  // 0139_admin_audit_log_sandbox_delete_actions.sql extends the DB CHECK constraint in the
+  // same commit.
+  | "sandbox.delete_completed"
+  | "sandbox.delete_failed";
 
 export type AuditEntryInput = {
   tenantId: string;

@@ -137,6 +137,9 @@ function isCronRepresentableByPicker(cronExpr: string): boolean {
   const [hourStr, minuteStr] = parsed.timeOfDay.split(":");
   const hour = Number(hourStr);
   const minute = Number(minuteStr);
+  // Required, not redundant: the round-trip check below accepts out-of-range
+  // integers (e.g. "0 25 * * *" rebuilds byte-for-byte), so these bounds are
+  // what reject them.
   if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return false;
   if (
     parsed.frequency === "weekly" &&
@@ -426,6 +429,7 @@ export function ScheduleRulesPage(): React.ReactElement {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<ScheduleRule | null>(null);
+  const [archiving, setArchiving] = useState<ScheduleRule | null>(null);
   const [deleting, setDeleting] = useState<ScheduleRule | null>(null);
 
   const refresh = useCallback((): void => {
@@ -475,6 +479,19 @@ export function ScheduleRulesPage(): React.ReactElement {
       refresh();
     } catch {
       showAlert("Failed to delete schedule rule.");
+    }
+  }
+
+  async function handleArchive(rule: ScheduleRule): Promise<void> {
+    try {
+      await fetchWithAuth(`${API_URL}/admin/schedule-rules/${rule.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "archived" }),
+      });
+      setArchiving(null);
+      refresh();
+    } catch {
+      showAlert("Failed to archive schedule rule.");
     }
   }
 
@@ -555,6 +572,14 @@ export function ScheduleRulesPage(): React.ReactElement {
                     >
                       ✎
                     </IconButton>
+                    {rule.status !== "archived" && (
+                      <IconButton
+                        aria-label="Archive rule"
+                        onClick={() => setArchiving(rule)}
+                      >
+                        ▣
+                      </IconButton>
+                    )}
                     <IconButton
                       aria-label="Delete rule"
                       onClick={() => setDeleting(rule)}
@@ -592,6 +617,30 @@ export function ScheduleRulesPage(): React.ReactElement {
           refresh();
         }}
       />
+
+      <AlertDialog
+        open={archiving !== null}
+        onOpenChange={(next) => {
+          if (!next) setArchiving(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogTitle>Archive schedule rule?</AlertDialogTitle>
+          <AlertDialogDescription>
+            {archiving
+              ? `"${archiving.name}" will stop firing. Archived rules cannot be resumed. Execution history is preserved.`
+              : ""}
+          </AlertDialogDescription>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => archiving && void handleArchive(archiving)}
+            >
+              Archive
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         open={deleting !== null}
@@ -837,20 +886,12 @@ function RuleFormModal({
         {step === 1 ? (
           <form onSubmit={handleNext}>
             {unsupportedCronExpr && (
-              <div
-                role="alert"
-                style={{
-                  padding: "10px 12px",
-                  marginBottom: 16,
-                  border: "1px solid var(--warning)",
-                  borderRadius: 8,
-                  color: "var(--text-primary)",
-                  background:
-                    "color-mix(in srgb, var(--warning) 12%, transparent)",
-                }}
-              >
-                Your stored schedule (<code>{unsupportedCronExpr}</code>) cannot
-                be represented by this picker and will be replaced on save.
+              <div className="form-group">
+                <div className="alert alert-warning" role="alert">
+                  Your stored schedule (<code>{unsupportedCronExpr}</code>){" "}
+                  cannot be represented by this picker and will be replaced on
+                  save.
+                </div>
               </div>
             )}
             <div className="form-group">
@@ -1004,6 +1045,17 @@ function RuleFormModal({
                 />
                 Catch up on missed fires (worker was down)
               </label>
+              {rule && !rule.catchUp && catchUp && (
+                <div
+                  role="alert"
+                  className="alert alert-warning"
+                  style={{ marginTop: 8 }}
+                >
+                  Catch-up will create one ticket for each missed fire since the
+                  rule was last active. For rules paused a long time, this can
+                  create many tickets at once.
+                </div>
+              )}
             </div>
 
             <Button type="submit" variant="primary" style={{ marginTop: 8 }}>

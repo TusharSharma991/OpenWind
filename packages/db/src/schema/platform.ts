@@ -34,6 +34,41 @@ export const tenants = pgTable("tenants", {
   deletionScheduledAt: timestamp("deletion_scheduled_at", {
     withTimezone: true,
   }),
+  // Multi-Org Sandbox System (docs/specs/multi-org-sandbox.md, ADR-022). False/absent for
+  // every real customer tenant. platform_admin_role (migration 0134) has column-scoped
+  // SELECT on exactly these three columns plus id/name/createdAt -- never on any other
+  // tenants column or any other table.
+  isSandbox: boolean("is_sandbox").default(false).notNull(),
+  /** Past this timestamp, login + all background jobs for this tenant stop (R6). Never set for real tenants. */
+  trialEndsAt: timestamp("trial_ends_at", { withTimezone: true }),
+  /** Zitadel user id of the platform_admin who created this sandbox. NULL for real tenants. */
+  createdByPlatformAdmin: text("created_by_platform_admin"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+// docs/specs/multi-org-sandbox.md T8/T21, ADR-022 -- platform-level job tracking, not
+// tenant-scoped data. See migration 0137 for why this is `resultTenantId`, not
+// `tenantId`: the row exists before any tenant does, and this table never holds a
+// tenant's business data in the first place. Deliberately holds no credentials -- T21's
+// handover artifact (seeded usernames + the shared password) lives in Redis with a 7-day
+// TTL (packages/auth/src/sandbox-handover-store.ts), not a durable column here; see
+// migration 0137's comment for why.
+export const sandboxProvisioningJobs = pgTable("sandbox_provisioning_jobs", {
+  id: uuid("id").primaryKey(),
+  resultTenantId: uuid("result_tenant_id"),
+  requestedBy: text("requested_by").notNull(),
+  orgName: text("org_name").notNull(),
+  status: text("status").default("pending").notNull(),
+  currentStep: text("current_step"),
+  completedSteps: integer("completed_steps").default(0).notNull(),
+  totalSteps: integer("total_steps").default(0).notNull(),
+  zitadelOrgId: text("zitadel_org_id"),
+  error: text("error"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .defaultNow()
     .notNull(),

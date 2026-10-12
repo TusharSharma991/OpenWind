@@ -71,7 +71,17 @@ const ALL_AUDIT_ACTIONS_EXHAUSTIVE: Record<AuditAction, true> = {
   "export.requested": true,
   "export.completed": true,
   "export.failed": true,
-  sync_failed: true,
+  // #693: fetching an export's URL, or being refused it, only reads data.
+  "export.downloaded": true,
+  "export.download_denied": true,
+  "org_directory.sync_completed": true,
+  "org_directory.sync_failed": true,
+  "sandbox.provisioning_completed": true,
+  "sandbox.provisioning_failed": true,
+  "sandbox.reset_completed": true,
+  "sandbox.reset_failed": true,
+  "sandbox.delete_completed": true,
+  "sandbox.delete_failed": true,
 };
 
 export const ALL_AUDIT_ACTIONS_FOR_REQUEST_KIND: readonly AuditAction[] =
@@ -124,9 +134,22 @@ const WRITE_ACTIONS: ReadonlySet<AuditAction> = new Set<AuditAction>([
   "schedule.rule_paused",
   "schedule.rule_resumed",
   "schedule.rule_archived",
-  // An admin-triggered tree rebuild that failed mid-run -- a mutation
-  // attempt, same reasoning as schedule.execution_failed.
-  "sync_failed",
+  // An admin-triggered tree rebuild, completed or failed mid-run -- a
+  // mutation (attempt), same reasoning as schedule.execution_failed.
+  "org_directory.sync_completed",
+  "org_directory.sync_failed",
+  // Provisioning creates a tenant row + Zitadel org/accounts -- a mutation
+  // regardless of whether the job ultimately succeeded or failed partway.
+  "sandbox.provisioning_completed",
+  "sandbox.provisioning_failed",
+  // Reset wipes and re-seeds a tenant's business data -- a mutation regardless of whether
+  // the job ultimately succeeded or failed partway, same reasoning as provisioning above.
+  "sandbox.reset_completed",
+  "sandbox.reset_failed",
+  // Delete removes the Zitadel org and initiates OpenWind-side deletion -- a mutation
+  // regardless of outcome, same reasoning as reset/provisioning above.
+  "sandbox.delete_completed",
+  "sandbox.delete_failed",
 ]);
 
 /**

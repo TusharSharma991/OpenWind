@@ -190,3 +190,37 @@ export const mentionResolutionQueue = new Queue("mention-resolution", {
     backoff: { type: "exponential", delay: 1_000 },
   },
 });
+
+// docs/specs/multi-org-sandbox.md T7/R5 — sandbox provisioning (~21+ Zitadel calls: 1 org +
+// 1-20 accounts + org-directory sync). API enqueues via
+// apps/api/src/lib/sandbox-provisioning-queue.ts using the same queue name.
+// attempts: 1 (no automatic retry) — a partial provisioning failure must be visible to the
+// platform admin via R5's progress UI, not silently retried from scratch with a second set
+// of (possibly already-created) Zitadel resources. Retry-vs-rollback is T11, not yet built.
+export const sandboxProvisioningQueue = new Queue("sandbox-provisioning", {
+  connection,
+  defaultJobOptions: { attempts: 1 },
+});
+
+// docs/specs/multi-org-sandbox.md T13/R7 — sandbox reset (wipe+reseed module data, cancel
+// queued background work). API enqueues via apps/api/src/lib/sandbox-reset-queue.ts using
+// the same queue name, then awaits the job's completion (BullMQ waitUntilFinished) before
+// responding. The sandbox-lifecycle advisory lock (T22) is acquired by the WORKER itself
+// (sandbox-reset-worker.ts), held for the job's actual execution -- the API route's own
+// acquire is only a fast pre-check-and-release, not authoritative (review finding, PR
+// #832: holding it in the route across the HTTP wait window let it release mid-job on a
+// slow reset). attempts: 1, same reasoning as provisioning: a partial reset failure must
+// surface to the platform admin, not silently retry against a half-wiped tenant.
+export const sandboxResetQueue = new Queue("sandbox-reset", {
+  connection,
+  defaultJobOptions: { attempts: 1 },
+});
+
+// docs/specs/multi-org-sandbox.md T15/R8 — sandbox delete (remove the Zitadel org,
+// initiate immediate OpenWind-side deletion via the existing tenant-purge queue). Same
+// locking pattern as sandbox-reset above: the worker (sandbox-delete-worker.ts) owns the
+// sandbox-lifecycle lock for its actual execution; the API route only pre-checks it.
+export const sandboxDeleteQueue = new Queue("sandbox-delete", {
+  connection,
+  defaultJobOptions: { attempts: 1 },
+});

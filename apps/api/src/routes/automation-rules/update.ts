@@ -14,6 +14,8 @@ import {
   ActionConfigSchema,
   ConditionTreeSchema,
   TRIGGER_CONFIG_SCHEMAS,
+  TriggerConfigInputSchema,
+  RETIRED_TRIGGER_TYPES,
 } from "./schemas.js";
 
 const UpdateAutomationRuleSchema = z
@@ -21,7 +23,7 @@ const UpdateAutomationRuleSchema = z
     name: z.string().min(1).max(200).optional(),
     isEnabled: z.boolean().optional(),
     triggerType: TriggerTypeSchema.optional(),
-    triggerConfig: z.record(z.unknown()).optional(),
+    triggerConfig: TriggerConfigInputSchema.optional(),
     conditions: ConditionTreeSchema.nullable().optional(),
     actions: z.array(ActionConfigSchema).min(1).optional(),
     priority: z.number().int().optional(),
@@ -112,6 +114,23 @@ export const updateAutomationRuleHandler = factory.createHandlers(
               message:
                 "Existing triggerConfig is incompatible with the new triggerType",
               fields: issues,
+            },
+            422,
+          );
+        }
+      }
+      // #684: migration 0132 disabled rules on trigger types nothing emits.
+      // Turning one back on would only make it silently inert again.
+      if (input.isEnabled === true && !input.triggerType) {
+        const existing = await withTenantContext(tenantId, (tx) =>
+          getAutomationRule(tx, tenantId, id),
+        );
+        const hint = RETIRED_TRIGGER_TYPES[existing.triggerType];
+        if (hint !== undefined) {
+          return c.json(
+            {
+              error: "TRIGGER_TYPE_RETIRED",
+              message: `${existing.triggerType} is no longer supported: ${hint}`,
             },
             422,
           );

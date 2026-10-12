@@ -27,6 +27,17 @@ describe("canAdvance", () => {
       expect(canAdvance("trigger", { ...base, triggerType: "" })).toBe(false);
     });
 
+    it("blocks a field-changed trigger until an entity type is chosen; the field is optional", () => {
+      const fieldChanged = { ...base, triggerType: "field.changed" as const };
+      expect(canAdvance("trigger", fieldChanged)).toBe(false);
+      expect(
+        canAdvance("trigger", {
+          ...fieldChanged,
+          triggerConfig: { entityTypeId: "et-1" },
+        }),
+      ).toBe(true);
+    });
+
     it("allows advance when triggerType is set", () => {
       expect(
         canAdvance("trigger", { ...base, triggerType: "entity.created" }),
@@ -56,6 +67,50 @@ describe("canAdvance", () => {
         canAdvance("actions", {
           ...base,
           actions: [{ id: "1", type: "notify", config: {} }],
+        }),
+      ).toBe(true);
+    });
+
+    it("blocks a transition action until the trigger pins a workflow (#760)", () => {
+      const data = {
+        ...base,
+        actions: [
+          {
+            id: "1",
+            type: "transition" as const,
+            config: { transitionId: "t1" },
+          },
+        ],
+      };
+      expect(canAdvance("actions", data, { status: "no-workflow" })).toBe(
+        false,
+      );
+    });
+
+    it("allows a transition action that names a runnable transition of the trigger's workflow (#760)", () => {
+      const data = {
+        ...base,
+        actions: [
+          {
+            id: "1",
+            type: "transition" as const,
+            config: { transitionId: "t1" },
+          },
+        ],
+      };
+      expect(
+        canAdvance("actions", data, {
+          status: "ready",
+          transitions: [
+            {
+              id: "t1",
+              fromState: "open",
+              toState: "closed",
+              label: null,
+              allowedRoles: [],
+              requiresComment: false,
+            },
+          ],
         }),
       ).toBe(true);
     });

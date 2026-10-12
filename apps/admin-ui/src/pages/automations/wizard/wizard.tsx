@@ -9,6 +9,15 @@ import { StepTrigger } from "./step-trigger.js";
 import { StepConditions } from "./step-conditions.js";
 import { StepActions } from "./step-actions.js";
 import { StepSave } from "./step-save.js";
+import { transitionActionProblem } from "./transition-action.js";
+import type { TransitionsState } from "./transition-action.js";
+import { useTriggerTransitions } from "./use-trigger-transitions.js";
+import {
+  fromApiActions,
+  fromApiTrigger,
+  toApiActions,
+  toApiTrigger,
+} from "./payload.js";
 
 const STEPS = [
   { label: "Trigger", key: "trigger" },
@@ -19,9 +28,28 @@ const STEPS = [
 
 type StepKey = (typeof STEPS)[number]["key"];
 
-export function canAdvance(step: StepKey, data: WizardData): boolean {
-  if (step === "trigger") return data.triggerType !== "";
-  if (step === "actions") return data.actions.length > 0;
+export function canAdvance(
+  step: StepKey,
+  data: WizardData,
+  transitions: TransitionsState = { status: "no-workflow" },
+): boolean {
+  if (step === "trigger") {
+    // "Field changed" without a type would fire on every record update.
+    if (data.triggerType === "field.changed") {
+      return typeof data.triggerConfig.entityTypeId === "string";
+    }
+    return data.triggerType !== "";
+  }
+  if (step === "actions") {
+    return (
+      data.actions.length > 0 &&
+      data.actions.every(
+        (a) =>
+          a.type !== "transition" ||
+          transitionActionProblem(a.config, transitions) === null,
+      )
+    );
+  }
   if (step === "save") return data.name.trim() !== "";
   return true;
 }
@@ -42,6 +70,10 @@ export function AutomationWizard(): React.ReactElement {
 
   const [step, setStep] = useState<StepKey>("trigger");
   const [data, setData] = useState<WizardData>(EMPTY_WIZARD);
+  const transitions = useTriggerTransitions(
+    data.triggerConfig,
+    data.actions.some((a) => a.type === "transition"),
+  );
   const [loading, setLoading] = useState(isEdit);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -53,19 +85,23 @@ export function AutomationWizard(): React.ReactElement {
       .then((res) => {
         const rule = (res as { data: Record<string, unknown> }).data;
         // Server returns untyped Record — Zod schema is dynamic so TypeScript cannot narrow these
+        const triggerConfig =
+          (rule.triggerConfig as Record<string, unknown> | undefined) ?? {};
         setData({
-          triggerType:
-            (rule.triggerType as WizardData["triggerType"] | undefined) ?? "",
-          triggerConfig:
-            (rule.triggerConfig as Record<string, unknown> | undefined) ?? {},
+          triggerType: fromApiTrigger(
+            (rule.triggerType as string | undefined) ?? "",
+            triggerConfig,
+          ),
+          triggerConfig,
           // Assign stable ids to nodes loaded from server — server stores the tree without ids
           conditions: rule.conditions
             ? (ensureIds(rule.conditions as ConditionGroup) as ConditionGroup)
             : null,
           // Server strips the local `id` field — assign fresh IDs so React keys are stable
-          actions: (
-            (rule.actions as Array<Omit<ActionItem, "id">> | undefined) ?? []
-          ).map((a) => ({ ...a, id: genId() })),
+          actions: fromApiActions(
+            (rule.actions as Array<Omit<ActionItem, "id">> | undefined) ?? [],
+            genId,
+          ),
           name: (rule.name as string | undefined) ?? "",
           priority: (rule.priority as number | undefined) ?? 0,
           isEnabled: (rule.isEnabled as boolean | undefined) ?? true,
@@ -94,15 +130,16 @@ export function AutomationWizard(): React.ReactElement {
   }
 
   async function handleSave(): Promise<void> {
+    // canAdvance keeps an unselected trigger off the save step.
+    if (data.triggerType === "") return;
     setSaving(true);
     setSaveError(null);
     try {
       const payload = {
         name: data.name.trim(),
-        triggerType: data.triggerType,
-        triggerConfig: data.triggerConfig,
+        ...toApiTrigger(data.triggerType, data.triggerConfig),
         conditions: data.conditions,
-        actions: data.actions.map(({ id: _id, ...rest }) => rest),
+        actions: toApiActions(data.actions),
         priority: data.priority,
         isEnabled: data.isEnabled,
       };
@@ -128,7 +165,7 @@ export function AutomationWizard(): React.ReactElement {
 
   const currentIndex = stepIndex(step);
   const isLast = currentIndex === STEPS.length - 1;
-  const advanceOk = canAdvance(step, data);
+  const advanceOk = canAdvance(step, data, transitions);
 
   if (loading) {
     return (
@@ -266,7 +303,9 @@ export function AutomationWizard(): React.ReactElement {
         {step === "conditions" && (
           <StepConditions data={data} onChange={patch} />
         )}
-        {step === "actions" && <StepActions data={data} onChange={patch} />}
+        {step === "actions" && (
+          <StepActions data={data} onChange={patch} transitions={transitions} />
+        )}
         {step === "save" && (
           <StepSave
             data={data}

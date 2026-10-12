@@ -2,10 +2,26 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Hono } from "hono";
 import type { Context, Next } from "hono";
 import type { AuthContext } from "@platform/auth";
+import { Readable } from "node:stream";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
 const mockGetJob = vi.fn();
+const mockWriteAuditEntry = vi.fn();
+const mockWithTenantContext = vi.fn();
+const mockGetExportStream = vi.fn();
+
+vi.mock("@platform/files", () => ({
+  getExportStream: (...args: unknown[]) => mockGetExportStream(...args),
+}));
+
+vi.mock("@platform/db", () => ({
+  withTenantContext: (...args: unknown[]) => mockWithTenantContext(...args),
+}));
+
+vi.mock("@platform/audit", () => ({
+  writeAuditEntry: (...args: unknown[]) => mockWriteAuditEntry(...args),
+}));
 
 vi.mock("@platform/auth", () => ({
   requireAuth: () => async (_c: Context, next: Next) => {
@@ -24,6 +40,8 @@ vi.mock("../../lib/export-queue.js", () => ({
 const { exportsRouter } = await import("./download.js");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+const TYPE_ID = "00000000-0000-4000-a000-000000000693";
 
 function makeApp(tenantId = "tenant-aaa", userId = "u-001", roles = ["agent"]) {
   const app = new Hono<{ Variables: { auth: AuthContext } }>();
@@ -51,13 +69,48 @@ function makeJob(
     returnvalue,
   } = opts;
   return {
-    data: { tenantId, requestedBy, includePii },
+    data: {
+      tenantId,
+      requestedBy,
+      includePii,
+      entityTypeId: TYPE_ID,
+      format: "csv",
+    },
     returnvalue,
     getState: vi.fn().mockResolvedValue(state),
   };
 }
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  mockWithTenantContext.mockImplementation(
+    (_tenantId: string, fn: (tx: unknown) => unknown) => fn({}),
+  );
+  mockWriteAuditEntry.mockResolvedValue(undefined);
+  mockGetExportStream.mockResolvedValue({
+    stream: Readable.from(["csv-data"]),
+    originalName: "export-job-001.csv",
+    mimeType: "text/csv; charset=utf-8",
+    sizeBytes: 8,
+  });
+});
+
+// The audit entries written, in order, with the tenant context each ran under.
+function auditEntries(): Array<Record<string, unknown>> {
+  return mockWriteAuditEntry.mock.calls.map(
+    // second argument is writeAuditEntry's AuditEntryInput
+    (call) => call[1] as Record<string, unknown>,
+  );
+}
+
+const completedJob = (opts: Parameters<typeof makeJob>[1] = {}) =>
+  makeJob("completed", {
+    returnvalue: {
+      storageKey: "tenant-aaa/exports/job-001.csv",
+      format: "csv",
+    },
+    ...opts,
+  });
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -80,7 +133,7 @@ describe("GET /exports/:jobId/download", () => {
     mockGetJob.mockResolvedValue(
       makeJob("completed", {
         returnvalue: {
-          downloadUrl: "https://s3.example.com/exports/tenant-aaa/job-001.csv",
+          storageKey: "tenant-aaa/exports/job-001.csv",
           format: "csv",
           rowCount: 1234,
         },
@@ -92,7 +145,7 @@ describe("GET /exports/:jobId/download", () => {
       data: { status: string; downloadUrl: string };
     };
     expect(body.data.status).toBe("complete");
-    expect(body.data.downloadUrl).toContain("s3.example.com");
+    expect(body.data.downloadUrl).toBe("/exports/job-001/download?file=1");
   });
 
   it("returns 200 with EXPORT_EXPIRED when completed job returnvalue is null (TTL expired)", async () => {
@@ -155,7 +208,10 @@ describe("GET /exports/:jobId/download", () => {
       makeJob("completed", {
         requestedBy: "u-001",
         includePii: true,
-        returnvalue: { downloadUrl: "https://s3.example.com/pii.csv" },
+        returnvalue: {
+          storageKey: "tenant-aaa/exports/job-pii.csv",
+          format: "csv",
+        },
       }),
     );
     // u-001 with role "agent" (no pii_export) — but they are the original requester
@@ -170,7 +226,10 @@ describe("GET /exports/:jobId/download", () => {
       makeJob("completed", {
         requestedBy: "u-001",
         includePii: true,
-        returnvalue: { downloadUrl: "https://s3.example.com/pii.csv" },
+        returnvalue: {
+          storageKey: "tenant-aaa/exports/job-pii.csv",
+          format: "csv",
+        },
       }),
     );
     // u-002 with role "agent" — different user, no pii_export
@@ -185,7 +244,10 @@ describe("GET /exports/:jobId/download", () => {
       makeJob("completed", {
         requestedBy: "u-001",
         includePii: true,
-        returnvalue: { downloadUrl: "https://s3.example.com/pii.csv" },
+        returnvalue: {
+          storageKey: "tenant-aaa/exports/job-pii.csv",
+          format: "csv",
+        },
       }),
     );
     // u-002 with pii_export role — different user but holds PII role
@@ -193,5 +255,91 @@ describe("GET /exports/:jobId/download", () => {
       "/exports/job-pii/download",
     );
     expect(res.status).toBe(200);
+  });
+});
+
+// ── #693 audit trail ──────────────────────────────────────────────────────────
+
+describe("GET /exports/:jobId/download audit (#693)", () => {
+  it("records export.downloaded before streaming the file", async () => {
+    mockGetJob.mockResolvedValue(completedJob());
+
+    const res = await makeApp().request("/exports/job-001/download?file=1");
+
+    expect(res.status).toBe(200);
+    expect(auditEntries()).toEqual([
+      expect.objectContaining({
+        tenantId: "tenant-aaa",
+        actorId: "u-001",
+        actorType: "user",
+        resourceType: "entity_type",
+        resourceId: TYPE_ID,
+        action: "export.downloaded",
+        metadata: { jobId: "job-001", format: "csv", mode: "async" },
+      }),
+    ]);
+    expect(mockWithTenantContext).toHaveBeenCalledWith(
+      "tenant-aaa",
+      expect.any(Function),
+    );
+  });
+
+  it("never puts the storage key in the audit entry", async () => {
+    mockGetJob.mockResolvedValue(completedJob());
+
+    await makeApp().request("/exports/job-001/download?file=1");
+
+    expect(JSON.stringify(auditEntries())).not.toContain("storageKey");
+  });
+
+  it("withholds file bytes when the audit write fails", async () => {
+    mockGetJob.mockResolvedValue(completedJob());
+    mockWriteAuditEntry.mockRejectedValue(new Error("db down"));
+
+    const res = await makeApp().request("/exports/job-001/download?file=1");
+
+    expect(res.status).toBe(500);
+    expect(await res.text()).not.toContain("csv-data");
+  });
+
+  it.each([
+    ["pending", () => makeJob("active")],
+    ["failed", () => makeJob("failed")],
+    ["expired", () => makeJob("completed", { returnvalue: undefined })],
+  ])("writes nothing for a %s job", async (_label, job) => {
+    mockGetJob.mockResolvedValue(job());
+
+    await makeApp().request("/exports/job-001/download");
+
+    expect(mockWriteAuditEntry).not.toHaveBeenCalled();
+  });
+
+  it("records export.download_denied when the PII check refuses a same-tenant caller", async () => {
+    mockGetJob.mockResolvedValue(
+      completedJob({ requestedBy: "u-001", includePii: true }),
+    );
+
+    const res = await makeApp("tenant-aaa", "u-002", ["agent"]).request(
+      "/exports/job-pii/download",
+    );
+
+    expect(res.status).toBe(404);
+    expect(auditEntries()).toEqual([
+      expect.objectContaining({
+        tenantId: "tenant-aaa",
+        actorId: "u-002",
+        action: "export.download_denied",
+      }),
+    ]);
+  });
+
+  it("writes nothing for another tenant's job or a missing job", async () => {
+    mockGetJob.mockResolvedValueOnce(completedJob({ tenantId: "tenant-bbb" }));
+    await makeApp("tenant-aaa").request("/exports/job-other/download");
+
+    mockGetJob.mockResolvedValueOnce(null);
+    await makeApp("tenant-aaa").request("/exports/missing/download");
+
+    expect(mockWriteAuditEntry).not.toHaveBeenCalled();
   });
 });

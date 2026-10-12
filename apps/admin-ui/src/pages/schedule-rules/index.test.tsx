@@ -238,10 +238,59 @@ describe("ScheduleRulesPage", () => {
     fireEvent.click(screen.getByLabelText("Edit rule"));
 
     const warning = await screen.findByRole("alert");
+    expect(warning.className).toContain("alert-warning");
     expect(warning.textContent).toContain("0 9 * * 1,3,5");
     expect(warning.textContent).toContain(
       "cannot be represented by this picker and will be replaced on save",
     );
+  });
+
+  it("keeps the unsupported-cron warning visible after picker interaction", async () => {
+    const advancedRule = {
+      ...RULE_A,
+      cronExpr: "0 9 * * 1,3,5",
+      cronHuman: "At 09:00 on Monday, Wednesday, and Friday",
+    };
+    queueRefresh([advancedRule]);
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByText("Weekly Standup")).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByLabelText("Edit rule"));
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "cannot be represented by this picker",
+    );
+
+    fireEvent.click(screen.getByText("monthly"));
+
+    expect(screen.getByLabelText("Day of month")).toBeTruthy();
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(screen.getByRole("alert").textContent).toContain(
+      "cannot be represented by this picker",
+    );
+  });
+
+  it("warns immediately when catch-up is enabled on an existing rule", async () => {
+    queueRefresh([RULE_A]);
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByText("Weekly Standup")).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByLabelText("Edit rule"));
+    const catchUpCheckbox = await screen.findByLabelText(
+      "Catch up on missed fires (worker was down)",
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    fireEvent.click(catchUpCheckbox);
+    expect(screen.getByRole("alert").textContent).toContain(
+      "Catch-up will create one ticket for each missed fire since the rule was last active.",
+    );
+
+    fireEvent.click(catchUpCheckbox);
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("computes a weekly cron expression from the frequency picker on save", async () => {
@@ -439,5 +488,44 @@ describe("ScheduleRulesPage", () => {
         }),
       ),
     );
+  });
+
+  it("archives a rule after confirmation", async () => {
+    queueRefresh([RULE_A]);
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByText("Weekly Standup")).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByLabelText("Archive rule"));
+    expect(screen.getByText("Archive schedule rule?")).toBeTruthy();
+    expect(screen.getByText(/Archived rules cannot be resumed/)).toBeTruthy();
+
+    mockFetchWithAuth.mockResolvedValueOnce({ data: {} });
+    queueRefresh([{ ...RULE_A, status: "archived" }]);
+    fireEvent.click(screen.getByText("Archive"));
+
+    await waitFor(() =>
+      expect(mockFetchWithAuth).toHaveBeenCalledWith(
+        "/api/admin/schedule-rules/rule-1",
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({ status: "archived" }),
+        }),
+      ),
+    );
+  });
+
+  it("does not offer archive or resume actions for an archived rule", async () => {
+    queueRefresh([{ ...RULE_A, status: "archived" }]);
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByText("Weekly Standup")).toBeTruthy(),
+    );
+
+    expect(screen.queryByLabelText("Archive rule")).toBeNull();
+    expect(
+      (screen.getByLabelText("Pause rule") as HTMLButtonElement).disabled,
+    ).toBe(true);
   });
 });

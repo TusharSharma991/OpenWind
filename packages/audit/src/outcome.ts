@@ -91,10 +91,27 @@ const ALL_AUDIT_ACTIONS_EXHAUSTIVE: Record<AuditAction, true> = {
   "export.requested": true,
   "export.completed": true,
   "export.failed": true,
+  "export.downloaded": true,
+  "export.download_denied": true,
+  "org_directory.sync_completed": true,
   // A sync the admin was entitled to trigger (requireRole("admin") already
   // passed) that then failed mid-run -- a worker/upstream-provider outcome,
   // not a denied caller request, same reasoning as schedule.execution_failed.
-  sync_failed: true,
+  "org_directory.sync_failed": true,
+  // Worker outcomes of a job the platform_admin was already entitled to start
+  // (requirePlatformAdmin already passed, R11's quota already checked) --
+  // same reasoning as schedule.execution_failed above, not a denied caller
+  // request.
+  "sandbox.provisioning_completed": true,
+  "sandbox.provisioning_failed": true,
+  // Same reasoning as sandbox.provisioning_completed/.failed above -- a worker outcome of
+  // a job the platform_admin was already entitled to start (requirePlatformAdmin already
+  // passed, the sandbox-lifecycle lock already acquired), not a denied caller request.
+  "sandbox.reset_completed": true,
+  "sandbox.reset_failed": true,
+  // Same reasoning as sandbox.reset_completed/.failed above.
+  "sandbox.delete_completed": true,
+  "sandbox.delete_failed": true,
 };
 
 // Object.keys() widens to string[] -- safe to narrow back since
@@ -119,6 +136,8 @@ const DENIED_ACTIONS: ReadonlySet<AuditAction> = new Set<AuditAction>([
   "attachment.download_denied",
   // A dashboard the caller's role does not entitle them to.
   "reporting.guest_token_denied",
+  // A PII export polled by someone who is neither its requester nor PII-capable.
+  "export.download_denied",
 ]);
 
 /**

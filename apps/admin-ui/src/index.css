@@ -1003,7 +1003,7 @@ button.menu-item.sidebar-logout {
    toggle in .lp-topbar - and only restyles the card interior: a
    breadcrumb-style header instead of the stacked logo/title/description
    block, and a rounder card. Every value below reads from the same
-   --bg-*/--text-*/--accent-primary/--border-color tokens the rest of the
+   --bg-* / --text-* / --accent-primary / --border-color tokens the rest of the
    page already uses, so it follows the light/dark toggle and saved accent
    color with no theme-specific overrides needed. */
 .lp-card-notebook {
@@ -2899,6 +2899,11 @@ select.form-input {
   background: hsla(350, 80%, 60%, 0.1);
   border: 1px solid hsla(350, 80%, 60%, 0.3);
   color: hsl(350, 80%, 72%);
+}
+.alert-warning {
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  border: 1px solid var(--warning);
+  color: var(--text-primary);
 }
 
 /* ── Enum options list ──────────────────────────────────────────────────── */

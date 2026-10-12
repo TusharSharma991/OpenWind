@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, waitFor, cleanup } from "@testing-library/react";
+import {
+  render,
+  screen,
+  waitFor,
+  cleanup,
+  fireEvent,
+} from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import type * as ReactRouterDom from "react-router-dom";
 
@@ -7,9 +13,20 @@ import type * as ReactRouterDom from "react-router-dom";
 // separated from an admin-only "Admin" section (docs task: split the side
 // menu so admin-only items are easy to tell apart at a glance).
 
+let mockIdentityData: {
+  id: string;
+  name: string;
+  email: string;
+  avatar?: string;
+} = {
+  id: "u1",
+  name: "Jane Doe",
+  email: "jane@example.com",
+};
+
 vi.mock("@refinedev/core", () => ({
   useGetIdentity: () => ({
-    data: { id: "u1", name: "Jane Doe", email: "jane@example.com" },
+    data: mockIdentityData,
   }),
   useLogout: () => ({ mutate: vi.fn() }),
 }));
@@ -94,5 +111,108 @@ describe("Layout sidebar — workspace vs admin-only sections", () => {
     expect(screen.queryByText("System Logs")).toBeNull();
     expect(screen.queryByText("API Keys")).toBeNull();
     expect(screen.queryByText("On-Call")).toBeNull();
+  });
+
+  it("renders InitialsAvatar with role='img' and accessible aria-label", () => {
+    mockIdentityData = {
+      id: "u1",
+      name: "Jane Doe",
+      email: "jane@example.com",
+    };
+    mockUserWithRoles(["agent"]);
+    renderLayout();
+
+    const avatarElements = screen.getAllByRole("img", {
+      name: "Jane Doe avatar",
+    });
+    expect(avatarElements.length).toBeGreaterThan(0);
+  });
+
+  it.each(["", "   "])(
+    "labels the avatar 'User avatar' when the name is %j",
+    (name) => {
+      mockIdentityData = { id: "u1", name, email: "u@example.com" };
+      mockUserWithRoles(["agent"]);
+      renderLayout();
+
+      expect(
+        screen.getAllByRole("img", { name: "User avatar" }).length,
+      ).toBeGreaterThan(0);
+    },
+  );
+
+  it("renders an image avatar with the user's name when a URL is provided", () => {
+    mockIdentityData = {
+      id: "u1",
+      name: "Jane Doe",
+      email: "jane@example.com",
+      avatar: "https://example.com/jane.png",
+    };
+    mockUserWithRoles(["agent"]);
+    renderLayout();
+
+    const avatarImages = screen.getAllByAltText("Jane Doe");
+    expect(avatarImages.length).toBeGreaterThan(0);
+  });
+
+  it.each(["", "   "])(
+    "uses fallback alt text for an image avatar when the name is %j",
+    (name) => {
+      mockIdentityData = {
+        id: "u1",
+        name,
+        email: "u@example.com",
+        avatar: "https://example.com/avatar.png",
+      };
+      mockUserWithRoles(["agent"]);
+      renderLayout();
+
+      expect(screen.getAllByAltText("Avatar").length).toBeGreaterThan(0);
+    },
+  );
+
+  it("falls back to initials when an avatar image fails to load", () => {
+    mockIdentityData = {
+      id: "u1",
+      name: "Jane Doe",
+      email: "jane@example.com",
+      avatar: "https://example.com/broken.png",
+    };
+    mockUserWithRoles(["agent"]);
+    renderLayout();
+
+    for (const avatarImage of screen.getAllByAltText("Jane Doe")) {
+      fireEvent.error(avatarImage);
+    }
+
+    const fallbacks = screen.getAllByRole("img", {
+      name: "Jane Doe avatar",
+    });
+    expect(fallbacks.length).toBeGreaterThan(0);
+    expect(fallbacks.every((avatar) => avatar.textContent === "JD")).toBe(true);
+  });
+
+  describe("initials derivation", () => {
+    const initialsFor = (name: string): string => {
+      mockIdentityData = { id: "u1", name, email: "u@example.com" };
+      mockUserWithRoles(["agent"]);
+      renderLayout();
+      const avatar = screen
+        .getAllByRole("img")
+        .find((el) => el.getAttribute("aria-label")?.endsWith(" avatar"));
+      return avatar?.textContent ?? "";
+    };
+
+    it.each([
+      ["Jane Doe", "JD"],
+      ["John  Doe", "JD"],
+      ["  John Doe  ", "JD"],
+      ["madonna", "M"],
+      ["Mary Jane Watson", "MJ"],
+      ["", "U"],
+      ["   ", "U"],
+    ])("derives initials for %j as %s", (name, expected) => {
+      expect(initialsFor(name)).toBe(expected);
+    });
   });
 });

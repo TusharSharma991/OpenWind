@@ -117,3 +117,15 @@
 - The merge of `main` made from GitHub had dropped `0142_platform_admin_sandbox_trial` from this
   branch's journal, which would have left #880's migration unrun on fresh databases. The journal
   is now main's entries plus `0143_tenant_lifecycle_role`.
+
+## 2026-10-13: sandbox Users page empty; handover labels
+
+- The sandbox admin could sign in, but the Users page was empty (`/api/users` returned `[]`).
+  `listUserRolesByUserId(orgId)` ignored `orgId`: Zitadel's v1 user-grant search defaults to the
+  caller's own org, so it only ever returned the main org's grants. For the new sandbox it saw
+  20 users but 0 of their roles, and `/users` filters to holders of the `user` role. The search
+  now sends `x-zitadel-orgid` for the requested org. A live check against the real sandbox org,
+  with the patched function, returned 20 users: 1 `admin` and 19 `user`. The main org behaves as
+  before.
+- The handover listed non-admin accounts as "(member)", the template's internal name. They are
+  now labelled with the role they were actually granted, "(user)".

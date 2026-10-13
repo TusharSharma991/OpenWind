@@ -94,13 +94,6 @@
       "breakpoints": false
     },
     {
-      "idx": 13,
-      "version": "7",
-      "when": 1778749338314,
-      "tag": "0013_tenant_lifecycle",
-      "breakpoints": false
-    },
-    {
       "idx": 14,
       "version": "7",
       "when": 1778749338315,
@@ -986,14 +979,14 @@
       "idx": 140,
       "version": "7",
       "when": 1789033329000,
-      "tag": "0140_platform_admin_audit_log",
+      "tag": "0140_admin_audit_log_access_actions",
       "breakpoints": false
     },
     {
       "idx": 141,
       "version": "7",
-      "when": 1789033330000,
-      "tag": "0141_tenant_lifecycle_role",
+      "when": 1789033329000,
+      "tag": "0141_platform_admin_audit_log",
       "breakpoints": false
     },
     {
@@ -1001,6 +994,13 @@
       "version": "7",
       "when": 1789119729000,
       "tag": "0142_platform_admin_sandbox_trial",
+      "breakpoints": false
+    },
+    {
+      "idx": 143,
+      "version": "7",
+      "when": 1789033330000,
+      "tag": "0143_tenant_lifecycle_role",
       "breakpoints": false
     }
   ]

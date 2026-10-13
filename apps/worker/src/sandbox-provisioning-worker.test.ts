@@ -25,13 +25,6 @@ const mockSet = vi.fn(() => ({ where: mockWhere }));
 const mockUpdate = vi.fn(() => ({ set: mockSet }));
 const mockDeleteWhere = vi.fn().mockResolvedValue(undefined);
 const mockDelete = vi.fn(() => ({ where: mockDeleteWhere }));
-const mockRecordPlatformAdminAction = vi.fn().mockResolvedValue(undefined);
-// Stands in for the transaction withTenantContext opens, so tests can tell an audit write
-// made inside the tenant context from one made on the plain connection.
-const mockTenantTx = { tenantTx: true };
-const mockWithTenantContext = vi.fn(
-  (_tenantId: string, fn: (tx: unknown) => unknown) => fn(mockTenantTx),
-);
 // tenants writes must run inside tenant_lifecycle_role (app_user can't, #405/#408). The
 // lifecycle tx reuses the builder spies so existing assertions hold; plain `db` no longer
 // has them, so a tenants write on the plain connection throws here.
@@ -41,14 +34,21 @@ const mockWithTenantLifecycleContext = vi.fn((fn: (tx: unknown) => unknown) =>
     delete: (...args: unknown[]) => mockDelete(...args),
   }),
 );
+const mockRecordPlatformAdminAction = vi.fn().mockResolvedValue(undefined);
+// Stands in for the transaction withTenantContext opens, so tests can tell an audit write
+// made inside the tenant context from one made on the plain connection.
+const mockTenantTx = { tenantTx: true };
+const mockWithTenantContext = vi.fn(
+  (_tenantId: string, fn: (tx: unknown) => unknown) => fn(mockTenantTx),
+);
 vi.mock("@platform/db", () => ({
   db: {
     update: (...args: unknown[]) => mockUpdate(...args),
   },
-  withTenantContext: (...args: Parameters<typeof mockWithTenantContext>) =>
-    mockWithTenantContext(...args),
   withTenantLifecycleContext: (fn: (tx: unknown) => unknown) =>
     mockWithTenantLifecycleContext(fn),
+  withTenantContext: (...args: Parameters<typeof mockWithTenantContext>) =>
+    mockWithTenantContext(...args),
   tenants: {},
   sandboxProvisioningJobs: {},
   recordPlatformAdminAction: (...args: unknown[]) =>

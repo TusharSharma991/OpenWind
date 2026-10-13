@@ -4,19 +4,25 @@ import {
   requirePlatformAdmin,
   invalidateTenantStatusCache,
 } from "@platform/auth";
-import { setSandboxTrialEndsAt } from "@platform/db";
+import {
+  tenants,
+  withPlatformAdminContext,
+  extendSandboxTrial,
+  endSandboxTrial,
+} from "@platform/db";
+import { and, eq } from "drizzle-orm";
 import { logger } from "@platform/logger";
 import { platformAdminFactory } from "./factory.js";
 
 /**
- * R6a (docs/specs/multi-org-sandbox.md): sets a sandbox's trial to end `trialDays` from now.
- * On an expired sandbox this is a reactivation -- R6's expiry check is a fresh timestamp
- * comparison with no status flag to flip back, so a future trial_ends_at is all it takes.
+ * R6a (docs/specs/multi-org-sandbox.md): extend a sandbox's trial, or end a running one now.
  *
- * Sandbox-only is enforced by the 0142 database function (it only updates active is_sandbox
- * rows), so there's no separate pre-check here: "not updated" covers "no such tenant", "not a
- * sandbox" and "being deleted", all a 404 (security.md 404-not-403 rule). The audit entry is
- * written in the same transaction (setSandboxTrialEndsAt).
+ * Both go through 0142's SECURITY DEFINER functions, which only ever update active is_sandbox
+ * rows and compute the new end inside a single UPDATE -- so concurrent extends stack instead of
+ * overwriting each other (PR #880 review B), and End can only end a trial that is running, never
+ * turn a sandbox with no trial into an expired one (review C). The R9 audit entry is written in
+ * the same transaction (extendSandboxTrial / endSandboxTrial). Both clear the tenant-status cache
+ * (locally and, via Redis pub/sub, on every replica) so the change applies to the next request.
  *
  * Rate limiting: the global per-IP limiter (app.ts) only, same as reset/delete -- an
  * MFA-verified platform admin doing a single-row update.
@@ -24,34 +30,67 @@ import { platformAdminFactory } from "./factory.js";
 const TenantIdParamSchema = z.object({ tenantId: z.string().uuid() });
 
 // Same bound as creation's trialDays (sandboxes.ts CreateSandboxSchema).
-const SetTrialSchema = z.object({
+const ExtendTrialSchema = z.object({
   trialDays: z.number().int().positive().max(365),
 });
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+const NOT_FOUND = { error: "NOT_FOUND", message: "No such sandbox" } as const;
+const NO_ACTIVE_TRIAL = {
+  error: "NO_ACTIVE_TRIAL",
+  message: "This sandbox has no running trial to end",
+} as const;
 
 export const sandboxTrialHandler = platformAdminFactory.createHandlers(
   requirePlatformAdmin(),
   zValidator("param", TenantIdParamSchema),
-  zValidator("json", SetTrialSchema),
+  zValidator("json", ExtendTrialSchema),
   async (c) => {
     const { userId } = c.get("platformAdmin");
     const { tenantId } = c.req.valid("param");
     const { trialDays } = c.req.valid("json");
 
-    const trialEndsAt = new Date(Date.now() + trialDays * DAY_MS);
-    const updated = await setSandboxTrialEndsAt(tenantId, trialEndsAt, userId);
-    if (!updated) {
-      return c.json({ error: "NOT_FOUND", message: "No such sandbox" }, 404);
-    }
+    // "Not updated" covers no such tenant, not a sandbox, and being deleted: all a 404
+    // (security.md 404-not-403 rule).
+    const trialEndsAt = await extendSandboxTrial(tenantId, trialDays, userId);
+    if (!trialEndsAt) return c.json(NOT_FOUND, 404);
 
-    // The auth middleware caches trial_ends_at for 30 s; drop it (locally and, via Redis
-    // pub/sub, on every replica) so a reactivated sandbox's users can log in straight away.
     invalidateTenantStatusCache(tenantId);
-
     logger.info(
       { tenantId, trialDays, trialEndsAt: trialEndsAt.toISOString() },
-      "Sandbox trial updated",
+      "Sandbox trial extended",
+    );
+    return c.json({ data: { trialEndsAt: trialEndsAt.toISOString() } });
+  },
+);
+
+export const sandboxTrialEndHandler = platformAdminFactory.createHandlers(
+  requirePlatformAdmin(),
+  zValidator("param", TenantIdParamSchema),
+  async (c) => {
+    const { userId } = c.get("platformAdmin");
+    const { tenantId } = c.req.valid("param");
+
+    // Read only to tell "no such sandbox" (404) from "no running trial" (409); the end
+    // function re-checks both, so a change in between still can't end the wrong thing.
+    const [current] = await withPlatformAdminContext((tx) =>
+      tx
+        .select({ trialEndsAt: tenants.trialEndsAt })
+        .from(tenants)
+        .where(and(eq(tenants.id, tenantId), eq(tenants.isSandbox, true)))
+        .limit(1),
+    );
+    if (!current) return c.json(NOT_FOUND, 404);
+    if (!current.trialEndsAt || current.trialEndsAt.getTime() <= Date.now()) {
+      return c.json(NO_ACTIVE_TRIAL, 409);
+    }
+
+    const trialEndsAt = await endSandboxTrial(tenantId, userId);
+    if (!trialEndsAt) return c.json(NO_ACTIVE_TRIAL, 409);
+
+    invalidateTenantStatusCache(tenantId);
+    logger.info(
+      { tenantId, trialEndsAt: trialEndsAt.toISOString() },
+      "Sandbox trial ended",
     );
     return c.json({ data: { trialEndsAt: trialEndsAt.toISOString() } });
   },

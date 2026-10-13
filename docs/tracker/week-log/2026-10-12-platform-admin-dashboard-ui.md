@@ -47,3 +47,41 @@
   anchored to the button. It opens upward when there's no room below, and closes on Escape, outside
   click, scroll (any scroll container) or resize. Tests cover the portal parent, the up/down flip
   and close-on-scroll.
+
+## 2026-10-13 follow-up: Extend trial and End trial
+
+- Owner request: "Change trial" becomes **Extend trial**, and a new **End trial** forces the
+  trial to end now.
+- Extend now adds the days to the later of the current end and now (it used to always count
+  from now). A running trial gets N more days; an expired or unset one runs N days from today,
+  which reactivates it.
+- End: `POST /platform-admin/sandboxes/:tenantId/trial/end` sets `trial_ends_at` to now through
+  the same 0142 function (active sandboxes only), clears the trial cache, and records
+  `sandbox.trial_ended` in the same transaction. 0142 (still unmerged) allows the new action.
+- UI: the menu reads Reset · Extend trial · End trial · Delete. End trial asks for confirmation
+  and is hidden once the trial has ended. The timeline labels these "Extended trial" and
+  "Ended trial", and its filter has both.
+- Tests: route units for extend-from-current-end, extend-when-expired and end; an isolation case
+  for ending a trial plus its audit row; UI tests for the menu order, the confirm + endpoint,
+  hiding End once ended, and the extend preview.
+
+## 2026-10-13 follow-up: PR #880 review round 3
+
+- [A] #880 and #869 both numbered their migration 0142. Agreed order: #880 merges first and
+  keeps `0142_platform_admin_sandbox_trial`; #869 renumbers to 0143 with a later journal `when`
+  (drizzle's migrator skips entries older than the last one applied). Recorded in both PRs.
+- [B] Extend read the current end and wrote the new one in separate transactions, so two
+  concurrent extends could overwrite each other. 0142 now has
+  `platform_admin_extend_sandbox_trial(tenant_id, days)`: one UPDATE computes
+  `GREATEST(now(), COALESCE(trial_ends_at, now())) + days`, so concurrent extends take the row
+  lock in turn and stack. An isolation test fires two 7-day extends in parallel and expects +14.
+- [C] End trial was offered, and allowed, for a sandbox with no trial, which would create an
+  expired trial and lock users out. `platform_admin_end_sandbox_trial(tenant_id)` only ends a
+  trial with `trial_ends_at > now()`. The route returns 409 `NO_ACTIVE_TRIAL` for no trial or an
+  already-ended one, and the menu shows End trial only while a trial is running.
+- The generic `platform_admin_set_sandbox_trial` function is gone: two narrower functions
+  replace it, with the same SECURITY DEFINER, pinned `search_path` and EXECUTE-only-for-
+  `platform_admin_role` lockdown. The audit row is still written in the same transaction and
+  rolled back when nothing changed.
+- [D] (extend dialog not resetting) needed no change: the dialog only mounts while open, so
+  each open starts from fresh state.

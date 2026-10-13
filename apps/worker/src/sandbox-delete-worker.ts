@@ -32,9 +32,9 @@ import {
   db,
   tenants,
   acquireTenantAdvisoryLock,
+  withTenantLifecycleContext,
   recordPlatformAdminAction,
   withTenantContext,
-  withTenantLifecycleContext,
 } from "@platform/db";
 import { Worker } from "@platform/telemetry";
 import { logger } from "@platform/logger";

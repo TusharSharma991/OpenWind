@@ -49,15 +49,14 @@
     session can switch into the role (the production path).
 - **Open:**
   - This is a new database-role pattern; a short human-authored ADR note should record it.
-  - Migration number `0142`: the next after main's `0141` (#859). #880 also adds a `0142` (the
-    sandbox trial function); whichever of the two merges second must take the next number **and**
-    a later journal `when`, because drizzle's migrator skips any entry older than the last applied.
+  - Migration number: landed as `0143` — #880 (sandbox trial function) merged first and kept
+    `0142`; this migration renumbered to `0143` with a later journal `when` before merging.
 
 ## 2026-10-13: review round 2 fixes
 
-- [A] After merging main (which now has #859's `0141`), the migration is
-  `0142_tenant_lifecycle_role.sql` with journal `idx` 142, matching its number. Its `when` is later
-  than every existing entry. Before this it had been idx 140, then 0143/idx 141.
+- [A] After merging main (which now has #859's `0141`), the migration was initially
+  `0142_tenant_lifecycle_role.sql` with journal `idx` 142. Before this it had been idx 140, then
+  0143/idx 141. Later renumbered to `0143` to avoid collision with #880 (see R5 note below).
 - [B] `provisionTenant`, `suspendTenant`, `reactivateTenant` and `scheduleTenantDeletion` now write
   their `admin_audit_log` entry inside `withTenantContext(tenantId, …)`, the same fix #868 made for
   the sandbox workers. On plain `db` the RLS-protected insert was rejected for `app_user` after the
@@ -117,15 +116,5 @@
 - The merge of `main` made from GitHub had dropped `0142_platform_admin_sandbox_trial` from this
   branch's journal, which would have left #880's migration unrun on fresh databases. The journal
   is now main's entries plus `0143_tenant_lifecycle_role`.
-
-## 2026-10-13: sandbox Users page empty; handover labels
-
-- The sandbox admin could sign in, but the Users page was empty (`/api/users` returned `[]`).
-  `listUserRolesByUserId(orgId)` ignored `orgId`: Zitadel's v1 user-grant search defaults to the
-  caller's own org, so it only ever returned the main org's grants. For the new sandbox it saw
-  20 users but 0 of their roles, and `/users` filters to holders of the `user` role. The search
-  now sends `x-zitadel-orgid` for the requested org. A live check against the real sandbox org,
-  with the patched function, returned 20 users: 1 `admin` and 19 `user`. The main org behaves as
-  before.
-- The handover listed non-admin accounts as "(member)", the template's internal name. They are
-  now labelled with the role they were actually granted, "(user)".
+- Stale "migration 0142" references updated to 0143 in the isolation test file header and
+  `describe` block.

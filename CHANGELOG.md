@@ -5,6 +5,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased — admin-ui blank-name initials fallback (#850)]
+
+### Fixed
+
+- **Blank or whitespace-only display names now render a `U` avatar initial** consistently across
+  admin-ui avatars through the shared initials formatter instead of producing empty avatar text.
+
+---
+
+## [Unreleased — per-ticket notification failure badge (#571)]
+
+### Added
+
+- **`GET /entities/:id/notification-failures`** (agent and admin only): the channels a ticket's
+  on-call notification failed on in the last 24 hours, newest first, with the time of each. It
+  returns only the channel and the time, never the provider's error text, which stays in the
+  admin-only audit log. A ticket the caller cannot see, or another tenant's, is a 404.
+- **"Notification failed" badge** on the ticket detail page for admins and agents, showing the
+  channels and how long ago the latest failure was.
+
 ## [Unreleased — platform-admin logout error feedback (#877)]
 
 ### Fixed

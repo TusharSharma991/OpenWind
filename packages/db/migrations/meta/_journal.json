@@ -94,6 +94,13 @@
       "breakpoints": false
     },
     {
+      "idx": 13,
+      "version": "7",
+      "when": 1778749338314,
+      "tag": "0013_tenant_lifecycle",
+      "breakpoints": false
+    },
+    {
       "idx": 14,
       "version": "7",
       "when": 1778749338315,

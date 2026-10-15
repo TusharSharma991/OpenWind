@@ -101,6 +101,27 @@ describe("PLATFORM_ADMIN_MFA_DEV_BYPASS", () => {
   });
 });
 
+describe("OPS_ALERT_EMAIL", () => {
+  it.each([undefined, "", "ops@example.com", "a@example.com, b@example.com"])(
+    "accepts %s",
+    (value) => {
+      expect(() =>
+        EnvSchema.parse(
+          value === undefined
+            ? MINIMAL_VALID_ENV
+            : { ...MINIMAL_VALID_ENV, OPS_ALERT_EMAIL: value },
+        ),
+      ).not.toThrow();
+    },
+  );
+
+  it.each(["not-an-email", "ops@example.com, nope"])("rejects %s", (value) => {
+    expect(() =>
+      EnvSchema.parse({ ...MINIMAL_VALID_ENV, OPS_ALERT_EMAIL: value }),
+    ).toThrow(/OPS_ALERT_EMAIL/);
+  });
+});
+
 describe("SECRETS_PROVIDER", () => {
   it("defaults to openbao and requires OPENBAO_ADDR", () => {
     const parsed = EnvSchema.parse(MINIMAL_VALID_ENV);

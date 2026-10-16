@@ -374,8 +374,7 @@ export async function processSandboxProvisioningJob(
         password: admin.password,
       },
     ];
-    // Seeded records are assigned round-robin across these accounts (admin first).
-    const seededUserIds = [admin.userId];
+    // Also the round-robin set for seeded records (admin first).
     const members = [
       {
         userId: admin.userId,
@@ -395,7 +394,6 @@ export async function processSandboxProvisioningJob(
         (await authorizeUser(account.userId, org.orgId, ["user"]));
       if (account && authorized) {
         seededAccountCount++;
-        seededUserIds.push(account.userId);
         members.push({
           userId: account.userId,
           email: account.email,
@@ -442,7 +440,7 @@ export async function processSandboxProvisioningJob(
     await seedAllModulesData(
       tenantId,
       coreModuleInstall.succeeded,
-      seededUserIds,
+      members.map((m) => m.userId),
     );
 
     await updateJobProgress(jobId, {

@@ -20,19 +20,23 @@ import type { HandoffState } from "./login.js";
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function isHandoffState(state: unknown): state is HandoffState {
+export function isHandoffState(state: unknown): state is HandoffState {
+  if (typeof state !== "object" || state === null) {
+    return false;
+  }
+  // state is narrowed to non-null object; cast to Record<string, unknown> allows
+  // property access to validate properties before establishing the HandoffState type guard.
+  const s = state as Record<string, unknown>;
   return (
-    typeof state === "object" &&
-    state !== null &&
-    typeof (state as HandoffState).workflowId === "string" &&
-    typeof (state as HandoffState).entityTypeId === "string" &&
-    UUID_RE.test((state as HandoffState).workflowId) &&
-    UUID_RE.test((state as HandoffState).entityTypeId) &&
+    typeof s.workflowId === "string" &&
+    typeof s.entityTypeId === "string" &&
+    UUID_RE.test(s.workflowId) &&
+    UUID_RE.test(s.entityTypeId) &&
     // docs/specs/third-party-api-origin-tagging.md R2 — required. A state
     // object missing it (e.g. an in-flight redirect started before this
     // param existed) falls through to the default /dashboard destination
     // below, same graceful-degradation posture as a bad workflowId (R5).
-    typeof (state as HandoffState).appClientId === "string"
+    typeof s.appClientId === "string"
   );
 }
 
@@ -75,7 +79,12 @@ export function AuthCallback(): React.ReactElement {
         // Object.keys(rolesMap) check as authProvider.ts's getPermissions() and
         // packages/auth/src/jwks.ts's extractPlatformAdminContext (server-side) --
         // never duplicated as a separate parsing implementation.
+        // user.profile is typed non-optional (IdTokenClaims, oidc-client-ts); widening it to
+        // include undefined keeps the optional chaining below defensive for a stored user
+        // with no profile, which the declared type can't express.
         const profile = user.profile as Record<string, unknown> | undefined;
+        // Every custom claim is typed unknown (IdTokenClaims index signature), and the roles
+        // claim is an object keyed by role name, which the type system can't know.
         const rolesMap = (profile?.["urn:zitadel:iam:org:project:roles"] ??
           {}) as Record<string, unknown>;
         if (Object.keys(rolesMap).includes("platform_admin")) {

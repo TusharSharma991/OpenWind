@@ -477,7 +477,12 @@ describe("executeDispatchSeverityNotificationAction", () => {
     });
 
     beforeEach(() => {
-      entityRow = { assignedTo: "u-assignee", workflowId: null, fields: {} };
+      entityRow = {
+        assignedTo: "u-assignee",
+        workflowId: null,
+        fields: {},
+        severity: "high",
+      };
     });
 
     it.each([
@@ -516,7 +521,12 @@ describe("executeDispatchSeverityNotificationAction", () => {
     });
 
     it("does not count a policy match when there is no recipient to send to", async () => {
-      entityRow = { assignedTo: null, workflowId: null, fields: {} };
+      entityRow = {
+        assignedTo: null,
+        workflowId: null,
+        fields: {},
+        severity: "high",
+      };
 
       await run();
 

@@ -31,15 +31,29 @@ export function PlatformAdminDashboard(): React.ReactElement {
   const [createOpen, setCreateOpen] = React.useState(false);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [refreshKey, setRefreshKey] = React.useState(0);
+  const isMountedRef = React.useRef(true);
+  const refreshSeq = React.useRef(0);
+
+  React.useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const refresh = React.useCallback((): void => {
     setRefreshKey((k) => k + 1);
+    const seq = ++refreshSeq.current;
     fetchWithAuth(`${API_URL}/platform-admin/sandboxes`)
       .then((res) => {
+        if (!isMountedRef.current || seq !== refreshSeq.current) return;
+        // fetchWithAuth returns unknown; { data: SandboxView[] } is the
+        // platform-admin/sandboxes list contract.
         setSandboxes((res as { data: SandboxView[] }).data);
         setLoadError(null);
       })
       .catch((err: unknown) => {
+        if (!isMountedRef.current || seq !== refreshSeq.current) return;
         setLoadError(
           err instanceof Error ? err.message : "Could not load sandboxes",
         );
@@ -47,8 +61,14 @@ export function PlatformAdminDashboard(): React.ReactElement {
   }, []);
 
   React.useEffect(() => {
+    // Ignore the answer once this effect is cleaned up, so under StrictMode (or a fast
+    // remount) a slower first fetch can't overwrite the live one.
+    let cancelled = false;
     fetchWithAuth(`${API_URL}/platform-admin/session`)
       .then((res) => {
+        if (cancelled) return;
+        // fetchWithAuth returns unknown; { data: PlatformAdminSession } is the
+        // platform-admin/session contract.
         setSession((res as { data: PlatformAdminSession }).data);
       })
       .catch(() => {
@@ -56,6 +76,9 @@ export function PlatformAdminDashboard(): React.ReactElement {
         // RequirePlatformAdminMfa already confirmed the session is valid to get here.
       });
     refresh();
+    return () => {
+      cancelled = true;
+    };
   }, [refresh]);
 
   async function handleLogout(): Promise<void> {

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import type { AuthContext } from "./types.js";
+import type * as JwksModule from "./jwks.js";
 import { invalidateTenantStatusCache } from "./tenant-status-cache.js";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
@@ -102,19 +103,16 @@ const mockExtractAuthContext = vi.fn();
 const mockExtractPlatformAdminContext = vi.fn();
 const mockIsMfaVerified = vi.fn();
 const mockIsMfaFresh = vi.fn();
-vi.mock("./jwks.js", () => ({
-  verifyJwt: (...args: unknown[]) => mockVerifyJwt(...args),
-  extractAuthContext: (...args: unknown[]) => mockExtractAuthContext(...args),
-  extractPlatformAdminContext: (...args: unknown[]) =>
-    mockExtractPlatformAdminContext(...args),
-  // Real logic, not a stub: these tests should decide from the token's own roles claim.
-  isPlatformAdminToken: (claims: {
-    "urn:zitadel:iam:org:project:roles"?: Record<string, unknown>;
-  }) =>
-    Object.keys(claims["urn:zitadel:iam:org:project:roles"] ?? {}).includes(
-      "platform_admin",
-    ),
-}));
+vi.mock("./jwks.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof JwksModule>();
+  return {
+    ...actual,
+    verifyJwt: (...args: unknown[]) => mockVerifyJwt(...args),
+    extractAuthContext: (...args: unknown[]) => mockExtractAuthContext(...args),
+    extractPlatformAdminContext: (...args: unknown[]) =>
+      mockExtractPlatformAdminContext(...args),
+  };
+});
 
 vi.mock("./platform-admin-mfa.js", () => ({
   isMfaVerified: (...args: unknown[]) => mockIsMfaVerified(...args),
@@ -404,6 +402,74 @@ describe("requireAuth", () => {
 
       const app = makeApp([requireAuth()]);
       const res = await get(app, "valid.jwt");
+
+      expect(res.status).toBe(200);
+    });
+
+    it("returns 403 TENANT_TRIAL_EXPIRED for API-key requests when trial_ends_at is in the past (#831)", async () => {
+      mockTenantRow = {
+        status: "active",
+        trialEndsAt: new Date(Date.now() - 60_000),
+      };
+      const fakeRow = {
+        id: "key-id-1",
+        tenant_id: tenantId,
+        scopes: ["read"],
+      };
+      const mockDb = {
+        execute: vi.fn().mockResolvedValue([fakeRow]),
+        select: mockModuleDbSelect,
+      };
+
+      const app = makeApp([
+        requireAuth(mockDb as unknown as Parameters<typeof requireAuth>[0]),
+      ]);
+      const res = await get(app, "sk_validkey");
+
+      expect(res.status).toBe(403);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe("TENANT_TRIAL_EXPIRED");
+    });
+
+    it("allows API-key requests when trial_ends_at is in the future (#831)", async () => {
+      mockTenantRow = {
+        status: "active",
+        trialEndsAt: new Date(Date.now() + 60_000),
+      };
+      const fakeRow = {
+        id: "key-id-1",
+        tenant_id: tenantId,
+        scopes: ["read"],
+      };
+      const mockDb = {
+        execute: vi.fn().mockResolvedValue([fakeRow]),
+        select: mockModuleDbSelect,
+      };
+
+      const app = makeApp([
+        requireAuth(mockDb as unknown as Parameters<typeof requireAuth>[0]),
+      ]);
+      const res = await get(app, "sk_validkey");
+
+      expect(res.status).toBe(200);
+    });
+
+    it("allows API-key requests when trial_ends_at is null (#831)", async () => {
+      mockTenantRow = { status: "active", trialEndsAt: null };
+      const fakeRow = {
+        id: "key-id-1",
+        tenant_id: tenantId,
+        scopes: ["read"],
+      };
+      const mockDb = {
+        execute: vi.fn().mockResolvedValue([fakeRow]),
+        select: mockModuleDbSelect,
+      };
+
+      const app = makeApp([
+        requireAuth(mockDb as unknown as Parameters<typeof requireAuth>[0]),
+      ]);
+      const res = await get(app, "sk_validkey");
 
       expect(res.status).toBe(200);
     });

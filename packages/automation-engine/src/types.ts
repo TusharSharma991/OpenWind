@@ -178,12 +178,11 @@ export class AutomationError extends Error {
       | "DNS_RESOLUTION_TIMEOUT"
       | "UNKNOWN_ACTION_TYPE"
       | "CIRCUIT_BREAKER_UNAVAILABLE"
-      | "NOTIFY_LINK_INVALID"
-      // docs/specs/mandatory-ticket-fields.md R7: no template assignee and no fallback.
-      | "NO_ASSIGNEE",
+      | "NOTIFY_LINK_INVALID",
     public readonly meta?: Record<string, unknown>,
+    message?: string,
   ) {
-    super(code);
+    super(message ?? code);
     this.name = "AutomationError";
   }
 }

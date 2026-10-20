@@ -13,6 +13,12 @@ import {
   isUniqueViolation,
 } from "@platform/db";
 import { logger } from "@platform/logger";
+import {
+  lockedWorkflowIds,
+  isStateWriteLocked,
+  childStateWriteReachesLockedStep,
+  workflowHasStateNamed,
+} from "./state-write-lock.js";
 import type {
   EntityInstance,
   EntityType,
@@ -62,7 +68,10 @@ import {
 import { fireEntityAuditHook } from "./audit-hook.js";
 import type { AuditFieldSensitivity } from "./audit-hook.js";
 import { getParentId } from "./child-relations.js";
-import { checkMandatoryFields } from "./mandatory-fields.js";
+import {
+  checkMandatoryFields,
+  checkMandatoryFieldsOnUpdate,
+} from "./mandatory-fields.js";
 import {
   assertTeamInTenant,
   assertWorkflowMatchesType,
@@ -261,6 +270,34 @@ const CREATE_DUE_DATE_GRACE_MS = 15_000;
 // Create-path counterpart of validateDueDateAfterCreation: the entity is
 // being created now, so "after creation" means "not in the past", with the
 // grace margin above.
+// Direct step writes on a locked workflow are refused for every record; a child ticket is also
+// refused when its fixed list would land on one of the workflow's own steps.
+async function assertDirectStateWriteAllowed(
+  db: DbOrTx,
+  tenantId: string,
+  instanceId: string,
+  existing: { workflowId: string | null; currentState: string },
+  to: string,
+  isChildTicket: boolean,
+): Promise<void> {
+  if (!existing.workflowId || to === existing.currentState) return;
+  const refused = isChildTicket
+    ? await childStateWriteReachesLockedStep(
+        db,
+        tenantId,
+        existing.workflowId,
+        to,
+      )
+    : await isStateWriteLocked(db, tenantId, existing.workflowId);
+  if (refused) {
+    throw new EntityError("STATE_CHANGE_NOT_ALLOWED", {
+      instanceId,
+      from: existing.currentState,
+      to,
+    });
+  }
+}
+
 function validateDueDateOnCreate(dueDate: string): FieldError[] {
   if (new Date(dueDate).getTime() < Date.now() - CREATE_DUE_DATE_GRACE_MS) {
     return [
@@ -272,6 +309,46 @@ function validateDueDateOnCreate(dueDate: string): FieldError[] {
     ];
   }
   return [];
+}
+
+// An edit that changes the due date must not move it into the past; an overdue ticket keeps
+// its untouched date (docs/specs/mandatory-ticket-fields.md R3/R5).
+function validateDueDateEdit(
+  dueDate: string,
+  existing: { createdAt: Date; dueDate: Date | null },
+): FieldError[] {
+  const after = validateDueDateAfterCreation(dueDate, existing.createdAt);
+  if (after.length > 0) return after;
+  if (existing.dueDate?.getTime() === new Date(dueDate).getTime()) return [];
+  return validateDueDateOnCreate(dueDate);
+}
+
+// No edit may remove a mandatory value a workflow record had (spec R5); logs or throws per
+// the mandatory-fields mode.
+function checkEditKeepsMandatoryValues(
+  tenantId: string,
+  existing: typeof entityInstances.$inferSelect,
+  nextTitle: unknown,
+  nextDueDate: Date | null | undefined,
+  path: string,
+): void {
+  if (!existing.workflowId) return;
+  const fields = existing.fields as Record<string, unknown>;
+  checkMandatoryFieldsOnUpdate(
+    {
+      title: fields["title"],
+      dueDate: existing.dueDate,
+      remark: existing.remark,
+      severity: existing.severity,
+    },
+    {
+      title: nextTitle,
+      dueDate: nextDueDate === undefined ? existing.dueDate : nextDueDate,
+      remark: existing.remark,
+      severity: existing.severity,
+    },
+    { tenantId, entityTypeId: existing.entityTypeId, path },
+  );
 }
 
 export async function createEntity(
@@ -358,8 +435,6 @@ export async function createEntity(
     await assertTeamInTenant(db, tenantId, input.teamId);
     fieldsWithFormulas["team_id"] = input.teamId;
   }
-  const teamId = fieldsWithFormulas["team_id"];
-
   if (input.workflowId) {
     await assertWorkflowMatchesType(
       db,
@@ -378,13 +453,8 @@ export async function createEntity(
         dueDate: input.dueDate,
         remark: input.remark,
         severity: input.severity,
-        assignedTo: input.assignedTo,
-        teamId,
       },
       { tenantId, entityTypeId: input.entityTypeId, path: "createEntity" },
-      {
-        assignee: input.mandatoryExemption === "partner_unresolved_assignee",
-      },
     );
   }
 
@@ -409,6 +479,26 @@ export async function createEntity(
             message: `Invalid state '${currentState}' for the selected workflow. Valid states are: ${validStates.join(", ")}`,
           },
         ]);
+      }
+      if (input.enforceInitialState) {
+        const initial = await resolveInitialState(
+          db,
+          tenantId,
+          input.workflowId,
+        );
+        const expected = validStates.includes(initial)
+          ? initial
+          : (validStates[0] ?? "initial");
+        if (
+          currentState !== expected &&
+          (await isStateWriteLocked(db, tenantId, input.workflowId))
+        ) {
+          throw new EntityError("STATE_CHANGE_NOT_ALLOWED", {
+            workflowId: input.workflowId,
+            requested: currentState,
+            initial: expected,
+          });
+        }
       }
     } else {
       const resolved = await resolveInitialState(
@@ -691,7 +781,13 @@ export async function updateEntity(
       if (!fullResult.success) {
         throw new ValidationError(transformZodErrors(fullResult.error));
       }
-      validatedFields = fullResult.data as Record<string, unknown>;
+      // Keys the type doesn't define (__accessUsers, a team_id on a type without that field,
+      // child_status) aren't the client's to set -- the update schema already drops them from
+      // the input -- but they must survive: the create schema would strip them from `merged`.
+      validatedFields = {
+        ...(existing.fields as Record<string, unknown>),
+        ...(fullResult.data as Record<string, unknown>),
+      };
     }
 
     const entityType = await loadEntityType(
@@ -756,14 +852,18 @@ export async function updateEntity(
     }
     if (input.dueDate !== undefined) {
       if (input.dueDate) {
-        const dueDateErrors = validateDueDateAfterCreation(
-          input.dueDate,
-          existing.createdAt,
-        );
+        const dueDateErrors = validateDueDateEdit(input.dueDate, existing);
         if (dueDateErrors.length > 0) throw new ValidationError(dueDateErrors);
       }
       updates.dueDate = input.dueDate ? new Date(input.dueDate) : null;
     }
+    checkEditKeepsMandatoryValues(
+      tenantId,
+      existing,
+      fieldsWithFormulas["title"],
+      updates.dueDate,
+      "updateEntity",
+    );
     if (input.currentState !== undefined && input.currentState !== null) {
       if (isChildTicket) {
         if (!CHILD_TICKET_STATES.includes(input.currentState)) {
@@ -775,7 +875,23 @@ export async function updateEntity(
             },
           ]);
         }
+        await assertDirectStateWriteAllowed(
+          db,
+          tenantId,
+          instanceId,
+          existing,
+          input.currentState,
+          true,
+        );
       } else if (existing.workflowId) {
+        await assertDirectStateWriteAllowed(
+          db,
+          tenantId,
+          instanceId,
+          existing,
+          input.currentState,
+          false,
+        );
         const states = await db
           .select({ name: workflowStates.name })
           .from(workflowStates)
@@ -1017,14 +1133,18 @@ export async function updateEntity(
     }
     if (input.dueDate !== undefined) {
       if (input.dueDate) {
-        const dueDateErrors = validateDueDateAfterCreation(
-          input.dueDate,
-          existing.createdAt,
-        );
+        const dueDateErrors = validateDueDateEdit(input.dueDate, existing);
         if (dueDateErrors.length > 0) throw new ValidationError(dueDateErrors);
       }
       updates.dueDate = input.dueDate ? new Date(input.dueDate) : null;
     }
+    checkEditKeepsMandatoryValues(
+      tenantId,
+      existing,
+      (existing.fields as Record<string, unknown>)["title"],
+      updates.dueDate,
+      "updateEntity",
+    );
     if (input.currentState !== undefined && input.currentState !== null) {
       if (isChildTicket2) {
         if (!CHILD_TICKET_STATES.includes(input.currentState)) {
@@ -1036,7 +1156,23 @@ export async function updateEntity(
             },
           ]);
         }
+        await assertDirectStateWriteAllowed(
+          db,
+          tenantId,
+          instanceId,
+          existing,
+          input.currentState,
+          true,
+        );
       } else if (existing.workflowId) {
+        await assertDirectStateWriteAllowed(
+          db,
+          tenantId,
+          instanceId,
+          existing,
+          input.currentState,
+          false,
+        );
         const states = await db
           .select({ name: workflowStates.name })
           .from(workflowStates)
@@ -1458,6 +1594,9 @@ export async function listEntities(
   }
   if (input.assignedTo !== undefined) {
     conditions.push(eq(entityInstances.assignedTo, input.assignedTo));
+  }
+  if (input.unassigned) {
+    conditions.push(isNull(entityInstances.assignedTo));
   }
   // docs/specs/ticket-severity-and-tags.md R6 — OR across the given levels.
   if (input.severity !== undefined && input.severity.length > 0) {
@@ -1932,8 +2071,6 @@ export async function bulkCreateEntities(
             dueDate: input.dueDate,
             remark: input.remark,
             severity: input.severity ?? DEFAULT_TICKET_SEVERITY,
-            assignedTo: input.assignedTo,
-            teamId: fieldsWithFormulas["team_id"],
           },
           {
             tenantId,
@@ -2250,10 +2387,11 @@ export async function bulkUpdateEntities(
           existing.entityTypeId,
           tenantId,
         );
-        const fieldsWithFormulas = await applyFormulaFields(
-          allFields,
-          fullResult.data as Record<string, unknown>,
-        );
+        // Same as updateEntity: keys the type doesn't define survive the edit.
+        const fieldsWithFormulas = await applyFormulaFields(allFields, {
+          ...(existing.fields as Record<string, unknown>),
+          ...(fullResult.data as Record<string, unknown>),
+        });
 
         const updateValues: Partial<typeof entityInstances.$inferInsert> = {
           fields: fieldsWithFormulas,
@@ -2264,10 +2402,7 @@ export async function bulkUpdateEntities(
         }
         if (input.dueDate !== undefined) {
           if (input.dueDate) {
-            const dueDateErrors = validateDueDateAfterCreation(
-              input.dueDate,
-              existing.createdAt,
-            );
+            const dueDateErrors = validateDueDateEdit(input.dueDate, existing);
             if (dueDateErrors.length > 0) {
               errors.push({
                 index: i,
@@ -2279,6 +2414,24 @@ export async function bulkUpdateEntities(
             }
           }
           updateValues.dueDate = input.dueDate ? new Date(input.dueDate) : null;
+        }
+        try {
+          checkEditKeepsMandatoryValues(
+            tenantId,
+            existing,
+            fieldsWithFormulas["title"],
+            updateValues.dueDate,
+            "bulkUpdateEntities",
+          );
+        } catch (err) {
+          if (!(err instanceof ValidationError)) throw err;
+          errors.push({
+            index: i,
+            id,
+            code: "VALIDATION_ERROR",
+            fields: err.fields,
+          });
+          return;
         }
 
         const [row] = await db
@@ -2371,10 +2524,7 @@ export async function bulkUpdateEntities(
         }
         if (input.dueDate !== undefined) {
           if (input.dueDate) {
-            const dueDateErrors = validateDueDateAfterCreation(
-              input.dueDate,
-              existing.createdAt,
-            );
+            const dueDateErrors = validateDueDateEdit(input.dueDate, existing);
             if (dueDateErrors.length > 0) {
               errors.push({
                 index: i,
@@ -2386,6 +2536,24 @@ export async function bulkUpdateEntities(
             }
           }
           updateValues.dueDate = input.dueDate ? new Date(input.dueDate) : null;
+        }
+        try {
+          checkEditKeepsMandatoryValues(
+            tenantId,
+            existing,
+            (existing.fields as Record<string, unknown>)["title"],
+            updateValues.dueDate,
+            "bulkUpdateEntities",
+          );
+        } catch (err) {
+          if (!(err instanceof ValidationError)) throw err;
+          errors.push({
+            index: i,
+            id,
+            code: "VALIDATION_ERROR",
+            fields: err.fields,
+          });
+          return;
         }
         const [row] = await db
           .update(entityInstances)
@@ -2603,6 +2771,13 @@ export async function bulkSetState(
     }
   }
 
+  const lockedIds = await lockedWorkflowIds(db, tenantId, [
+    ...new Set(
+      validItems
+        .map((item) => foundMap.get(item.id)?.workflowId)
+        .filter((w): w is string => !!w),
+    ),
+  ]);
   const stateValidatedItems: Array<{ id: string; state: string }> = [];
   for (const item of validItems) {
     if (childIds.has(item.id)) {
@@ -2614,10 +2789,36 @@ export async function bulkSetState(
         });
         continue;
       }
+      const childWorkflowId = foundMap.get(item.id)?.workflowId;
+      if (
+        childWorkflowId &&
+        lockedIds.has(childWorkflowId) &&
+        item.state !== foundMap.get(item.id)?.currentState &&
+        (await workflowHasStateNamed(db, tenantId, childWorkflowId, item.state))
+      ) {
+        errors.push({
+          index: item.originalIndex,
+          id: item.id,
+          code: "STATE_CHANGE_NOT_ALLOWED",
+        });
+        continue;
+      }
       stateValidatedItems.push(item);
       continue;
     }
     const workflowId = foundMap.get(item.id)?.workflowId;
+    if (
+      workflowId &&
+      lockedIds.has(workflowId) &&
+      item.state !== foundMap.get(item.id)?.currentState
+    ) {
+      errors.push({
+        index: item.originalIndex,
+        id: item.id,
+        code: "STATE_CHANGE_NOT_ALLOWED",
+      });
+      continue;
+    }
     if (workflowId && !statesByWorkflow.get(workflowId)?.has(item.state)) {
       errors.push({
         index: item.originalIndex,
@@ -2801,7 +3002,23 @@ export async function setEntityState(
         },
       ]);
     }
+    await assertDirectStateWriteAllowed(
+      db,
+      tenantId,
+      instanceId,
+      existing,
+      state,
+      true,
+    );
   } else if (existing.workflowId) {
+    await assertDirectStateWriteAllowed(
+      db,
+      tenantId,
+      instanceId,
+      existing,
+      state,
+      false,
+    );
     const states = await db
       .select({ name: workflowStates.name })
       .from(workflowStates)

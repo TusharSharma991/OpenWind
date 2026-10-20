@@ -792,9 +792,34 @@ function AssignDropdown({
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          {/* No "Unassigned" choice: every ticket keeps an assignee or a team
-              (docs/specs/mandatory-ticket-fields.md R3). */}
           <div className="asgn-options">
+            {/* Unassigned is allowed: the ticket stays on the records list under the
+                "Unassigned" filter (docs/specs/mandatory-ticket-fields.md, 2026-10-19). */}
+            <button
+              type="button"
+              className={`asgn-option ${!value ? "asgn-option-selected" : ""}`}
+              onClick={() => select("")}
+            >
+              <span className="asgn-avatar asgn-avatar-empty">?</span>
+              <span className="asgn-option-info">
+                <span className="asgn-option-name">Unassigned</span>
+              </span>
+              {!value && (
+                <svg
+                  className="asgn-check"
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              )}
+            </button>
             {filtered.length === 0 && (
               <div className="asgn-empty">No results</div>
             )}
@@ -1244,6 +1269,13 @@ export function CustomerRecordDetail(): React.ReactElement {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [allStates, setAllStates] = useState<WorkflowState[]>([]);
+  // docs/specs/state-override.md: the workflow's switch, and the admin-only dialog it enables.
+  const [allowStateOverride, setAllowStateOverride] = useState(false);
+  const [overrideOpen, setOverrideOpen] = useState(false);
+  const [overrideTarget, setOverrideTarget] = useState("");
+  const [overrideReason, setOverrideReason] = useState("");
+  const [overriding, setOverriding] = useState(false);
+  const [overrideError, setOverrideError] = useState<string | null>(null);
   const [transitions, setTransitions] = useState<Transition[]>([]);
   const [_maxChildDepth, setMaxChildDepth] = useState<number>(1);
   const [workflowCreatedBy, setWorkflowCreatedBy] = useState<string | null>(
@@ -1324,6 +1356,7 @@ export function CustomerRecordDetail(): React.ReactElement {
     useState<Severity>(DEFAULT_SEVERITY);
   const [creatingChild, setCreatingChild] = useState(false);
   const [createChildError, setCreateChildError] = useState<string | null>(null);
+  const [childNotice, setChildNotice] = useState<string | null>(null);
   const [archiveConfirm, setArchiveConfirm] = useState<{
     childCount: number;
   } | null>(null);
@@ -1573,9 +1606,6 @@ export function CustomerRecordDetail(): React.ReactElement {
       ? fields.filter((f) => /^(due_?date|due|description|desc)$/i.test(f.name))
       : fields
   ).filter((f) => !f.config.virtual);
-  // team_id shows as the resolved team name; it changes through assignment, never as a
-  // free-text input (blanking it would leave a team ticket with nobody).
-  const editFormFields = editableFields.filter((f) => f.name !== "team_id");
 
   // Child tickets use a fixed 3-state machine regardless of parent workflow
   const CHILD_TICKET_STATES: WorkflowState[] = [
@@ -1602,6 +1632,14 @@ export function CustomerRecordDetail(): React.ReactElement {
     },
   ];
   const effectiveStates = isChildTicket ? CHILD_TICKET_STATES : allStates;
+  // Mirrors POST /entities/:id/override-state: a real admin, the workflow's switch on, a record
+  // on a workflow, and not the record's own creator. The API enforces all of it.
+  const canOverrideState =
+    currentUserRoles.includes("admin") &&
+    allowStateOverride &&
+    !isChildTicket &&
+    !record?.deletedAt &&
+    !isRecordCreator;
 
   // The coverage-gap badge is for a ticket that still needs routing, so it is off
   // for a deleted ticket and for one in a terminal state. A ticket with a state
@@ -2467,11 +2505,10 @@ export function CustomerRecordDetail(): React.ReactElement {
 
   async function createChild(): Promise<void> {
     if (!id || !effectiveEntityTypeId) return;
-    // docs/specs/mandatory-ticket-fields.md R4: a sub-task needs the same five mandatory
-    // values as a full ticket.
+    // docs/specs/mandatory-ticket-fields.md R4: a sub-task needs the same four mandatory
+    // values as a full ticket; the assignee is optional.
     const missing = [
       !newChildTitle.trim() && "Title",
-      !newChildAssignedTo && "Assignee",
       !newChildDueDate && "Due date",
       !newChildRemark.trim() && "Remark",
     ].filter((m): m is string => typeof m === "string");
@@ -2493,17 +2530,20 @@ export function CustomerRecordDetail(): React.ReactElement {
       };
       if (newChildDescription.trim())
         childFields.description = newChildDescription.trim();
-      await fetchWithAuth(`${API_URL}/entities/${id}/children`, {
-        method: "POST",
-        body: JSON.stringify({
-          entityTypeId: effectiveEntityTypeId,
-          fields: childFields,
-          assignedTo: newChildAssignedTo,
-          dueDate: new Date(newChildDueDate).toISOString(),
-          remark: newChildRemark.trim(),
-          severity: newChildSeverity,
-        }),
-      });
+      const created = await fetchWithAuth(
+        `${API_URL}/entities/${id}/children`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            entityTypeId: effectiveEntityTypeId,
+            fields: childFields,
+            ...(newChildAssignedTo ? { assignedTo: newChildAssignedTo } : {}),
+            dueDate: new Date(newChildDueDate).toISOString(),
+            remark: newChildRemark.trim(),
+            severity: newChildSeverity,
+          }),
+        },
+      );
       setNewChildTitle("");
       setNewChildAssignedTo("");
       setNewChildDueDate("");
@@ -2511,6 +2551,12 @@ export function CustomerRecordDetail(): React.ReactElement {
       setNewChildRemark("");
       setNewChildSeverity(DEFAULT_SEVERITY);
       setShowCreateChild(false);
+      const warnings = (created as { warnings?: unknown } | null)?.warnings;
+      setChildNotice(
+        Array.isArray(warnings) && warnings.includes("remark_comment_failed")
+          ? "The sub-task was created, but its remark could not be added as the first comment. The remark is saved on the sub-task."
+          : null,
+      );
       void loadChildren();
     } catch (err) {
       setCreateChildError(
@@ -2764,6 +2810,7 @@ export function CustomerRecordDetail(): React.ReactElement {
                   maxChildDepth?: number;
                   createdBy?: string | null;
                   assignedTo?: string[] | null;
+                  allowStateOverride?: boolean;
                 };
               }
             ).data
@@ -2786,7 +2833,12 @@ export function CustomerRecordDetail(): React.ReactElement {
           );
           setWorkflowCreatedBy(wf.createdBy ?? null);
           setWorkflowAssignedTo(wf.assignedTo ?? []);
+          setAllowStateOverride(
+            (wf as { allowStateOverride?: boolean }).allowStateOverride ===
+              true,
+          );
         } else {
+          setAllowStateOverride(false);
           setAllStates([]);
           setTransitions([]);
           setWorkflowCreatedBy(null);
@@ -2845,8 +2897,7 @@ export function CustomerRecordDetail(): React.ReactElement {
         body: JSON.stringify({
           fields: editValues,
           currentState,
-          // Empty means a team ticket left as is: the assignee is never sent as null.
-          ...(editAssignedTo ? { assignedTo: editAssignedTo } : {}),
+          assignedTo: editAssignedTo || null,
           ...(dueDateChanged
             ? { dueDate: new Date(editDueDate).toISOString() }
             : {}),
@@ -2867,13 +2918,12 @@ export function CustomerRecordDetail(): React.ReactElement {
   }
 
   async function quickAssign(userId: string): Promise<void> {
-    // Never clears the assignee (docs/specs/mandatory-ticket-fields.md R3).
-    if (!id || !userId) return;
+    if (!id) return;
     setQuickAssigning(true);
     try {
       await fetchWithAuth(`${API_URL}/entities/${id}`, {
         method: "PATCH",
-        body: JSON.stringify({ assignedTo: userId }),
+        body: JSON.stringify({ assignedTo: userId || null }),
       });
       void loadRecord();
     } finally {
@@ -2989,6 +3039,48 @@ export function CustomerRecordDetail(): React.ReactElement {
     if (dueDateInput) return;
     setDueDateInput(record?.dueDate ? toLocalInputValue(record.dueDate) : "");
     setDueDateInputError(null);
+  }
+
+  const OVERRIDE_REASON_MIN = 10;
+  const OVERRIDE_REASON_MAX = 1000;
+
+  async function submitOverride(): Promise<void> {
+    if (!id) return;
+    const reason = overrideReason.trim();
+    if (!overrideTarget) {
+      setOverrideError("Choose the step to move this record to.");
+      return;
+    }
+    if (reason.length < OVERRIDE_REASON_MIN) {
+      setOverrideError(
+        `Give a reason of at least ${OVERRIDE_REASON_MIN} characters. It is recorded with the change.`,
+      );
+      return;
+    }
+    if (reason.length > OVERRIDE_REASON_MAX) {
+      setOverrideError(
+        `The reason can be at most ${OVERRIDE_REASON_MAX} characters.`,
+      );
+      return;
+    }
+    setOverriding(true);
+    setOverrideError(null);
+    try {
+      await fetchWithAuth(`${API_URL}/entities/${id}/override-state`, {
+        method: "POST",
+        body: JSON.stringify({ state: overrideTarget, reason }),
+      });
+      setOverrideOpen(false);
+      setOverrideTarget("");
+      setOverrideReason("");
+      void loadRecord();
+    } catch (err) {
+      setOverrideError(
+        err instanceof Error ? err.message : "Failed to override the state",
+      );
+    } finally {
+      setOverriding(false);
+    }
   }
 
   async function executeTransition(
@@ -3883,6 +3975,18 @@ export function CustomerRecordDetail(): React.ReactElement {
               {record.origin && <OriginDetailLine origin={record.origin} />}
             </div>
             <div className="rcd-card-header-right">
+              {canOverrideState && (
+                <button
+                  type="button"
+                  className="rcd-btn-secondary"
+                  onClick={() => {
+                    setOverrideError(null);
+                    setOverrideOpen(true);
+                  }}
+                >
+                  Override state…
+                </button>
+              )}
               {!editing && isAdminOrAgent && record.deletedAt && (
                 <button
                   type="button"
@@ -4264,23 +4368,17 @@ export function CustomerRecordDetail(): React.ReactElement {
                       </div>
                     )}
                     <div className="portal-field-group portal-field-full">
-                      <label className="portal-field-label">
-                        Assigned To<span className="portal-required">*</span>
-                      </label>
+                      <label className="portal-field-label">Assigned To</label>
                       <select
                         className="portal-input"
                         value={editAssignedTo}
                         onChange={(e) => setEditAssignedTo(e.target.value)}
                       >
-                        {/* No "Unassigned": the empty value only labels a team ticket
-                            (or a legacy unassigned one) and is never saved. */}
-                        {!editAssignedTo && (
-                          <option value="" disabled>
-                            {record.teamName
-                              ? `Team: ${record.teamName}`
-                              : "Select assignee"}
-                          </option>
-                        )}
+                        <option value="">
+                          {record.teamName && !record.assignedTo
+                            ? `Team: ${record.teamName}`
+                            : "Unassigned"}
+                        </option>
                         {users.map((u) => (
                           <option key={u.userId} value={u.userId}>
                             {u.displayName ?? u.email}
@@ -4322,7 +4420,7 @@ export function CustomerRecordDetail(): React.ReactElement {
                         ))}
                       </select>
                     </div>
-                    {editFormFields.map((f) => (
+                    {editableFields.map((f) => (
                       <div
                         key={f.id}
                         className={`portal-field-group ${f.fieldType === "longtext" ? "portal-field-full" : ""}`}
@@ -4386,15 +4484,7 @@ export function CustomerRecordDetail(): React.ReactElement {
                         <div className="rcd-field-lbl">{f.label}</div>
                         <div className="rcd-field-val">
                           <FieldValue
-                            // team_id is a plain generic field on every
-                            // entity type (no dedicated field type) -- the
-                            // server-resolved live team name (get.ts) is
-                            // shown instead of the raw id whenever present.
-                            value={
-                              f.name === "team_id" && record.teamName
-                                ? record.teamName
-                                : record.fields[f.name]
-                            }
+                            value={record.fields[f.name]}
                             fieldType={f.fieldType}
                             field={f}
                             attachments={attachments}
@@ -4870,6 +4960,27 @@ export function CustomerRecordDetail(): React.ReactElement {
               </div>
             ) : activeTab === "subtasks" ? (
               <div className="rcd-tab-scroll">
+                {childNotice && (
+                  <div
+                    className="portal-alert-error"
+                    role="status"
+                    style={{
+                      marginBottom: "12px",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: "12px",
+                    }}
+                  >
+                    <span>{childNotice}</span>
+                    <button
+                      type="button"
+                      aria-label="Dismiss notice"
+                      onClick={() => setChildNotice(null)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                )}
                 {canCreateChild && !record.deletedAt && (
                   <div className="rcd-linked-tab-actions">
                     <button
@@ -5785,13 +5896,12 @@ export function CustomerRecordDetail(): React.ReactElement {
               />
             </div>
             <div className="form-group">
-              <label className="form-label">Assign to *</label>
+              <label className="form-label">Assign to</label>
               <AssignDropdown
                 value={newChildAssignedTo}
                 users={users}
                 onChange={setNewChildAssignedTo}
                 className="asgn-drop-full"
-                emptyLabel="Select assignee"
               />
             </div>
             <div className="form-group">
@@ -5874,6 +5984,105 @@ export function CustomerRecordDetail(): React.ReactElement {
               onClick={() => void createChild()}
             >
               {creatingChild ? "Creating…" : "Create sub-task"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Admin state override (docs/specs/state-override.md) ──── */}
+      <Dialog
+        open={overrideOpen}
+        onOpenChange={(next) => {
+          if (!next) {
+            setOverrideOpen(false);
+            setOverrideTarget("");
+            setOverrideReason("");
+            setOverrideError(null);
+          }
+        }}
+      >
+        <DialogContent
+          showCloseButton={false}
+          className="modal"
+          style={DIALOG_CONTENT_RESET}
+        >
+          <div className="modal-header">
+            <DialogTitle asChild>
+              <h3 className="modal-title">Override state</h3>
+            </DialogTitle>
+            <DialogClose asChild>
+              <button type="button" className="modal-close" aria-label="Close">
+                ×
+              </button>
+            </DialogClose>
+          </div>
+          <div className="modal-body">
+            <p className="rd-muted" style={{ marginBottom: "12px" }}>
+              Moves this record outside its workflow's transitions. It skips the
+              transition rules, runs automations bound to the new step, and is
+              recorded with your name and the reason below.
+            </p>
+            {overrideError && (
+              <div
+                className="portal-alert-error"
+                style={{ marginBottom: "12px" }}
+              >
+                {overrideError}
+              </div>
+            )}
+            <div className="form-group">
+              <label className="form-label" htmlFor="override-target">
+                Move to *
+              </label>
+              <select
+                id="override-target"
+                className="form-input"
+                value={overrideTarget}
+                disabled={overriding}
+                onChange={(e) => setOverrideTarget(e.target.value)}
+              >
+                <option value="">Select a step</option>
+                {allStates
+                  .filter((st) => st.name !== record.currentState)
+                  .map((st) => (
+                    <option key={st.name} value={st.name}>
+                      {st.label || st.name}
+                    </option>
+                  ))}
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label" htmlFor="override-reason">
+                Reason *
+              </label>
+              <textarea
+                id="override-reason"
+                className="form-input"
+                rows={3}
+                value={overrideReason}
+                disabled={overriding}
+                onChange={(e) => setOverrideReason(e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="modal-footer">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setOverrideOpen(false);
+                setOverrideTarget("");
+                setOverrideReason("");
+                setOverrideError(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              disabled={overriding}
+              onClick={() => void submitOverride()}
+            >
+              {overriding ? "Overriding…" : "Override state"}
             </Button>
           </div>
         </DialogContent>

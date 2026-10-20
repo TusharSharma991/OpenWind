@@ -7,7 +7,7 @@
  *     [--tenant <uuid>] [--assignee <userId>] [--notify it_security=<userId>] \
  *     [--notify legal=<userId>] [--notify finance_approver=<userId>]
  *
- * Every vendor record gets the five mandatory ticket values
+ * Every vendor record gets the four mandatory ticket values
  * (docs/specs/mandatory-ticket-fields.md): --assignee, else the first --notify user.
  *
  * Idempotent: the module install is a no-op once installed, and fixtures are
@@ -262,7 +262,10 @@ async function step(
     executeTransition(tx, tenantId, {
       instanceId,
       transitionId,
-      actorId: ACTOR_ID,
+      // One identity per role: the review transitions refuse the requester and anyone who
+      // already acted on the vendor (segregation of duties), so a single script id cannot
+      // walk a vendor through its stages.
+      actorId: `${ACTOR_ID}:${roles[0]}`,
       actorRoles: roles,
       triggeredBy: "system",
       ...(comment ? { comment } : {}),

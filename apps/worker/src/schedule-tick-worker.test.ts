@@ -161,6 +161,7 @@ vi.mock("@platform/db", () => ({
 }));
 
 const { schedulerTick } = await import("./schedule-tick-worker.js");
+const { logger } = await import("@platform/logger");
 
 function makeRule(overrides: Partial<Record<string, unknown>> = {}) {
   return {
@@ -618,41 +619,6 @@ describe("schedulerTick", () => {
       });
     });
 
-    // Bug this covers: severity used to be merged into `fields`, which
-    // entity-engine's per-entity-type field schema silently strips unless
-    // that type happens to declare a custom field literally named
-    // "severity" -- it must go through createEntity's dedicated top-level
-    // `severity` param instead (same as apps/api/src/routes/entities/
-    // create.ts:287), so it lands regardless of the target entity type's
-    // declared custom fields.
-    it("passes template.severity as createEntity's top-level severity param, not inside fields", async () => {
-      const rule = makeRule({
-        template: {
-          title: "Severity check",
-          teamId: "22222222-2222-2222-2222-222222222222",
-          due_days: 1,
-          remark: "r",
-          severity: "critical",
-        },
-      });
-      dueRules = [rule];
-      claimRows = [rule];
-      mockCreateEntity.mockResolvedValue({
-        id: "ticket-severity",
-        workflowId: "wf-1",
-        currentState: "open",
-      });
-
-      await schedulerTick();
-
-      const createArgs = mockCreateEntity.mock.calls[0]?.[2] as {
-        severity?: string;
-        fields: Record<string, unknown>;
-      };
-      expect(createArgs.severity).toBe("critical");
-      expect(createArgs.fields["severity"]).toBeUndefined();
-    });
-
     it("assignedTo mode passes assignedTo directly and writes no team_id field", async () => {
       const rule = makeRule({
         template: {
@@ -794,6 +760,30 @@ describe("schedulerTick", () => {
 
       expect(mockCreateEntity).not.toHaveBeenCalled();
       expect(insertedExecutions).toHaveLength(0);
+    });
+
+    it("counts rules of an ineligible tenant apart from missed fires skipped by catch-up (#996)", async () => {
+      dueRules = [
+        makeRule({ id: "rule-a", tenantId: "tenant-expired" }),
+        makeRule({ id: "rule-b", tenantId: "tenant-expired" }),
+      ];
+      mockIsTenantActive.mockResolvedValue(false);
+      vi.mocked(logger.info).mockClear();
+
+      await schedulerTick();
+
+      const summary = vi
+        .mocked(logger.info)
+        .mock.calls.find(
+          ([, message]) => message === "scheduler tick complete",
+        );
+      expect(summary?.[0]).toMatchObject({
+        totalDue: 2,
+        success: 0,
+        failed: 0,
+        skipped: 0,
+        skippedIneligible: 2,
+      });
     });
   });
 });

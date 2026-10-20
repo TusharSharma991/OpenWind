@@ -3,12 +3,23 @@ import {
   resolveTicketValues,
   registerFallbackAssigneeResolver,
 } from "./ticket-template.js";
-import { AutomationError } from "../types.js";
 
 // docs/specs/mandatory-ticket-fields.md R7 (owner decisions 2026-10-16).
 const NOW = new Date("2030-01-01T10:00:00.000Z");
 const DAY = 24 * 60 * 60 * 1000;
-const db = {} as never;
+// The tenant_users lookup behind the assignee check: every id is a member, or none is.
+function membersDb(isMember: boolean): never {
+  const rows = isMember ? [{ userId: "member" }] : [];
+  const chain = {
+    select: () => chain,
+    from: () => chain,
+    where: () => chain,
+    limit: () => Promise.resolve(rows),
+  };
+  // A stand-in for the one query resolveTicketValues runs; DbOrTx's full surface isn't needed.
+  return chain as never;
+}
+const db = membersDb(true);
 
 const BASE = {
   template: undefined,
@@ -80,18 +91,13 @@ describe("resolveTicketValues", () => {
     expect(values).not.toHaveProperty("assignedTo");
   });
 
-  it("refuses to create an unassigned ticket when nobody can be found", async () => {
+  // Owner decision 2026-10-19: an unassigned ticket is allowed; it shows under the records
+  // list's "Unassigned" filter.
+  it("leaves the ticket unassigned when nobody can be found", async () => {
     registerFallbackAssigneeResolver(() => Promise.resolve(null));
-    await expect(resolveTicketValues(db, "t-1", BASE)).rejects.toMatchObject({
-      code: "NO_ASSIGNEE",
-    });
-  });
-
-  it("gives the failure a readable reason", async () => {
-    registerFallbackAssigneeResolver(() => Promise.resolve(null));
-    await expect(resolveTicketValues(db, "t-1", BASE)).rejects.toThrow(
-      /set an assignee in the rule's template/,
-    );
+    const values = await resolveTicketValues(db, "t-1", BASE);
+    expect(values).not.toHaveProperty("assignedTo");
+    expect(values).not.toHaveProperty("teamId");
   });
 
   // Seed SQL bypasses the API's validation.
@@ -108,9 +114,31 @@ describe("resolveTicketValues", () => {
     },
   );
 
-  it("also refuses when no resolver is registered", async () => {
-    await expect(resolveTicketValues(db, "t-1", BASE)).rejects.toBeInstanceOf(
-      AutomationError,
-    );
+  it("hands a departed assignee's ticket to the fallback owner", async () => {
+    registerFallbackAssigneeResolver(() => Promise.resolve("owner-1"));
+    for (const change of [
+      { template: { assignedTo: "departed" } },
+      { legacyAssignee: "departed" },
+    ]) {
+      const values = await resolveTicketValues(membersDb(false), "t-1", {
+        ...BASE,
+        ...change,
+      });
+      expect(values.assignedTo).toBe("owner-1");
+    }
+  });
+
+  it("leaves the ticket unassigned when the assignee has left and there is no fallback", async () => {
+    registerFallbackAssigneeResolver(() => Promise.resolve(null));
+    const values = await resolveTicketValues(membersDb(false), "t-1", {
+      ...BASE,
+      template: { assignedTo: "departed" },
+    });
+    expect(values).not.toHaveProperty("assignedTo");
+  });
+
+  it("also leaves it unassigned when no resolver is registered", async () => {
+    const values = await resolveTicketValues(db, "t-1", BASE);
+    expect(values).not.toHaveProperty("assignedTo");
   });
 });

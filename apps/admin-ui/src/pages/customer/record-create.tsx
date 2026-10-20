@@ -278,9 +278,7 @@ function UserPicker({
             </span>
           </>
         ) : (
-          <span style={{ color: "var(--text-tertiary)" }}>
-            Search and assign a user…
-          </span>
+          <span style={{ color: "var(--text-tertiary)" }}>Unassigned</span>
         )}
       </button>
 
@@ -488,10 +486,9 @@ const INITIAL_FORM_DATA: RecordCreateFormData = {
   fieldValues: {},
   workflowId: "",
   currentState: "",
-  // docs/specs/team-assign-oncall-fallback.md R1 — exactly one of user/team;
-  // teamId is only ever sent when mode is "team" (assignedTo cleared, and
-  // vice versa) so the payload always matches the server's exactly-one-of
-  // contract regardless of which mode the ticket creator last touched.
+  // At most one of user/team: teamId is only ever sent when mode is "team" (and vice
+  // versa), so the payload never carries both whichever mode the creator last touched.
+  // Both empty (the default) creates the ticket unassigned.
   assignMode: "user",
   assignedTo: "",
   teamId: "",
@@ -579,12 +576,8 @@ export function CustomerRecordCreate(): React.ReactElement {
   const { stagedFiles, addFiles, removeFile, pendingCount, cleanFileIds } =
     useFileUpload({ moduleSlug: typeSlug ?? "unknown" });
   const mandateFields = fields.filter((f) => f.isRequired);
-  // team_id is excluded here (docs/specs/team-assign-oncall-fallback.md R2)
-  // -- it is exclusively set through the User/Team toggle below, never
-  // independently editable as a normal Other-tab custom field.
-  const otherFields = fields.filter(
-    (f) => !f.isRequired && f.name !== "team_id",
-  );
+  // Virtual fields (team_id, set through the User/Team toggle below) never reach `fields`.
+  const otherFields = fields.filter((f) => !f.isRequired);
 
   const currentWorkflowName = workflows.find((w) => w.id === workflowId)?.name;
 
@@ -672,22 +665,13 @@ export function CustomerRecordCreate(): React.ReactElement {
     // Mandatory platform-wide invariant, mirrored client-side as defense in
     // depth -- POST /entities rejects a request missing either field
     // regardless, but blocking here avoids a round-trip. Deliberately not a
-    // native `required` attribute on the Due Date input (and can't be one on
-    // Assigned To -- UserPicker isn't a native form control): native
-    // constraint validation blocks form submission before this handler ever
-    // runs, which would skip this consistent error message for one field
-    // but not the other.
-    // docs/specs/team-assign-oncall-fallback.md R1 — exactly one of
-    // assignedTo/teamId, driven by assignMode so the two can never both be
-    // set (or both be empty) regardless of what the ticket creator touched
-    // before switching modes.
-    const assignValue = assignMode === "user" ? assignedTo : teamId;
-    if (!assignValue || !dueDate || !remark.trim()) {
-      setError(
-        assignMode === "user"
-          ? "Assigned To, Due Date, and Remark are required."
-          : "Team, Due Date, and Remark are required.",
-      );
+    // native `required` attribute on the Due Date input: native constraint
+    // validation blocks form submission before this handler ever runs, which
+    // would skip this consistent error message.
+    // The assignee is optional: an unassigned ticket stays on the records list under the
+    // "Unassigned" filter (docs/specs/mandatory-ticket-fields.md, 2026-10-19).
+    if (!dueDate || !remark.trim()) {
+      setError("Due Date and Remark are required.");
       setActiveTab("mandate");
       return;
     }
@@ -701,9 +685,10 @@ export function CustomerRecordCreate(): React.ReactElement {
         dueDate: new Date(dueDate).toISOString(),
         remark: remark.trim(),
       };
+      // At most one of assignedTo/teamId, driven by assignMode; neither leaves it unassigned.
       if (assignMode === "user") {
-        payload["assignedTo"] = assignedTo;
-      } else {
+        if (assignedTo) payload["assignedTo"] = assignedTo;
+      } else if (teamId) {
         payload["teamId"] = teamId;
       }
       if (workflowId) payload["workflowId"] = workflowId;
@@ -874,9 +859,7 @@ export function CustomerRecordCreate(): React.ReactElement {
               className="portal-field-group"
               style={{ margin: 0, gridColumn: "1 / -1" }}
             >
-              <label className="portal-field-label">
-                Assign To<span className="portal-required">*</span>
-              </label>
+              <label className="portal-field-label">Assign To</label>
               <div
                 style={{
                   display: "flex",

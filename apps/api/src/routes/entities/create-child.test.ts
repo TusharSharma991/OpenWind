@@ -99,7 +99,7 @@ beforeEach(() => {
   });
 });
 
-describe("POST /entities/:id/children — the five mandatory values", () => {
+describe("POST /entities/:id/children — the four mandatory values", () => {
   it("creates a complete sub-task, defaulting severity, and posts the remark as the first comment", async () => {
     const res = await post(VALID);
     expect(res.status).toBe(201);
@@ -125,7 +125,6 @@ describe("POST /entities/:id/children — the five mandatory values", () => {
     ["a remark", { remark: undefined }],
     ["a due date", { dueDate: undefined }],
     ["a due date in the future", { dueDate: "2020-01-01T10:00:00.000Z" }],
-    ["an assignee or a team", { assignedTo: undefined }],
   ])("refuses a sub-task without %s", async (_what, change) => {
     const res = await post({ ...VALID, ...change });
     expect(res.status).toBe(400);
@@ -148,6 +147,17 @@ describe("POST /entities/:id/children — the five mandatory values", () => {
       teamId: "22222222-2222-4222-8222-222222222222",
     });
     expect(res.status).toBe(400);
+  });
+
+  // Owner decision 2026-10-19: an unassigned sub-task is allowed.
+  it("creates an unassigned sub-task", async () => {
+    const res = await post({ ...VALID, assignedTo: undefined });
+    expect(res.status).toBe(201);
+    expect(mockCreateChildRelation).toHaveBeenCalledWith(
+      expect.anything(),
+      "t-aaa",
+      expect.objectContaining({ assignedTo: undefined }),
+    );
   });
 
   it("accepts a team instead of an assignee, without a membership lookup", async () => {
@@ -175,9 +185,19 @@ describe("POST /entities/:id/children — the five mandatory values", () => {
     expect(mockCreateChildRelation).not.toHaveBeenCalled();
   });
 
-  it("still returns 201 when posting the remark comment fails", async () => {
+  it("still returns 201 but flags remark_comment_failed when posting the remark comment fails", async () => {
     mockPostRemarkComment.mockRejectedValue(new Error("comment store down"));
     const res = await post(VALID);
     expect(res.status).toBe(201);
+    const body = (await res.json()) as { data: unknown; warnings?: string[] };
+    expect(body.warnings).toEqual(["remark_comment_failed"]);
+  });
+
+  it("returns no warnings when the remark comment posts", async () => {
+    mockPostRemarkComment.mockResolvedValue(undefined);
+    const res = await post(VALID);
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).not.toHaveProperty("warnings");
   });
 });

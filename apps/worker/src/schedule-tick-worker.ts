@@ -283,7 +283,8 @@ async function fireRule(
         // template.fields.priority/category still overrides them.
         // Severity and remark go to their own columns, like a manually created ticket
         // (docs/specs/mandatory-ticket-fields.md R4); the team goes through teamId so it
-        // survives on types with no team_id field.
+        // survives on types with no team_id field. fields.severity stays for the
+        // severity-notification rule, which reads it from the event.
         const instance = await createEntity(tx, rule.tenantId, {
           entityTypeId: rule.entityTypeId,
           workflowId: rule.workflowId ?? undefined,
@@ -301,6 +302,7 @@ async function fireRule(
             ...(rendered.description
               ? { description: rendered.description }
               : {}),
+            ...(rendered.severity ? { severity: rendered.severity } : {}),
             ...(rendered.service_id ? { service_id: rendered.service_id } : {}),
           },
         });
@@ -525,6 +527,10 @@ export async function schedulerTick(
   let success = 0;
   let failed = 0;
   let skipped = 0;
+  // Rules left alone because their tenant is deactivated or its trial has ended (R6 of
+  // docs/specs/multi-org-sandbox.md). Counted apart from `skipped` (missed fires dropped by
+  // catch-up) so a lapsed sandbox is visible without an audit row per tick.
+  let skippedIneligible = 0;
 
   try {
     // System-level cross-tenant poll — intentionally no tenant_id filter;
@@ -566,7 +572,7 @@ export async function schedulerTick(
         tenantEligibilityCache.set(rule.tenantId, isEligible);
       }
       if (!isEligible) {
-        skipped++;
+        skippedIneligible++;
         continue;
       }
 
@@ -602,6 +608,7 @@ export async function schedulerTick(
         success,
         failed,
         skipped,
+        skippedIneligible,
         durationMs: Date.now() - tickStart,
       },
       "scheduler tick complete",

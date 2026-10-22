@@ -22,6 +22,20 @@ vi.mock("../lib/org-directory-client.js", () => ({
   triggerOrgSync: (): unknown => mockTriggerOrgSync(),
 }));
 
+// React Flow measures nodes with ResizeObserver / DOMMatrixReadOnly, which jsdom lacks.
+class ResizeObserverStub {
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+}
+vi.stubGlobal("ResizeObserver", ResizeObserverStub);
+vi.stubGlobal(
+  "DOMMatrixReadOnly",
+  class {
+    m22 = 1;
+  },
+);
+
 const { OrgDirectoryPage } = await import("./org-directory.js");
 
 const ROOT = {
@@ -117,6 +131,15 @@ describe("OrgDirectoryPage", () => {
     await waitFor(() => expect(screen.getByText("Acme Corp")).toBeTruthy());
     expect(screen.getByText("CEO Person")).toBeTruthy();
     expect(screen.getByText("VP Person")).toBeTruthy();
+  });
+
+  it("offers zoom in, zoom out and fit-view controls", async () => {
+    render(<OrgDirectoryPage />);
+
+    await waitFor(() => expect(screen.getByText("Acme Corp")).toBeTruthy());
+    expect(screen.getByRole("button", { name: /zoom in/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /zoom out/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /fit view/i })).toBeTruthy();
   });
 
   it("does not show the Sync now button for a non-admin", async () => {

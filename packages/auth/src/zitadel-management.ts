@@ -771,6 +771,38 @@ export async function authorizeUser(
   );
 }
 
+// ── Org-chart metadata ───────────────────────────────────────────────────────
+
+/**
+ * Writes the org-directory metadata keys (manager_id / department / title) onto a user, so the
+ * org chart built from Zitadel metadata has real data for a freshly seeded sandbox. Only the
+ * keys in `ORG_METADATA_KEYS` are written, and null/empty values are skipped. Zitadel v2
+ * UserService.SetUserMetadata takes base64-encoded values, matching what the reader decodes.
+ */
+export async function setUserOrgMetadata(
+  userId: string,
+  metadata: Partial<OrgMetadata>,
+): Promise<boolean> {
+  const pairs: [string, string | null | undefined][] = [
+    ["manager_id", metadata.managerId],
+    ["department", metadata.department],
+    ["title", metadata.title],
+  ];
+  const entries = pairs
+    .filter((p): p is [string, string] => !!p[1])
+    .map(([key, value]) => ({
+      key,
+      value: Buffer.from(value, "utf8").toString("base64"),
+    }));
+  if (entries.length === 0) return true;
+  return provisioningPost(
+    "/zitadel.user.v2.UserService/SetUserMetadata",
+    { userId, metadata: entries },
+    { userId },
+    "setUserOrgMetadata: Zitadel set metadata failed",
+  );
+}
+
 // ── List project roles ────────────────────────────────────────────────────────
 
 export async function listProjectRoles(): Promise<string[]> {
@@ -1196,7 +1228,7 @@ export async function getUserById(
 // docs/specs/org-directory.md T2 -- read-only primitive the org-directory importer
 // (packages/org-directory) calls once per user during a sync. Deliberately separate
 // from getUserById's identity fields: metadata is a distinct Zitadel API surface
-// (user.v2.UserService/ListMetadata) and callers that don't care about org-directory
+// (user.v2.UserService/ListUserMetadata) and callers that don't care about org-directory
 // shouldn't pay for an extra request.
 
 const _orgMetadataCache = new Map<
@@ -1248,7 +1280,7 @@ async function _fetchOrgMetadataForUser(
   }
 
   try {
-    const url = `${internalBase()}/zitadel.user.v2.UserService/ListMetadata`;
+    const url = `${internalBase()}/zitadel.user.v2.UserService/ListUserMetadata`;
     const result = await httpPost(
       url,
       issuerHost(),

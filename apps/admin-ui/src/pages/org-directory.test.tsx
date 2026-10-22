@@ -137,9 +137,15 @@ describe("OrgDirectoryPage", () => {
     render(<OrgDirectoryPage />);
 
     await waitFor(() => expect(screen.getByText("Acme Corp")).toBeTruthy());
-    expect(screen.getByRole("button", { name: /zoom in/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /zoom out/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /fit view/i })).toBeTruthy();
+    expect(
+      await screen.findByRole("button", { name: /zoom in/i }),
+    ).toBeTruthy();
+    expect(
+      await screen.findByRole("button", { name: /zoom out/i }),
+    ).toBeTruthy();
+    expect(
+      await screen.findByRole("button", { name: /fit view/i }),
+    ).toBeTruthy();
   });
 
   it("does not show the Sync now button for a non-admin", async () => {

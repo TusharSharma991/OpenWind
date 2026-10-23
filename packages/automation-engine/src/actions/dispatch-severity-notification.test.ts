@@ -129,13 +129,8 @@ describe("executeDispatchSeverityNotificationAction", () => {
     onInsert = undefined;
   });
 
-  // Severity is a dedicated entity_instances column, never part of the
-  // entity.created event's `fields` payload (packages/entity-engine/src/
-  // engine.ts's redactedFieldsForEvents never merges it in) -- the event
-  // below deliberately carries no severity in `fields` at all, to prove
-  // this reads instance.severity (the persisted column) rather than
-  // event.fields["severity"] (which was always empty here, the bug this
-  // fixes).
+  // The created event carries no severity in `fields` (it never does), so
+  // this proves the stored column is read.
   it("dispatches to the assignee on entity.created with severity set, falling back to the hardcoded email-only default when no policy matches", async () => {
     entityRow = {
       assignedTo: "u-assignee",

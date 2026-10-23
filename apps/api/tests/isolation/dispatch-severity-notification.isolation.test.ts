@@ -180,11 +180,7 @@ describe("dispatch_severity_notification action — tenant isolation", () => {
       createEntity(tx, TENANT_A, {
         entityTypeId: entityTypeA.id,
         fields: { title: "Test ticket", team_id: teamAId },
-        // severity is createEntity's dedicated top-level param (the
-        // entity_instances.severity column), not a fields entry -- matching
-        // apps/api/src/routes/entities/create.ts's pattern. The action now
-        // resolves severity from this column, not event.fields (the bug
-        // this file's own automation-engine unit tests cover).
+        // Its own column, as the create route passes it; never a fields entry.
         severity: "high",
         assignedTo: ASSIGNEE_A,
       }),

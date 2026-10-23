@@ -119,13 +119,19 @@ describe("GET /admin/members", () => {
     currentRoles = ["admin"];
   });
 
-  it('returns agents, admins, and "user"-role members (2026-09-25: this deployment\'s org has no customer accounts -- see header comment)', async () => {
+  it('returns admins, agents and "user" employees, but not a platform admin', async () => {
     mockListOrgUsers.mockResolvedValueOnce([
       {
         userId: "u-staff-user-role",
         email: "c@x.com",
         displayName: "Staff Member",
         loginName: "c",
+      },
+      {
+        userId: "u-platform",
+        email: "p@x.com",
+        displayName: "Platform Operator",
+        loginName: "p",
       },
       {
         userId: "u-agent",
@@ -143,6 +149,7 @@ describe("GET /admin/members", () => {
     mockListUserRolesByUserId.mockResolvedValueOnce(
       new Map([
         ["u-staff-user-role", ["user"]],
+        ["u-platform", ["platform_admin"]],
         ["u-agent", ["agent"]],
         ["u-admin", ["admin"]],
       ]),
@@ -156,6 +163,7 @@ describe("GET /admin/members", () => {
     expect(ids).toEqual(
       expect.arrayContaining(["u-staff-user-role", "u-agent", "u-admin"]),
     );
+    expect(ids).not.toContain("u-platform");
   });
 
   it("excludes an org member with no role grant at all", async () => {

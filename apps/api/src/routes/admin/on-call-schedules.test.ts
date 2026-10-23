@@ -3,28 +3,47 @@ import { Hono } from "hono";
 import type { Context, Next } from "hono";
 import type { AuthContext } from "@platform/auth";
 
-const { mockAuth, mockWriteAuditEntry, mockOrgUsers, mockRolesByUserId } =
+const { mockAuth, mockWriteAuditEntry, mockResolveTenantMembers, callOrder } =
   vi.hoisted(() => ({
     mockAuth: {
       tenantId: "t-aaa",
       userId: "u-bbb",
-      orgId: "org-aaa",
+      orgId: "org-1",
       roles: ["admin"] as string[],
       email: "test@example.com",
     },
     mockWriteAuditEntry: vi.fn(),
-    // Fixture for the Zitadel-org fallback in validateScheduleRefs — a user id
-    // present here but NOT in the tenant_users mock below simulates an
-    // agent/admin who's never logged into OpenWind (the bug this fallback
-    // fixes: they're selectable via the live-Zitadel-sourced GET
-    // /admin/members picker but previously 422'd on save).
-    mockOrgUsers: [] as {
-      userId: string;
-      email: string;
-      displayName: string;
-    }[],
-    mockRolesByUserId: new Map<string, string[]>(),
+    mockResolveTenantMembers:
+      vi.fn<
+        (
+          tenantId: string,
+          ids: string[],
+          orgId: string | undefined,
+        ) => Promise<Set<string>>
+      >(),
+    callOrder: [] as string[],
   }));
+
+let orgRoles = new Map<string, string[]>();
+let rolesLookupFails = false;
+
+vi.mock("../../lib/zitadel-management.js", () => ({
+  listUserRolesByUserId: () =>
+    rolesLookupFails
+      ? Promise.reject(new Error("zitadel unavailable"))
+      : Promise.resolve(orgRoles),
+}));
+
+vi.mock("../../lib/ensure-user-refs.js", () => ({
+  resolveTenantMembers: (
+    tenantId: string,
+    ids: string[],
+    orgId: string | undefined,
+  ) => {
+    callOrder.push("resolveTenantMembers");
+    return mockResolveTenantMembers(tenantId, ids, orgId);
+  },
+}));
 
 vi.mock("@platform/auth", () => ({
   requireAuth:
@@ -42,8 +61,6 @@ vi.mock("@platform/auth", () => ({
       }
       await next();
     },
-  listOrgUsers: async () => mockOrgUsers,
-  listUserRolesByUserId: async () => mockRolesByUserId,
 }));
 
 const FUTURE_START = new Date(Date.now() + 24 * 60 * 60 * 1000);
@@ -67,15 +84,6 @@ const mockScheduleRow = {
 
 let overlapConflict = false;
 let getReturnsRow = true;
-// tenant_users' known user ids -- mutable so a test can simulate a user id
-// that's valid in the live Zitadel org (mockOrgUsers/mockRolesByUserId
-// above) but has no tenant_users row yet (never logged in).
-let tenantUserIds = new Set(["u-bbb"]);
-const mockUpserts: {
-  userId: string;
-  email: string | null;
-  displayName: string | null;
-}[] = [];
 
 vi.mock("@platform/teams", () => ({
   validateCrossTenantRefs: async (
@@ -99,7 +107,7 @@ vi.mock("@platform/teams", () => ({
   lookupValidIdsInTable:
     (_tx: unknown, _table: unknown, idColumn: string) => async () =>
       idColumn === "userId"
-        ? new Set(tenantUserIds)
+        ? new Set(["u-bbb"])
         : new Set(["11111111-1111-4111-8111-111111111111"]),
 }));
 
@@ -124,6 +132,7 @@ vi.mock("@platform/db", () => ({
     deletedAt: "deletedAt",
   },
   withTenantContext: (_tenantId: unknown, fn: (tx: unknown) => unknown) => {
+    callOrder.push("withTenantContext");
     const tx = {
       select: () => tx,
       from: () => tx,
@@ -131,21 +140,7 @@ vi.mock("@platform/db", () => ({
       orderBy: () => tx,
       limit: () => Promise.resolve(getReturnsRow ? [mockScheduleRow] : []),
       insert: () => tx,
-      values: (v: {
-        userId: string;
-        email: string | null;
-        displayName: string | null;
-      }) => {
-        // Only the tenant_users upsert (validateScheduleRefs' Zitadel
-        // fallback) passes an object with userId here -- the schedule
-        // insert/update .values() calls pass different shapes and never
-        // reach .onConflictDoUpdate().
-        if (v && typeof v === "object" && "userId" in v) {
-          mockUpserts.push(v);
-        }
-        return tx;
-      },
-      onConflictDoUpdate: () => Promise.resolve(),
+      values: () => tx,
       update: () => tx,
       set: () => tx,
       returning: () => {
@@ -216,10 +211,135 @@ beforeEach(() => {
   mockAuth.roles = ["admin"];
   overlapConflict = false;
   getReturnsRow = true;
-  tenantUserIds = new Set(["u-bbb"]);
-  mockOrgUsers.length = 0;
-  mockRolesByUserId.clear();
-  mockUpserts.length = 0;
+  callOrder.length = 0;
+  mockResolveTenantMembers.mockReset();
+  mockResolveTenantMembers.mockResolvedValue(new Set());
+  rolesLookupFails = false;
+  orgRoles = new Map([
+    ["u-bbb", ["admin"]],
+    ["u-backup", ["user"]],
+    ["u-manager", ["agent"]],
+  ]);
+});
+
+describe("on-call schedule writes — people who haven't signed in yet", () => {
+  it("records the picked people from the org before the write transaction opens", async () => {
+    const res = await makeApp().request("/admin/on-call-schedules", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...validCreateBody,
+        backupUserId: "u-backup",
+        escalationManagerUserId: "u-manager",
+      }),
+    });
+    expect(res.status).toBe(422); // the mocked tenant_users only knows u-bbb
+    expect(mockResolveTenantMembers).toHaveBeenCalledWith(
+      "t-aaa",
+      ["u-bbb", "u-backup", "u-manager"],
+      "org-1",
+    );
+    expect(callOrder.slice(0, 2)).toEqual([
+      "resolveTenantMembers",
+      "withTenantContext",
+    ]);
+  });
+
+  it("does the same on edit, and skips the lookup when no person changes", async () => {
+    await makeApp().request(`/admin/on-call-schedules/${mockScheduleRow.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ backupUserId: "u-bbb" }),
+    });
+    expect(mockResolveTenantMembers).toHaveBeenCalledWith(
+      "t-aaa",
+      ["u-bbb"],
+      "org-1",
+    );
+
+    mockResolveTenantMembers.mockClear();
+    const res = await makeApp().request(
+      `/admin/on-call-schedules/${mockScheduleRow.id}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label: "Renamed" }),
+      },
+    );
+    expect(res.status).toBe(200);
+    expect(mockResolveTenantMembers).not.toHaveBeenCalled();
+  });
+
+  it("refuses a person without an on-call role (platform admin or no role), naming each field", async () => {
+    orgRoles = new Map([
+      ["u-bbb", ["admin"]],
+      ["u-platform", ["platform_admin"]],
+    ]);
+    const res = await makeApp().request("/admin/on-call-schedules", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...validCreateBody,
+        backupUserId: "u-platform",
+        escalationManagerUserId: "u-norole",
+      }),
+    });
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.fields).toEqual([
+      { field: "backupUserId", message: expect.stringMatching(/on-call role/) },
+      {
+        field: "escalationManagerUserId",
+        message: expect.stringMatching(/on-call role/),
+      },
+    ]);
+    expect(mockResolveTenantMembers).not.toHaveBeenCalled();
+    expect(callOrder).not.toContain("withTenantContext");
+  });
+
+  it("refuses a signed-in person whose role isn't an on-call role (direct API call)", async () => {
+    // u-bbb is in tenant_users (the mocked lookup) but now holds no on-call role.
+    orgRoles = new Map([["u-bbb", ["platform_admin"]]]);
+    const res = await makeApp().request(
+      `/admin/on-call-schedules/${mockScheduleRow.id}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ primaryUserId: "u-bbb" }),
+      },
+    );
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.fields).toEqual([
+      expect.objectContaining({ field: "primaryUserId" }),
+    ]);
+  });
+
+  it("answers 503 when Zitadel can't be asked, without recording or writing", async () => {
+    rolesLookupFails = true;
+    const res = await makeApp().request("/admin/on-call-schedules", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(validCreateBody),
+    });
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toBe("SERVICE_UNAVAILABLE");
+    expect(mockResolveTenantMembers).not.toHaveBeenCalled();
+    expect(callOrder).not.toContain("withTenantContext");
+  });
+
+  it("still rejects a person who isn't in the org (422)", async () => {
+    const res = await makeApp().request("/admin/on-call-schedules", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...validCreateBody, primaryUserId: "u-outsider" }),
+    });
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.fields).toEqual([
+      expect.objectContaining({ field: "primaryUserId" }),
+    ]);
+  });
 });
 
 describe("GET /admin/on-call-schedules — role enforcement", () => {
@@ -295,103 +415,6 @@ describe("POST /admin/on-call-schedules", () => {
       body: JSON.stringify(validCreateBody),
     });
     expect(res.status).toBe(403);
-  });
-
-  // The bug this covers: GET /admin/members lists agent/admin users straight
-  // from the live Zitadel org, so a user who's never logged into OpenWind
-  // (and so has no tenant_users row) is still selectable in the roster
-  // picker. Before this fix, submitting that id 422'd here even though it
-  // was a valid pick.
-  it("accepts a primaryUserId that exists in the Zitadel org with an allowed role but has no tenant_users row yet", async () => {
-    mockOrgUsers.push({
-      userId: "u-new-agent",
-      email: "new-agent@example.com",
-      displayName: "New Agent",
-    });
-    mockRolesByUserId.set("u-new-agent", ["agent"]);
-
-    const res = await makeApp().request("/admin/on-call-schedules", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...validCreateBody,
-        primaryUserId: "u-new-agent",
-      }),
-    });
-    expect(res.status).toBe(201);
-    // Self-syncs a tenant_users row so the next lookup/display-name
-    // resolution doesn't need to re-hit Zitadel.
-    expect(mockUpserts).toEqual([
-      {
-        tenantId: "t-aaa",
-        userId: "u-new-agent",
-        email: "new-agent@example.com",
-        displayName: "New Agent",
-      },
-    ]);
-  });
-
-  // 2026-09-25: ONCALL_ASSIGNABLE_ROLES was widened to match members.ts'
-  // picker (agent/admin/user -- see both files' header comments), so a
-  // "user"-role org member is now a valid pick, same as members.ts's own
-  // "u-staff-user-role" test case.
-  it('accepts a primaryUserId that exists in the Zitadel org holding only the "user" role', async () => {
-    mockOrgUsers.push({
-      userId: "u-staff-user-role",
-      email: "staff@example.com",
-      displayName: "Staff Member",
-    });
-    mockRolesByUserId.set("u-staff-user-role", ["user"]);
-
-    const res = await makeApp().request("/admin/on-call-schedules", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...validCreateBody,
-        primaryUserId: "u-staff-user-role",
-      }),
-    });
-    expect(res.status).toBe(201);
-  });
-
-  it("rejects a primaryUserId that exists in the Zitadel org but holds no role at all", async () => {
-    mockOrgUsers.push({
-      userId: "u-norole",
-      email: "norole@example.com",
-      displayName: "No Role",
-    });
-
-    const res = await makeApp().request("/admin/on-call-schedules", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...validCreateBody, primaryUserId: "u-norole" }),
-    });
-    expect(res.status).toBe(422);
-    const json = await res.json();
-    expect(json.fields).toEqual([
-      {
-        field: "primaryUserId",
-        message: "Referenced resource does not exist or is not accessible",
-      },
-    ]);
-    expect(mockUpserts).toEqual([]);
-  });
-
-  it("rejects a primaryUserId that doesn't exist in tenant_users or the Zitadel org", async () => {
-    const res = await makeApp().request("/admin/on-call-schedules", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...validCreateBody, primaryUserId: "u-ghost" }),
-    });
-    expect(res.status).toBe(422);
-    const json = await res.json();
-    expect(json.fields).toEqual([
-      {
-        field: "primaryUserId",
-        message: "Referenced resource does not exist or is not accessible",
-      },
-    ]);
-    expect(mockUpserts).toEqual([]);
   });
 });
 

@@ -175,7 +175,7 @@ export async function executeDispatchSeverityNotificationAction(
     config.instanceId ?? ("instanceId" in event ? event.instanceId : undefined);
   if (!instanceId) return;
 
-  let severity: string | undefined;
+  let changedSeverity: string | undefined;
 
   if (event.eventType === "entity.updated") {
     // event.changed is optional (PR #597 review, B1) -- a pre-existing
@@ -190,16 +190,12 @@ export async function executeDispatchSeverityNotificationAction(
     ) {
       return; // severity didn't change in this event
     }
-    severity = severityChange.new;
+    changedSeverity = severityChange.new;
   } else if (event.eventType !== "entity.created") {
     return;
   }
-  // entity.created: severity is resolved below from the persisted column,
-  // not event.fields -- severity is a dedicated entity_instances column /
-  // createEntity top-level param (packages/entity-engine/src/engine.ts),
-  // never part of the fields JSONB payload the create event carries, for
-  // any creation path (manual or scheduled). Checking event.fields["severity"]
-  // here always missed it.
+  // entity.created: severity is its own entity_instances column, never in the
+  // event's `fields`, so it is read from the stored row below.
 
   const [instance] = await db
     .select({
@@ -219,10 +215,8 @@ export async function executeDispatchSeverityNotificationAction(
     .limit(1);
   if (!instance) return;
 
-  if (event.eventType === "entity.created") {
-    if (!instance.severity) return;
-    severity = instance.severity;
-  }
+  const severity =
+    event.eventType === "entity.created" ? instance.severity : changedSeverity;
   if (!severity) return;
 
   const fields = instance.fields as Record<string, unknown>;

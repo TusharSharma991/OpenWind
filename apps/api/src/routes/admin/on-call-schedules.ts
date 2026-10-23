@@ -13,29 +13,20 @@
  * R6's "referenced_user_deleted" distinction is approximated as "no
  * tenant_users row found", not a true deactivation flag).
  *
- * tenant_users only gets a row for a user once they've actually logged into
- * OpenWind (packages/auth/src/middleware.ts upserts it from the JWT on every
- * request). GET /admin/members -- the picker this route's writes are
- * validated against -- sources from the live Zitadel org instead (same data
- * GET /users uses), so it can legitimately list an agent/admin who's never
- * logged in here. Without a fallback, that user is selectable but every
- * write referencing them 422s. validateScheduleRefs below falls back to the
- * same live Zitadel org+role check the picker uses, and upserts a
- * tenant_users row on a match so later lookups don't need to re-hit
- * Zitadel.
+ * Before each write opens its transaction, checkPickedPeople confirms every
+ * picked person holds an on-call role in the live Zitadel org (the same roles
+ * GET /admin/members lists) and records any of them who hasn't signed in yet,
+ * since tenant_users only fills on first sign-in. Anyone else gets a 422; a
+ * failed Zitadel lookup a 503.
  */
 
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { zValidator } from "../../lib/validator.js";
 import { z } from "zod";
 import { and, eq, gt, or, inArray, isNull, lte, gte, asc } from "drizzle-orm";
 import type { AuthContext } from "@platform/auth";
-import {
-  requireAuth,
-  requireRole,
-  listOrgUsers,
-  listUserRolesByUserId,
-} from "@platform/auth";
+import { requireAuth, requireRole } from "@platform/auth";
 import {
   db,
   withTenantContext,
@@ -53,6 +44,9 @@ import {
 } from "@platform/teams";
 import { writeAuditEntry } from "@platform/audit";
 import { logger } from "@platform/logger";
+import { resolveTenantMembers } from "../../lib/ensure-user-refs.js";
+import { listUserRolesByUserId } from "../../lib/zitadel-management.js";
+import { ONCALL_ROLES } from "../../lib/oncall-roles.js";
 
 type Vars = { Variables: { auth: AuthContext } };
 
@@ -111,26 +105,97 @@ function isExclusionViolation(err: unknown): boolean {
   );
 }
 
+const NOT_ONCALL_MESSAGE =
+  "This person doesn't hold an on-call role (admin, agent or user)";
+
+type PeopleCheck =
+  | { status: "unavailable" }
+  | { status: "checked"; errors: { field: string; message: string }[] };
+
+// Every picked person must hold an on-call role, whether or not they have
+// signed in (spec R13a), and a picked person who hasn't signed in yet is
+// recorded. Runs with no transaction open, so the Zitadel lookups never hold
+// a database connection (#952). Without an org there is nobody to confirm,
+// so every pick is refused.
+async function checkPickedPeople(
+  auth: AuthContext,
+  input: {
+    primaryUserId?: string | undefined;
+    backupUserId?: string | undefined;
+    escalationManagerUserId?: string | undefined;
+  },
+): Promise<PeopleCheck> {
+  const picks = (
+    [
+      ["primaryUserId", input.primaryUserId],
+      ["backupUserId", input.backupUserId],
+      ["escalationManagerUserId", input.escalationManagerUserId],
+    ] as const
+  ).filter((p): p is readonly [(typeof p)[0], string] => !!p[1]);
+  if (picks.length === 0) return { status: "checked", errors: [] };
+
+  let rolesByUserId = new Map<string, string[]>();
+  if (auth.orgId) {
+    try {
+      rolesByUserId = await listUserRolesByUserId(auth.orgId);
+    } catch (err: unknown) {
+      logger.warn(
+        { err, tenantId: auth.tenantId, orgId: auth.orgId },
+        "on-call schedule: zitadel role lookup failed; refusing the write",
+      );
+      return { status: "unavailable" };
+    }
+  }
+  const isOnCall = (id: string): boolean =>
+    (rolesByUserId.get(id) ?? []).some((r) => ONCALL_ROLES.includes(r));
+
+  const errors = picks
+    .filter(([, id]) => !isOnCall(id))
+    .map(([field]) => ({ field, message: NOT_ONCALL_MESSAGE }));
+  if (errors.length > 0) return { status: "checked", errors };
+
+  await resolveTenantMembers(
+    auth.tenantId,
+    picks.map(([, id]) => id),
+    auth.orgId,
+  );
+  return { status: "checked", errors: [] };
+}
+
+function peopleCheckResponse(
+  c: Context<Vars>,
+  check: PeopleCheck,
+): Response | null {
+  if (check.status === "unavailable") {
+    return c.json(
+      {
+        error: "SERVICE_UNAVAILABLE",
+        message: "Couldn't check people's roles just now. Try again shortly.",
+      },
+      503,
+    );
+  }
+  if (check.errors.length > 0) {
+    return c.json(
+      {
+        error: "VALIDATION_ERROR",
+        message: "Validation failed",
+        fields: check.errors,
+      },
+      422,
+    );
+  }
+  return null;
+}
+
 // Runs under the caller's withTenantContext tx (not the raw db client) so
 // these lookups are defended by RLS as a second layer, not just the
 // explicit tenantId filters already applied (PR #583-series review: an
 // app-layer-only check with no RLS backstop is one accidental edit away
 // from a cross-tenant leak).
-// Must match GET /admin/members' role filter (apps/api/src/routes/admin/
-// members.ts) -- that route is this one's picker, so a role accepted there
-// has to be accepted here too, or a pickable user 422s on save (as
-// happened when members.ts was broadened to include "user" without this
-// list being updated to match). See members.ts's header comment for why
-// "user" is included here despite normally being the customer role.
-const ONCALL_ASSIGNABLE_ROLES = ["agent", "admin", "user"];
-
-const INVALID_REFERENCE_MESSAGE =
-  "Referenced resource does not exist or is not accessible";
-
 async function validateScheduleRefs(
   tx: DbOrTx,
   tenantId: string,
-  orgId: string | undefined,
   input: {
     teamId?: string | undefined;
     primaryUserId?: string | undefined;
@@ -185,54 +250,13 @@ async function validateScheduleRefs(
       undefined, // tenant_users has no soft-delete column
       tenantId,
     );
-    const refIds = [...new Set(userRefs.map((r) => r.refId))];
-    const validIds = await userLookup(refIds);
-    const missingIds = refIds.filter((id) => !validIds.has(id));
-
-    if (missingIds.length > 0 && orgId) {
-      const [orgUsers, rolesByUserId] = await Promise.all([
-        listOrgUsers(orgId),
-        listUserRolesByUserId(orgId),
-      ]);
-      const orgUsersById = new Map(orgUsers.map((u) => [u.userId, u]));
-
-      for (const id of missingIds) {
-        const orgUser = orgUsersById.get(id);
-        const roles = rolesByUserId.get(id) ?? [];
-        if (
-          !orgUser ||
-          !roles.some((r) => ONCALL_ASSIGNABLE_ROLES.includes(r))
-        ) {
-          continue;
-        }
-        validIds.add(id);
-        // Same self-sync upsert packages/auth/src/middleware.ts does on
-        // login, so a user we've just confirmed exists in the org doesn't
-        // require re-hitting Zitadel on the next validation or display-name
-        // lookup (at most 3 rows per request -- not worth batching).
-        await tx
-          .insert(tenantUsers)
-          .values({
-            tenantId,
-            userId: id,
-            email: orgUser.email || null,
-            displayName: orgUser.displayName || null,
-          })
-          .onConflictDoUpdate({
-            target: [tenantUsers.tenantId, tenantUsers.userId],
-            set: {
-              email: orgUser.email || null,
-              displayName: orgUser.displayName || null,
-            },
-          });
-      }
-    }
-
-    for (const { fieldName, refId } of userRefs) {
-      if (!validIds.has(refId)) {
-        errors.push({ field: fieldName, message: INVALID_REFERENCE_MESSAGE });
-      }
-    }
+    const userErrors = await validateCrossTenantRefs(userRefs, userLookup);
+    errors.push(
+      ...userErrors.map((e: FieldError) => ({
+        field: e.field,
+        message: e.message,
+      })),
+    );
   }
 
   return errors;
@@ -479,13 +503,13 @@ router.post(
     const input = c.req.valid("json");
 
     try {
+      const refused = peopleCheckResponse(
+        c,
+        await checkPickedPeople(auth, input),
+      );
+      if (refused) return refused;
       const result = await withTenantContext(auth.tenantId, async (tx) => {
-        const refErrors = await validateScheduleRefs(
-          tx,
-          auth.tenantId,
-          auth.orgId,
-          input,
-        );
+        const refErrors = await validateScheduleRefs(tx, auth.tenantId, input);
         if (refErrors.length > 0) {
           return { status: "invalid" as const, refErrors };
         }
@@ -573,13 +597,13 @@ router.patch(
     const input = c.req.valid("json");
 
     try {
+      const refused = peopleCheckResponse(
+        c,
+        await checkPickedPeople(auth, input),
+      );
+      if (refused) return refused;
       const result = await withTenantContext(auth.tenantId, async (tx) => {
-        const refErrors = await validateScheduleRefs(
-          tx,
-          auth.tenantId,
-          auth.orgId,
-          input,
-        );
+        const refErrors = await validateScheduleRefs(tx, auth.tenantId, input);
         if (refErrors.length > 0) {
           return { status: "invalid" as const, refErrors };
         }

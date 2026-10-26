@@ -1,14 +1,14 @@
 # 2026-10-20 — Mandatory ticket fields PR 2.5: backfill, then enforce by default
 
 **Session type:** feature (docs/specs/mandatory-ticket-fields.md R9, T10)
-**Branch:** `feat/mandatory-fields-enforce` (local, on PR 2.4; rebased on `main` in order after 2.3 and 2.4)
+**Branch:** `feat/mandatory-fields-enforce` (off `main` after #1059 merged on 2026-10-21)
 
 - **Backfill migration.** Fills the four values on every workflow record that lacks them
   (workflow_id set, or its type has an active workflow): title "Untitled ticket #<id prefix>",
   due date created_at + 7 days, remark "Backfilled: no remark was recorded when this ticket was
   created.", severity medium. Never overwrites a value, leaves updated_at and non-workflow
   records alone, and re-running it changes nothing. The header carries the zero-missing check.
-  Numbered 0152 on this local stack; it takes the next free number when it lands.
+  Lands as migration 0154, after #1032's 0153.
 - **Dry run.** Run inside a rolled-back transaction on the local test database: it filled 3,686
   leftover records and the check query then returned 0.
 - **Enforce.** `MANDATORY_FIELDS_MODE` defaults to "enforce" (env schema, `.env.example`);

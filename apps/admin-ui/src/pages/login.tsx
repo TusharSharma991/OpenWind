@@ -3,6 +3,8 @@ import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { userManager } from "../authProvider.js";
 import { contactUsHref } from "./login-contact.js";
+import { HeaderBrand } from "../components/header-brand.js";
+import { useLoginOrgBranding } from "../hooks/use-login-org-branding.js";
 
 // Hosted ticket-create handoff (docs/specs/hosted-ticket-create-handoff.md).
 // A 3rd party opens this route with these params instead of the bare
@@ -106,6 +108,8 @@ function MoonIcon(): React.ReactElement {
 export function Login(): React.ReactElement {
   const { t } = useTranslation();
   const [searchParams] = useSearchParams();
+  // A sandbox's own login link carries its slug (R13); plain /login has none and stays generic.
+  const orgBranding = useLoginOrgBranding(searchParams.get("org"));
   const [loading, setLoading] = React.useState(false);
   // Shown when the redirect to the identity provider fails before leaving
   // the page. A fixed sentence: the underlying error can name hosts or
@@ -197,10 +201,10 @@ export function Login(): React.ReactElement {
 
   return (
     <div className="lp-page lp-page-notebook" data-theme={theme}>
-      {/* Logo, floating top-left -- the same icon and wordmark as the app's navbar. */}
+      {/* Brand, floating top-left -- the app navbar's own brand block: OpenWind, or a sandbox's
+          logo and name when this is that sandbox's login link (R13). */}
       <div className="lp-float-logo">
-        <img src="/favicon.svg" alt="" className="logo-icon" />
-        <span className="logo-text">OpenWind</span>
+        <HeaderBrand branding={orgBranding} />
       </div>
 
       {/* Theme toggle, floating top-right — icon only, no label */}

@@ -268,3 +268,146 @@ describe("Login", () => {
     expect(userManager.removeUser).toHaveBeenCalled();
   });
 });
+
+// docs/specs/multi-org-sandbox.md R13 -- a sandbox's own login link shows its brand; every other
+// way of reaching the page is the generic OpenWind login.
+describe("Login brand for a sandbox login link", () => {
+  const mockFetch = vi.fn();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFetch.mockReset();
+    vi.stubGlobal("fetch", mockFetch);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  function ok(data: unknown): Response {
+    return new Response(JSON.stringify({ data }), { status: 200 });
+  }
+
+  function brand(container: HTMLElement): Element | null {
+    return container.querySelector(".lp-float-logo");
+  }
+
+  it("shows the sandbox's logo and name instead of the OpenWind brand", async () => {
+    mockFetch.mockResolvedValue(
+      ok({ name: "Acme Demo", logo: "data:image/png;base64,AAAA" }),
+    );
+
+    const { container } = renderAt("/login?org=acme-demo-4821");
+
+    await waitFor(() =>
+      expect(brand(container)?.textContent).toContain("Acme Demo"),
+    );
+    expect(brand(container)?.textContent).not.toContain("OpenWind");
+    expect(
+      brand(container)?.querySelector('img[src="data:image/png;base64,AAAA"]'),
+    ).not.toBeNull();
+    expect(
+      brand(container)?.querySelector('img[src="/favicon.svg"]'),
+    ).toBeNull();
+  });
+
+  it("shows the initials tile and name when the sandbox has no logo", async () => {
+    mockFetch.mockResolvedValue(ok({ name: "Acme Demo", logo: null }));
+
+    const { container } = renderAt("/login?org=acme-demo-4821");
+
+    await waitFor(() =>
+      expect(brand(container)?.textContent).toContain("Acme Demo"),
+    );
+    expect(brand(container)?.textContent).toContain("AD");
+    expect(brand(container)?.querySelector("img")).toBeNull();
+  });
+
+  it("leaves the rest of the page, and signing in, exactly as before", async () => {
+    mockFetch.mockResolvedValue(ok({ name: "Acme Demo", logo: null }));
+
+    renderAt("/login?org=acme-demo-4821");
+    await waitFor(() => expect(mockFetch).toHaveBeenCalled());
+
+    expect(screen.getByRole("heading", { name: "Welcome back" })).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Login" }));
+    await waitFor(() =>
+      expect(userManager.signinRedirect).toHaveBeenCalledWith({
+        prompt: "login",
+      }),
+    );
+  });
+
+  it("does not wait for the lookup before signing in", () => {
+    mockFetch.mockReturnValue(new Promise(() => undefined));
+
+    renderAt("/login?org=acme-demo-4821");
+
+    expect(
+      screen.getByRole("button", { name: "Login" }).hasAttribute("disabled"),
+    ).toBe(false);
+  });
+
+  it("holds the brand's space invisibly while the lookup runs, never flashing OpenWind", () => {
+    mockFetch.mockReturnValue(new Promise(() => undefined));
+
+    const { container } = renderAt("/login?org=acme-demo-4821");
+
+    const text = brand(container)?.querySelector(".logo-text") as HTMLElement;
+    expect(text.style.visibility).toBe("hidden");
+  });
+
+  it("makes no lookup at all, and shows OpenWind at once, on plain /login", () => {
+    const { container } = renderAt("/login");
+
+    expect(mockFetch).not.toHaveBeenCalled();
+    const text = brand(container)?.querySelector(".logo-text") as HTMLElement;
+    expect(text.textContent).toBe("OpenWind");
+    expect(text.style.visibility).toBe("");
+  });
+
+  it("ignores an org value that is not a slug, with no lookup", () => {
+    const { container } = renderAt("/login?org=%3Cscript%3E");
+
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(brand(container)?.textContent).toBe("OpenWind");
+  });
+
+  it.each([
+    ["an unknown slug (404)", () => new Response("{}", { status: 404 })],
+    ["a rate limit (429)", () => new Response("{}", { status: 429 })],
+    [
+      "a network failure",
+      () => Promise.reject(new TypeError("Failed to fetch")),
+    ],
+  ])(
+    "falls back to the generic OpenWind login for %s",
+    async (_label, answer) => {
+      mockFetch.mockImplementation(() => Promise.resolve(answer()));
+
+      const { container } = renderAt("/login?org=acme-demo-4821");
+
+      await waitFor(() => {
+        const text = brand(container)?.querySelector(
+          ".logo-text",
+        ) as HTMLElement;
+        expect(text.style.visibility).toBe("");
+      });
+      expect(brand(container)?.textContent).toBe("OpenWind");
+      expect(screen.getByRole("button", { name: "Login" })).toBeDefined();
+    },
+  );
+
+  it("carries the org value into the lookup only, never into the sign-in redirect", async () => {
+    mockFetch.mockResolvedValue(ok({ name: "Acme Demo", logo: null }));
+
+    renderAt("/login?org=acme-demo-4821");
+    fireEvent.click(screen.getByRole("button", { name: "Login" }));
+
+    await waitFor(() => expect(userManager.signinRedirect).toHaveBeenCalled());
+    expect(userManager.signinRedirect).toHaveBeenCalledWith({
+      prompt: "login",
+    });
+  });
+});

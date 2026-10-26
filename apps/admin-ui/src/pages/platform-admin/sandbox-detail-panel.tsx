@@ -1,6 +1,7 @@
 import React from "react";
 import { IconButton } from "@platform/ui";
 import { SandboxRowActions } from "./sandbox-row-actions.js";
+import { loginLink } from "./login-link.js";
 import { ActivityTimeline } from "./activity-timeline.js";
 import {
   TRIAL_BADGE,
@@ -68,6 +69,8 @@ export function SandboxDetailPanel({
               tenantId={sandbox.id}
               tenantName={sandbox.name}
               trialEndsAt={sandbox.trialEndsAt}
+              logo={sandbox.logo}
+              slug={sandbox.slug}
               onDone={onActionDone}
             />
             <IconButton aria-label="Close details" onClick={onClose}>
@@ -80,6 +83,10 @@ export function SandboxDetailPanel({
           <dt>Tenant ID</dt>
           <dd className="pa-id" style={{ fontSize: 13 }}>
             {sandbox.id}
+          </dd>
+          <dt>Login link</dt>
+          <dd style={{ fontSize: 13, wordBreak: "break-all" }}>
+            <code style={{ userSelect: "all" }}>{loginLink(sandbox.slug)}</code>
           </dd>
           <dt>Created</dt>
           <dd>

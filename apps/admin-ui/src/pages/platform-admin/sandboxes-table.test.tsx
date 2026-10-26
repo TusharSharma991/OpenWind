@@ -19,6 +19,8 @@ const SANDBOXES: SandboxView[] = [
     createdAt: "2026-10-10T00:00:00Z",
     trialStatus: "active",
     trialEndsAt: new Date(Date.now() + 5 * DAY + 3_600_000).toISOString(),
+    logo: null,
+    slug: "acme-demo-4821",
   },
   {
     id: "bbbbbbbb-0000-4000-b000-000000000002",
@@ -27,6 +29,8 @@ const SANDBOXES: SandboxView[] = [
     createdAt: "2026-01-01T00:00:00Z",
     trialStatus: "none",
     trialEndsAt: null,
+    logo: null,
+    slug: "acme-demo-4821",
   },
   {
     id: "cccccccc-0000-4000-c000-000000000003",
@@ -35,6 +39,8 @@ const SANDBOXES: SandboxView[] = [
     createdAt: "2026-09-01T00:00:00Z",
     trialStatus: "expired",
     trialEndsAt: new Date(Date.now() - 2 * DAY - 3_600_000).toISOString(),
+    logo: null,
+    slug: "acme-demo-4821",
   },
 ];
 

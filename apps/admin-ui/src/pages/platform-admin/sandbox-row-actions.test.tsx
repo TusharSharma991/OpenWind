@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import {
   render,
   screen,
@@ -42,6 +42,25 @@ vi.mock("./extend-trial-dialog.js", () => ({
   ),
 }));
 
+// Shallow-mocked: edit-branding-dialog.test.tsx covers the dialog itself.
+vi.mock("./edit-branding-dialog.js", () => ({
+  EditBrandingDialog: (props: {
+    onSaved: () => void;
+    onClose: () => void;
+    logo: string | null;
+  }) => (
+    <div>
+      Branding dialog ({props.logo ?? "no logo"})
+      <button type="button" onClick={props.onSaved}>
+        Save branding
+      </button>
+      <button type="button" onClick={props.onClose}>
+        Close branding
+      </button>
+    </div>
+  ),
+}));
+
 // Shallow-mocked: step-up-mfa-dialog.test.tsx covers the dialog itself.
 vi.mock("./step-up-mfa-dialog.js", () => ({
   StepUpMfaDialog: (props: {
@@ -70,6 +89,8 @@ function renderComponent(onDone: () => void = vi.fn()): () => void {
       tenantId={TENANT_ID}
       tenantName="Acme Sandbox"
       trialEndsAt="2026-12-01T00:00:00.000Z"
+      logo={null}
+      slug="acme-sandbox-1234"
       onDone={onDone}
     />,
   );
@@ -77,7 +98,14 @@ function renderComponent(onDone: () => void = vi.fn()): () => void {
 }
 
 function choose(
-  item: "Reset" | "Delete" | "Extend trial" | "End trial" | "Seed org chart",
+  item:
+    | "Reset"
+    | "Delete"
+    | "Extend trial"
+    | "End trial"
+    | "Seed org chart"
+    | "Edit branding"
+    | "Copy login link",
 ): void {
   fireEvent.click(screen.getByLabelText("Actions for Acme Sandbox"));
   fireEvent.click(screen.getByRole("menuitem", { name: item }));
@@ -291,7 +319,15 @@ describe("SandboxRowActions", () => {
     expect(screen.queryByRole("menu")).toBeNull();
     fireEvent.click(screen.getByLabelText("Actions for Acme Sandbox"));
     expect(screen.getAllByRole("menuitem").map((el) => el.textContent)).toEqual(
-      ["Reset", "Seed org chart", "Extend trial", "End trial", "Delete"],
+      [
+        "Reset",
+        "Seed org chart",
+        "Extend trial",
+        "Edit branding",
+        "Copy login link",
+        "End trial",
+        "Delete",
+      ],
     );
   });
 
@@ -302,6 +338,8 @@ describe("SandboxRowActions", () => {
           tenantId={TENANT_ID}
           tenantName="Acme Sandbox"
           trialEndsAt={null}
+          logo={null}
+          slug="acme-sandbox-1234"
           onDone={vi.fn()}
         />
       </div>,
@@ -373,12 +411,21 @@ describe("SandboxRowActions", () => {
         tenantId={TENANT_ID}
         tenantName="Acme Sandbox"
         trialEndsAt="2026-01-01T00:00:00.000Z"
+        logo={null}
+        slug="acme-sandbox-1234"
         onDone={vi.fn()}
       />,
     );
     fireEvent.click(screen.getByLabelText("Actions for Acme Sandbox"));
     expect(screen.getAllByRole("menuitem").map((el) => el.textContent)).toEqual(
-      ["Reset", "Seed org chart", "Extend trial", "Delete"],
+      [
+        "Reset",
+        "Seed org chart",
+        "Extend trial",
+        "Edit branding",
+        "Copy login link",
+        "Delete",
+      ],
     );
   });
 
@@ -389,12 +436,21 @@ describe("SandboxRowActions", () => {
         tenantId={TENANT_ID}
         tenantName="Acme Sandbox"
         trialEndsAt={null}
+        logo={null}
+        slug="acme-sandbox-1234"
         onDone={vi.fn()}
       />,
     );
     fireEvent.click(screen.getByLabelText("Actions for Acme Sandbox"));
     expect(screen.getAllByRole("menuitem").map((el) => el.textContent)).toEqual(
-      ["Reset", "Seed org chart", "Extend trial", "Delete"],
+      [
+        "Reset",
+        "Seed org chart",
+        "Extend trial",
+        "Edit branding",
+        "Copy login link",
+        "Delete",
+      ],
     );
   });
 
@@ -407,6 +463,79 @@ describe("SandboxRowActions", () => {
     fireEvent.click(screen.getByText("Save trial"));
     expect(onDone).toHaveBeenCalledTimes(1);
     expect(screen.queryByText(/Trial dialog/)).toBeNull();
+  });
+
+  describe("Copy login link (R13)", () => {
+    const writeText = vi.fn();
+
+    beforeEach(() => {
+      writeText.mockReset().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText },
+        configurable: true,
+        writable: true,
+      });
+    });
+
+    it("copies the sandbox's /login?org=<slug> link and closes the menu", async () => {
+      renderComponent();
+      choose("Copy login link");
+
+      await waitFor(() =>
+        expect(writeText).toHaveBeenCalledWith(
+          `${window.location.origin}/login?org=acme-sandbox-1234`,
+        ),
+      );
+      expect(screen.queryByRole("menu")).toBeNull();
+    });
+
+    it("confirms the copy on the button and to assistive technology", async () => {
+      renderComponent();
+      choose("Copy login link");
+
+      await waitFor(() =>
+        expect(screen.getByRole("status").textContent).toBe(
+          "Login link copied",
+        ),
+      );
+      expect(
+        screen.getByLabelText("Actions for Acme Sandbox").textContent,
+      ).toBe("✓");
+    });
+
+    it("says so, and does not claim success, when the clipboard is refused", async () => {
+      writeText.mockRejectedValueOnce(new Error("denied"));
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => undefined);
+      renderComponent();
+      choose("Copy login link");
+
+      await waitFor(() =>
+        expect(mockShowAlert).toHaveBeenCalledWith(
+          "Could not copy the login link",
+        ),
+      );
+      expect(screen.getByRole("status").textContent).toBe("");
+      consoleError.mockRestore();
+    });
+  });
+
+  it("opens the branding dialog with the current logo and calls onDone after saving", () => {
+    const onDone = renderComponent();
+    choose("Edit branding");
+    expect(screen.getByText("Branding dialog (no logo)")).toBeTruthy();
+    fireEvent.click(screen.getByText("Save branding"));
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/Branding dialog/)).toBeNull();
+  });
+
+  it("closes the branding dialog without calling onDone when it is dismissed", () => {
+    const onDone = renderComponent();
+    choose("Edit branding");
+    fireEvent.click(screen.getByText("Close branding"));
+    expect(screen.queryByText(/Branding dialog/)).toBeNull();
+    expect(onDone).not.toHaveBeenCalled();
   });
 
   it("disables the actions menu while a request for this row is in flight", async () => {

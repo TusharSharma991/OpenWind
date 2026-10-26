@@ -5,6 +5,8 @@ import { TOKENS } from "@platform/ui";
 import { userManager } from "../authProvider.js";
 import { initials } from "../lib/format.js";
 import { NotificationBell } from "./notification-bell.js";
+import { HeaderBrand } from "./header-brand.js";
+import { useOrgBranding } from "../hooks/use-org-branding.js";
 
 // ── Admin nav items ──────────────────────────────────────────────────────────
 
@@ -424,6 +426,7 @@ export function Layout({
     email: string;
     avatar?: string;
   }>();
+  const orgBranding = useOrgBranding();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -519,8 +522,7 @@ export function Layout({
           <span />
           <span />
         </button>
-        <img src="/favicon.svg" alt="OpenWind" className="logo-icon" />
-        <div className="logo-text">OpenWind</div>
+        <HeaderBrand branding={orgBranding} />
       </div>
 
       <div

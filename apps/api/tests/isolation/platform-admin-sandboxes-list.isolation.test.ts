@@ -44,7 +44,9 @@ const VIEW_FIELDS = [
   "createdAt",
   "id",
   "isSandbox",
+  "logo",
   "name",
+  "slug",
   "trialEndsAt",
   "trialStatus",
 ];

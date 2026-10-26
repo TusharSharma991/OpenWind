@@ -22,7 +22,7 @@ afterEach(() => {
 });
 
 describe("useLoginOrgBranding", () => {
-  it("is the generic page at once, with no request, when there is no slug", () => {
+  it("is the generic page at once, with no request, when there is no key", () => {
     const { result } = renderHook(() => useLoginOrgBranding(null));
 
     expect(result.current).toEqual({ status: "default" });
@@ -30,14 +30,15 @@ describe("useLoginOrgBranding", () => {
   });
 
   it.each([
-    ["uppercase", "Acme-Demo"],
-    ["an underscore", "acme_demo"],
+    ["uppercase hex", "3F9A1C7E2B4D8A60"],
+    ["one character short", "3f9a1c7e2b4d8a6"],
+    ["one character long", "3f9a1c7e2b4d8a601"],
+    ["a non-hex letter", "3f9a1c7e2b4d8a6g"],
+    ["a readable slug", "acme-demo-4821"],
     ["an empty value", ""],
-    ["a leading dash", "-acme"],
     ["markup", "<script>"],
-    ["more than 80 characters", "a".repeat(81)],
-  ])("never sends %s, and is the generic page", (_label, slug) => {
-    const { result } = renderHook(() => useLoginOrgBranding(slug));
+  ])("never sends %s, and is the generic page", (_label, key) => {
+    const { result } = renderHook(() => useLoginOrgBranding(key));
 
     expect(result.current).toEqual({ status: "default" });
     expect(mockFetch).not.toHaveBeenCalled();
@@ -50,7 +51,9 @@ describe("useLoginOrgBranding", () => {
         resolve = r;
       }),
     );
-    const { result } = renderHook(() => useLoginOrgBranding("acme-demo-4821"));
+    const { result } = renderHook(() =>
+      useLoginOrgBranding("3f9a1c7e2b4d8a60"),
+    );
 
     expect(result.current).toEqual({ status: "loading" });
 
@@ -71,17 +74,17 @@ describe("useLoginOrgBranding", () => {
   it("asks the public endpoint with a plain request, carrying no credentials", async () => {
     mockFetch.mockResolvedValue(okBody({ name: "Acme Demo", logo: null }));
 
-    renderHook(() => useLoginOrgBranding("acme-demo-4821"));
+    renderHook(() => useLoginOrgBranding("3f9a1c7e2b4d8a60"));
 
     await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
     const [url, init] = mockFetch.mock.calls[0] as [string, FetchInit];
-    expect(url).toBe("/api/public/org-branding/acme-demo-4821");
+    expect(url).toBe("/api/public/org-branding/3f9a1c7e2b4d8a60");
     expect(init.headers).toBeUndefined();
     expect(init.credentials).toBeUndefined();
   });
 
   it.each([
-    ["an unknown slug (404)", () => new Response("{}", { status: 404 })],
+    ["an unknown key (404)", () => new Response("{}", { status: 404 })],
     ["a rate limit (429)", () => new Response("{}", { status: 429 })],
     ["a server error (500)", () => new Response("{}", { status: 500 })],
     ["a null answer", () => okBody(null)],
@@ -103,7 +106,9 @@ describe("useLoginOrgBranding", () => {
   ])("is the generic page for %s", async (_label, make) => {
     mockFetch.mockResolvedValue(make());
 
-    const { result } = renderHook(() => useLoginOrgBranding("acme-demo-4821"));
+    const { result } = renderHook(() =>
+      useLoginOrgBranding("3f9a1c7e2b4d8a60"),
+    );
 
     await waitFor(() => expect(result.current).toEqual({ status: "default" }));
   });
@@ -111,7 +116,9 @@ describe("useLoginOrgBranding", () => {
   it("is the generic page when the network fails", async () => {
     mockFetch.mockRejectedValue(new TypeError("Failed to fetch"));
 
-    const { result } = renderHook(() => useLoginOrgBranding("acme-demo-4821"));
+    const { result } = renderHook(() =>
+      useLoginOrgBranding("3f9a1c7e2b4d8a60"),
+    );
 
     await waitFor(() => expect(result.current).toEqual({ status: "default" }));
   });
@@ -126,7 +133,9 @@ describe("useLoginOrgBranding", () => {
           );
         }),
     );
-    const { result } = renderHook(() => useLoginOrgBranding("acme-demo-4821"));
+    const { result } = renderHook(() =>
+      useLoginOrgBranding("3f9a1c7e2b4d8a60"),
+    );
     expect(result.current).toEqual({ status: "loading" });
 
     await act(async () => {
@@ -136,16 +145,16 @@ describe("useLoginOrgBranding", () => {
     expect(result.current).toEqual({ status: "default" });
   });
 
-  it("looks up again when the slug changes, and ignores the earlier answer", async () => {
+  it("looks up again when the key changes, and ignores the earlier answer", async () => {
     mockFetch
       .mockResolvedValueOnce(okBody({ name: "First Org", logo: null }))
       .mockResolvedValueOnce(okBody({ name: "Second Org", logo: null }));
     const { result, rerender } = renderHook(
-      ({ slug }: { slug: string }) => useLoginOrgBranding(slug),
-      { initialProps: { slug: "first-1111" } },
+      ({ key }: { key: string }) => useLoginOrgBranding(key),
+      { initialProps: { key: "3f9a1c7e2b4d8a60" } },
     );
 
-    rerender({ slug: "second-2222" });
+    rerender({ key: "0011223344556677" });
 
     await waitFor(() =>
       expect(result.current).toEqual({
@@ -163,7 +172,9 @@ describe("useLoginOrgBranding", () => {
       signal = init.signal ?? undefined;
       return new Promise(() => undefined);
     });
-    const { unmount } = renderHook(() => useLoginOrgBranding("acme-demo-4821"));
+    const { unmount } = renderHook(() =>
+      useLoginOrgBranding("3f9a1c7e2b4d8a60"),
+    );
     await waitFor(() => expect(signal).toBeDefined());
 
     unmount();

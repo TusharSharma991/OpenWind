@@ -17,8 +17,8 @@ interface ProvisioningProgress {
 
 interface SandboxHandover {
   tenantId: string;
-  /** The sandbox's slug, for its login link (R13); null if it could not be read back. */
-  slug?: string | null;
+  /** The sandbox's login key, for its login link (R13); null if it could not be read back. */
+  loginKey?: string | null;
   seededAccounts: {
     username: string;
     email: string;
@@ -122,7 +122,7 @@ export function CreateSandboxModal({
     resetForm();
   }
 
-  const link = handover?.slug ? loginLink(handover.slug) : null;
+  const link = handover?.loginKey ? loginLink(handover.loginKey) : null;
 
   async function handleCopyCredentials(): Promise<void> {
     if (!handover) return;

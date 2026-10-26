@@ -47,7 +47,7 @@ const HANDOVER_ACCOUNTS = [
   },
 ];
 
-async function showHandover(slug?: string): Promise<void> {
+async function showHandover(loginKey?: string): Promise<void> {
   mockFetchWithAuth.mockResolvedValueOnce({ data: { jobId: "job-1" } });
   mockFetchWithAuth.mockResolvedValueOnce({
     data: {
@@ -61,7 +61,7 @@ async function showHandover(slug?: string): Promise<void> {
   mockFetchWithAuth.mockResolvedValueOnce({
     data: {
       tenantId: "t1",
-      ...(slug ? { slug } : {}),
+      ...(loginKey ? { loginKey } : {}),
       seededAccounts: HANDOVER_ACCOUNTS,
     },
   });
@@ -232,8 +232,8 @@ describe("CreateSandboxModal", () => {
   });
 
   it("shows the sandbox's login link on the reveal, and puts it in the CSV and clipboard text (R13)", async () => {
-    await showHandover("acme-sandbox-4821");
-    const link = `${window.location.origin}/login?org=acme-sandbox-4821`;
+    await showHandover("3f9a1c7e2b4d8a60");
+    const link = `${window.location.origin}/login?org=3f9a1c7e2b4d8a60`;
 
     expect(screen.getByText(link)).toBeTruthy();
 
@@ -253,7 +253,7 @@ describe("CreateSandboxModal", () => {
     expect(text).toContain(link);
   });
 
-  it("shows no login link when the server could not read the slug back", async () => {
+  it("shows no login link when the server could not read the login key back", async () => {
     await showHandover();
 
     expect(screen.queryByText("Login link")).toBeNull();

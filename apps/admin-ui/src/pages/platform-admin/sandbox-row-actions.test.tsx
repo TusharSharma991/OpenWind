@@ -90,7 +90,7 @@ function renderComponent(onDone: () => void = vi.fn()): () => void {
       tenantName="Acme Sandbox"
       trialEndsAt="2026-12-01T00:00:00.000Z"
       logo={null}
-      slug="acme-sandbox-1234"
+      loginKey="3f9a1c7e2b4d8a60"
       onDone={onDone}
     />,
   );
@@ -319,7 +319,7 @@ describe("SandboxRowActions", () => {
           tenantName="Acme Sandbox"
           trialEndsAt={null}
           logo={null}
-          slug="acme-sandbox-1234"
+          loginKey="3f9a1c7e2b4d8a60"
           onDone={vi.fn()}
         />
       </div>,
@@ -392,7 +392,7 @@ describe("SandboxRowActions", () => {
         tenantName="Acme Sandbox"
         trialEndsAt="2026-01-01T00:00:00.000Z"
         logo={null}
-        slug="acme-sandbox-1234"
+        loginKey="3f9a1c7e2b4d8a60"
         onDone={vi.fn()}
       />,
     );
@@ -410,7 +410,7 @@ describe("SandboxRowActions", () => {
         tenantName="Acme Sandbox"
         trialEndsAt={null}
         logo={null}
-        slug="acme-sandbox-1234"
+        loginKey="3f9a1c7e2b4d8a60"
         onDone={vi.fn()}
       />,
     );
@@ -431,6 +431,24 @@ describe("SandboxRowActions", () => {
     expect(screen.queryByText(/Trial dialog/)).toBeNull();
   });
 
+  it("offers no Copy login link for a sandbox that has no login key", () => {
+    render(
+      <SandboxRowActions
+        tenantId={TENANT_ID}
+        tenantName="Acme Sandbox"
+        trialEndsAt={null}
+        logo={null}
+        loginKey={null}
+        onDone={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText("Actions for Acme Sandbox"));
+
+    expect(
+      screen.queryByRole("menuitem", { name: "Copy login link" }),
+    ).toBeNull();
+  });
+
   describe("Copy login link (R13)", () => {
     const writeText = vi.fn();
 
@@ -443,13 +461,13 @@ describe("SandboxRowActions", () => {
       });
     });
 
-    it("copies the sandbox's /login?org=<slug> link and closes the menu", async () => {
+    it("copies the sandbox's /login?org=<login key> link and closes the menu", async () => {
       renderComponent();
       choose("Copy login link");
 
       await waitFor(() =>
         expect(writeText).toHaveBeenCalledWith(
-          `${window.location.origin}/login?org=acme-sandbox-1234`,
+          `${window.location.origin}/login?org=3f9a1c7e2b4d8a60`,
         ),
       );
       expect(screen.queryByRole("menu")).toBeNull();

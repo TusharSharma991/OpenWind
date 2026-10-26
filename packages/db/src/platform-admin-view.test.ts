@@ -19,7 +19,7 @@ describe("toPlatformAdminSandboxView", () => {
     isSandbox: true,
     trialEndsAt: null,
     createdAt: new Date("2026-10-01T00:00:00.000Z"),
-    slug: "acme-demo-4821",
+    loginKey: "3f9a1c7e2b4d8a60",
   };
 
   it("passes the logo through, and null when there is none (R12)", () => {
@@ -28,9 +28,9 @@ describe("toPlatformAdminSandboxView", () => {
     expect(toPlatformAdminSandboxView({ ...base, logo: null }).logo).toBeNull();
   });
 
-  it("passes the slug through for the login link (R13)", () => {
-    expect(toPlatformAdminSandboxView({ ...base, logo: null }).slug).toBe(
-      "acme-demo-4821",
+  it("passes the login key through for the login link (R13)", () => {
+    expect(toPlatformAdminSandboxView({ ...base, logo: null }).loginKey).toBe(
+      "3f9a1c7e2b4d8a60",
     );
   });
 
@@ -41,9 +41,9 @@ describe("toPlatformAdminSandboxView", () => {
       "createdAt",
       "id",
       "isSandbox",
+      "loginKey",
       "logo",
       "name",
-      "slug",
       "trialEndsAt",
       "trialStatus",
     ]);

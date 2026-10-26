@@ -48,3 +48,22 @@ replaying these commits with `git rebase --onto upstream/main <#1077 tip>`.
 Read docs/specs/multi-org-sandbox.md (§R13, Phase 5) and this file. Implement Phase 1 (T33, T34)
 first. Do not start Phase 2 until Phase 1 tests pass. Stop and ask on any decision the spec does not
 cover. Do not push this branch; the PR waits for #1077 to merge. Log failures with `/spec amend §B`.
+
+---
+
+## Revision 2026-10-27 — login key instead of the slug (spec Phase 6, T41–T48)
+
+The readable slug in `/login?org=` is replaced by a random 16-hex login key stored on the tenant
+row (unique, never changed, `NULL` for real tenants). The login card's "OpenWind / Sign in"
+breadcrumb and the browser tab title also show the org's name on a sandbox link.
+
+| task                                                                                  | requirement | status |
+| ------------------------------------------------------------------------------------- | ----------- | ------ |
+| T41: migration `login_key` (unique, CHECK, backfill), grant it, revoke the slug grant | R13, R2     | done   |
+| T42: provisioning worker generates the key at creation                                | R13         | done   |
+| T43: `loginKey` replaces `slug` on the view, selects and handover                     | R13         | done   |
+| T44: `GET /public/org-branding/:key` looks up by key                                  | R13         | done   |
+| T45: platform-admin link, CSV, clipboard and reveal use the key                       | R13         | done   |
+| T46: login page validates the key, brands the breadcrumb and tab title                | R13         | done   |
+| T47: isolation tests for the key                                                      | R13, R2     | done   |
+| T48: `/security-review`, docs                                                         | R13         | done   |

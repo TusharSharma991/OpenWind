@@ -78,14 +78,11 @@ describe("Login", () => {
     expect(link.getAttribute("rel")).toBe("noopener noreferrer");
   });
 
-  it("shows the navbar's logo (icon + wordmark) and no footer", () => {
+  it("shows no brand at the top left (neither OpenWind nor an org) and no footer", () => {
     const { container } = renderAt("/login");
 
-    const logo = container.querySelector(".lp-float-logo");
-    expect(logo?.querySelector("img.logo-icon")?.getAttribute("src")).toBe(
-      "/favicon.svg",
-    );
-    expect(logo?.querySelector(".logo-text")?.textContent).toBe("OpenWind");
+    expect(container.querySelector(".lp-float-logo")).toBeNull();
+    expect(container.querySelector("img.logo-icon")).toBeNull();
     expect(container.querySelector("footer")).toBeNull();
     expect(screen.queryByText(/© 2026/)).toBeNull();
   });
@@ -269,20 +266,24 @@ describe("Login", () => {
   });
 });
 
-// docs/specs/multi-org-sandbox.md R13 -- a sandbox's own login link shows its brand; every other
-// way of reaching the page is the generic OpenWind login.
+// docs/specs/multi-org-sandbox.md R13 -- a sandbox's own login link shows its brand; every other way
+// of reaching the page (plain /login, every miss, a lookup still running) shows no brand at all.
 describe("Login brand for a sandbox login link", () => {
   const mockFetch = vi.fn();
+  const KEY = "3f9a1c7e2b4d8a60";
+  const initialTitle = document.title;
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockFetch.mockReset();
     vi.stubGlobal("fetch", mockFetch);
+    document.title = initialTitle;
   });
 
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    document.title = initialTitle;
   });
 
   function ok(data: unknown): Response {
@@ -293,17 +294,29 @@ describe("Login brand for a sandbox login link", () => {
     return container.querySelector(".lp-float-logo");
   }
 
-  it("shows the sandbox's logo and name instead of the OpenWind brand", async () => {
+  function crumb(container: HTMLElement): string {
+    return container.querySelector(".lp-notebook-crumb")?.textContent ?? "";
+  }
+
+  /** Everything the page draws as a brand: top-left block, breadcrumb, tab title. */
+  function brandAreas(container: HTMLElement): string {
+    return [
+      brand(container)?.textContent ?? "",
+      crumb(container),
+      document.title,
+    ].join(" | ");
+  }
+
+  it("shows the sandbox's logo and name at the top left", async () => {
     mockFetch.mockResolvedValue(
       ok({ name: "Acme Demo", logo: "data:image/png;base64,AAAA" }),
     );
 
-    const { container } = renderAt("/login?org=3f9a1c7e2b4d8a60");
+    const { container } = renderAt(`/login?org=${KEY}`);
 
     await waitFor(() =>
       expect(brand(container)?.textContent).toContain("Acme Demo"),
     );
-    expect(brand(container)?.textContent).not.toContain("OpenWind");
     expect(
       brand(container)?.querySelector('img[src="data:image/png;base64,AAAA"]'),
     ).not.toBeNull();
@@ -315,7 +328,7 @@ describe("Login brand for a sandbox login link", () => {
   it("shows the initials tile and name when the sandbox has no logo", async () => {
     mockFetch.mockResolvedValue(ok({ name: "Acme Demo", logo: null }));
 
-    const { container } = renderAt("/login?org=3f9a1c7e2b4d8a60");
+    const { container } = renderAt(`/login?org=${KEY}`);
 
     await waitFor(() =>
       expect(brand(container)?.textContent).toContain("Acme Demo"),
@@ -324,91 +337,30 @@ describe("Login brand for a sandbox login link", () => {
     expect(brand(container)?.querySelector("img")).toBeNull();
   });
 
-  it("names the sandbox in the card's breadcrumb instead of OpenWind", async () => {
+  it("names the sandbox in the card's breadcrumb", async () => {
     mockFetch.mockResolvedValue(ok({ name: "Acme Demo", logo: null }));
 
-    const { container } = renderAt("/login?org=3f9a1c7e2b4d8a60");
+    const { container } = renderAt(`/login?org=${KEY}`);
 
-    await waitFor(() => {
-      const crumb = container.querySelector(".lp-notebook-crumb");
-      expect(crumb?.textContent).toContain("Acme Demo");
-    });
-    const crumb = container.querySelector(".lp-notebook-crumb");
-    expect(crumb?.textContent).not.toContain("OpenWind");
-    expect(crumb?.textContent).toContain("Sign in");
+    await waitFor(() => expect(crumb(container)).toContain("Acme Demo"));
+    expect(crumb(container)).toBe("Acme Demo/Sign in");
   });
 
-  it("keeps the generic breadcrumb on plain /login", () => {
-    const { container } = renderAt("/login");
-
-    const crumb = container.querySelector(".lp-notebook-crumb");
-    expect(crumb?.textContent).toContain("OpenWind");
-    expect((crumb?.querySelector("span") as HTMLElement).style.visibility).toBe(
-      "",
-    );
-  });
-
-  it("holds the breadcrumb's brand invisibly while the lookup runs", () => {
-    mockFetch.mockReturnValue(new Promise(() => undefined));
-
-    const { container } = renderAt("/login?org=3f9a1c7e2b4d8a60");
-
-    const brandSpan = container.querySelector(
-      ".lp-notebook-crumb span",
-    ) as HTMLElement;
-    expect(brandSpan.style.visibility).toBe("hidden");
-  });
-
-  it("keeps the generic breadcrumb when the lookup misses", async () => {
-    mockFetch.mockResolvedValue(new Response("{}", { status: 404 }));
-
-    const { container } = renderAt("/login?org=3f9a1c7e2b4d8a60");
-
-    await waitFor(() => {
-      const brandSpan = container.querySelector(
-        ".lp-notebook-crumb span",
-      ) as HTMLElement;
-      expect(brandSpan.style.visibility).toBe("");
-    });
-    expect(
-      container.querySelector(".lp-notebook-crumb")?.textContent,
-    ).toContain("OpenWind");
-  });
-
-  it("sets the browser tab title to the sandbox's name, and puts it back on leaving", async () => {
+  it("sets the browser tab title to the sandbox's name, and puts the old one back on leaving", async () => {
     mockFetch.mockResolvedValue(ok({ name: "Acme Demo", logo: null }));
-    const before = document.title;
+    document.title = "before";
 
-    const view = renderAt("/login?org=3f9a1c7e2b4d8a60");
+    const view = renderAt(`/login?org=${KEY}`);
 
     await waitFor(() => expect(document.title).toBe("Acme Demo"));
     view.unmount();
-    expect(document.title).toBe(before);
-  });
-
-  it("leaves the tab title alone on plain /login and on a miss", async () => {
-    const before = document.title;
-    renderAt("/login");
-    expect(document.title).toBe(before);
-    cleanup();
-
-    mockFetch.mockResolvedValue(new Response("{}", { status: 404 }));
-    renderAt("/login?org=3f9a1c7e2b4d8a60");
-    await waitFor(() => expect(mockFetch).toHaveBeenCalled());
-    expect(document.title).toBe(before);
-  });
-
-  it("does not look a readable slug up: only a login key is sent", () => {
-    const { container } = renderAt("/login?org=acme-demo-4821");
-
-    expect(mockFetch).not.toHaveBeenCalled();
-    expect(brand(container)?.textContent).toBe("OpenWind");
+    expect(document.title).toBe("before");
   });
 
   it("leaves the rest of the page, and signing in, exactly as before", async () => {
     mockFetch.mockResolvedValue(ok({ name: "Acme Demo", logo: null }));
 
-    renderAt("/login?org=3f9a1c7e2b4d8a60");
+    renderAt(`/login?org=${KEY}`);
     await waitFor(() => expect(mockFetch).toHaveBeenCalled());
 
     expect(screen.getByRole("heading", { name: "Welcome back" })).toBeDefined();
@@ -423,72 +375,112 @@ describe("Login brand for a sandbox login link", () => {
   it("does not wait for the lookup before signing in", () => {
     mockFetch.mockReturnValue(new Promise(() => undefined));
 
-    renderAt("/login?org=3f9a1c7e2b4d8a60");
+    renderAt(`/login?org=${KEY}`);
 
     expect(
       screen.getByRole("button", { name: "Login" }).hasAttribute("disabled"),
     ).toBe(false);
   });
 
-  it("holds the brand's space invisibly while the lookup runs, never flashing OpenWind", () => {
-    mockFetch.mockReturnValue(new Promise(() => undefined));
-
-    const { container } = renderAt("/login?org=3f9a1c7e2b4d8a60");
-
-    const text = brand(container)?.querySelector(".logo-text") as HTMLElement;
-    expect(text.style.visibility).toBe("hidden");
-  });
-
-  it("makes no lookup at all, and shows OpenWind at once, on plain /login", () => {
-    const { container } = renderAt("/login");
-
-    expect(mockFetch).not.toHaveBeenCalled();
-    const text = brand(container)?.querySelector(".logo-text") as HTMLElement;
-    expect(text.textContent).toBe("OpenWind");
-    expect(text.style.visibility).toBe("");
-  });
-
-  it("ignores an org value that is not a login key, with no lookup", () => {
-    const { container } = renderAt("/login?org=%3Cscript%3E");
-
-    expect(mockFetch).not.toHaveBeenCalled();
-    expect(brand(container)?.textContent).toBe("OpenWind");
-  });
-
-  it.each([
-    ["an unknown key (404)", () => new Response("{}", { status: 404 })],
-    ["a rate limit (429)", () => new Response("{}", { status: 429 })],
-    [
-      "a network failure",
-      () => Promise.reject(new TypeError("Failed to fetch")),
-    ],
-  ])(
-    "falls back to the generic OpenWind login for %s",
-    async (_label, answer) => {
-      mockFetch.mockImplementation(() => Promise.resolve(answer()));
-
-      const { container } = renderAt("/login?org=3f9a1c7e2b4d8a60");
-
-      await waitFor(() => {
-        const text = brand(container)?.querySelector(
-          ".logo-text",
-        ) as HTMLElement;
-        expect(text.style.visibility).toBe("");
-      });
-      expect(brand(container)?.textContent).toBe("OpenWind");
-      expect(screen.getByRole("button", { name: "Login" })).toBeDefined();
-    },
-  );
-
   it("carries the org value into the lookup only, never into the sign-in redirect", async () => {
     mockFetch.mockResolvedValue(ok({ name: "Acme Demo", logo: null }));
 
-    renderAt("/login?org=3f9a1c7e2b4d8a60");
+    renderAt(`/login?org=${KEY}`);
     fireEvent.click(screen.getByRole("button", { name: "Login" }));
 
     await waitFor(() => expect(userManager.signinRedirect).toHaveBeenCalled());
     expect(userManager.signinRedirect).toHaveBeenCalledWith({
       prompt: "login",
+    });
+  });
+
+  describe("with no match, the page carries no brand at all", () => {
+    function expectBlank(container: HTMLElement): void {
+      expect(brand(container)).toBeNull();
+      expect(container.querySelector("img.logo-icon")).toBeNull();
+      expect(crumb(container)).toBe("Sign in");
+      expect(document.title).toBe("Sign in");
+      expect(brandAreas(container)).not.toMatch(/openwind/i);
+    }
+
+    it("on plain /login, with no lookup", () => {
+      const { container } = renderAt("/login");
+
+      expect(mockFetch).not.toHaveBeenCalled();
+      expectBlank(container);
+    });
+
+    it("while the lookup is still running, never flashing a name first", () => {
+      mockFetch.mockReturnValue(new Promise(() => undefined));
+
+      const { container } = renderAt(`/login?org=${KEY}`);
+
+      expectBlank(container);
+    });
+
+    it.each([
+      [
+        "an edited or unknown key (404)",
+        () => Promise.resolve(new Response("{}", { status: 404 })),
+      ],
+      [
+        "a rate limit (429)",
+        () => Promise.resolve(new Response("{}", { status: 429 })),
+      ],
+      [
+        "a server error (500)",
+        () => Promise.resolve(new Response("{}", { status: 500 })),
+      ],
+      [
+        "a network failure",
+        () => Promise.reject(new TypeError("Failed to fetch")),
+      ],
+      [
+        "a malformed answer",
+        () => Promise.resolve(ok({ name: 42, logo: "x" })),
+      ],
+      [
+        "a logo that is not a raster data URL",
+        () =>
+          Promise.resolve(
+            ok({ name: "Acme Demo", logo: "https://evil.example/pixel.png" }),
+          ),
+      ],
+    ])("for %s, once the lookup has finished", async (_label, answer) => {
+      mockFetch.mockImplementation(answer);
+
+      const { container } = renderAt(`/login?org=${KEY}`);
+
+      await waitFor(() => expect(mockFetch).toHaveBeenCalled());
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expectBlank(container);
+      expect(screen.getByRole("button", { name: "Login" })).toBeDefined();
+    });
+
+    it.each([
+      ["a readable slug", "acme-demo-4821"],
+      ["markup", "%3Cscript%3E"],
+      [
+        "a key with one character changed to a non-hex letter",
+        "3f9a1c7e2b4d8a6g",
+      ],
+      ["a key one character short", "3f9a1c7e2b4d8a6"],
+      ["an empty value", ""],
+    ])("for %s, without even asking the server", (_label, value) => {
+      const { container } = renderAt(`/login?org=${value}`);
+
+      expect(mockFetch).not.toHaveBeenCalled();
+      expectBlank(container);
+    });
+
+    it("never shows OpenWind in any brand area, whatever the miss", async () => {
+      mockFetch.mockResolvedValue(new Response("{}", { status: 404 }));
+
+      const { container } = renderAt(`/login?org=${KEY}`);
+
+      await waitFor(() => expect(mockFetch).toHaveBeenCalled());
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(brandAreas(container)).not.toMatch(/openwind/i);
     });
   });
 });

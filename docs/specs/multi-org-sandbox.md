@@ -321,21 +321,21 @@ usable. A broken logo image falls back to the initials tile.
 ✓ Reset (R7) keeps the name and logo; delete (R8) leaves none behind, the purge clears the logo on
 the tombstone row.
 
-R13 **(added 2026-10-26; owner request; keyed on a random login key 2026-10-27)**: A sandbox's own
-login link shows its name and logo on the login page; every other way of reaching the login page
-stays the generic OpenWind login.
+R13 **(added 2026-10-26; owner request; keyed on a random login key 2026-10-27; blank fallback
+2026-10-28)**: A sandbox's own login link shows its name and logo on the login page; every other way
+of reaching the login page shows no brand at all, neither an org nor OpenWind.
 ✓ `/login?org=<key>`, where `<key>` is the sandbox's login key, for an active sandbox shows that
 sandbox's logo (or, with none set, the initials tile of its name) and its name at the top left of the
-login page in place of the OpenWind icon and wordmark, shows its name in the card's "OpenWind / Sign in"
-breadcrumb, and sets the browser tab title to its name. Nothing else on the page changes, and sign-in
-works exactly as before.
-✓ Plain `/login` (no `org`) is the generic page and makes no lookup. The app learns the org after
-sign-in from `GET /me/org` (R12), so no org is remembered across logins.
-✓ Every miss gives the generic page, and the visitor cannot tell the cases apart: a missing, malformed
-or unknown key, a real (non-sandbox) tenant, a suspended or deleted sandbox, a slow or failed lookup,
-and a rate-limited one. While a lookup runs, the brand, the breadcrumb and the tab title hold the
-generic text invisibly or unchanged rather than flashing OpenWind in front of a sandbox visitor, and
-the sign-in button never waits on it.
+login page, shows its name in the card's breadcrumb ("<name> / Sign in"), and sets the browser tab
+title to its name. Nothing else on the page changes, and sign-in works exactly as before.
+✓ Without a valid match the login page carries no brand: no logo or icon and no name at the top left,
+the card's breadcrumb reads just "Sign in", and the browser tab title is "Sign in". That covers plain
+`/login` (which makes no lookup) and every miss: a missing, malformed or unknown key, a real
+(non-sandbox) tenant, a suspended or deleted sandbox, a slow or failed lookup, and a rate-limited one.
+The visitor cannot tell the cases apart, and the page never shows "OpenWind" or any other name there.
+The app learns the org after sign-in from `GET /me/org` (R12), so no org is remembered across logins.
+✓ While a lookup runs the page shows no brand either (it never flashes a name before the answer), and
+the sign-in button never waits on it. A hit then fills in the brand, breadcrumb and tab title.
 ✓ The login key is a random value, not derived from the org's name or anything else a visitor could
 guess: 16 lowercase hex characters (64 bits, 60 of them random), generated when the sandbox is created
 and stored on the tenant row with a unique index and a database CHECK on its format. Existing sandboxes
@@ -415,7 +415,8 @@ branding any page other than `/login`, and regenerating or revoking a login key.
   non-active sandbox or a malformed key (one `404`, one body), never returns more than `name` and
   `logo`, validates the key before the database is read, and is rate limited in a bucket of its own.
   The login key is random and unrelated to any name, never changes, and is never returned by any
-  tenant-facing route. The login page draws the logo only through an `<img>`. (R13)
+  tenant-facing route. The login page draws the logo only through an `<img>`, and shows no brand text (no org name, no
+  product name) unless a lookup matched. (R13)
 
 ## §T Tasks
 
@@ -523,6 +524,16 @@ breadcrumb and the browser tab title. Same branch and PR as Phase 5 (`feat/login
 | T46 | admin-ui login page: validate `?org=` as a key, brand the card breadcrumb and the tab title (held while loading, restored on leaving); tests — **done**                                                                                                                       | T44      |
 | T47 | Isolation tests: key unique and format CHECK, real tenants have none, backfill covers every sandbox, `platform_admin_role` reads `login_key` and no longer `slug`, no UPDATE on it — **done**                                                                                 | T41, T44 |
 | T48 | `/security-review`, then docs: week-log, tracker, this spec — **done**                                                                                                                                                                                                        | T47      |
+
+### Phase 7 — Blank login page without a match (R13, revised 2026-10-28) — ✅ implemented (branch `feat/login-org-branding`, PR opens after #1077 merges)
+
+Same branch and PR as Phases 5 and 6 (`feat/login-org-branding`).
+
+| id  | task                                                                                                                                                                                                                                                                                                                                                              | depends |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| T49 | admin-ui login page: render no top-left brand unless a lookup matched (no OpenWind icon or wordmark on plain `/login`, on a miss or while loading); breadcrumb reads "Sign in" without a match and "<name> / Sign in" with one; tab title "Sign in" without a match, the name with one, restored on leaving; drop the now-unused `login.brandName` use — **done** | —       |
+| T50 | Login page and hook tests: no brand on plain `/login`, on every miss kind and while loading; brand, breadcrumb and title on a hit; no "OpenWind" text anywhere in the page's brand areas — **done**                                                                                                                                                               | T49     |
+| T51 | Docs: week-log, tracker, this spec; `/review` of the diff (UI-only, no new route, table or grant, so no new security review) — **done**                                                                                                                                                                                                                           | T50     |
 
 ## §O Operations — OTP delivery failure and break-glass (#801)
 

@@ -23,7 +23,7 @@ export interface SandboxRowActionsProps {
   tenantName: string;
   trialEndsAt: string | null;
   logo: string | null;
-  slug: string;
+  loginKey: string | null;
   /** Called after a reset, delete, trial or branding change succeeds, so the parent can refresh. */
   onDone: () => void;
 }
@@ -130,7 +130,7 @@ export function SandboxRowActions({
   tenantName,
   trialEndsAt,
   logo,
-  slug,
+  loginKey,
   onDone,
 }: SandboxRowActionsProps): React.ReactElement {
   const [confirming, setConfirming] = React.useState<ActionKind | null>(null);
@@ -192,10 +192,11 @@ export function SandboxRowActions({
     [],
   );
 
-  // R13: the link a prospect is sent, /login?org=<slug>, so the login page shows their brand.
+  // R13: the link a prospect is sent, /login?org=<login key>, so the login page shows their brand.
   async function copyLoginLink(): Promise<void> {
+    if (!loginKey) return;
     try {
-      await navigator.clipboard.writeText(loginLink(slug));
+      await navigator.clipboard.writeText(loginLink(loginKey));
       setLinkCopied(true);
       if (copyTimer.current) clearTimeout(copyTimer.current);
       copyTimer.current = setTimeout(() => setLinkCopied(false), 2_000);
@@ -334,14 +335,16 @@ export function SandboxRowActions({
               >
                 Edit branding
               </button>
-              <button
-                type="button"
-                role="menuitem"
-                className="rcd-kebab-menu-item"
-                onClick={() => choose(() => void copyLoginLink())}
-              >
-                Copy login link
-              </button>
+              {loginKey && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="rcd-kebab-menu-item"
+                  onClick={() => choose(() => void copyLoginLink())}
+                >
+                  Copy login link
+                </button>
+              )}
               {trialActive && (
                 <button
                   type="button"

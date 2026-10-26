@@ -108,8 +108,10 @@ function MoonIcon(): React.ReactElement {
 export function Login(): React.ReactElement {
   const { t } = useTranslation();
   const [searchParams] = useSearchParams();
-  // A sandbox's own login link carries its slug (R13); plain /login has none and stays generic.
+  // A sandbox's own login link carries its login key (R13); plain /login has none and stays generic.
   const orgBranding = useLoginOrgBranding(searchParams.get("org"));
+  const orgName = orgBranding.status === "org" ? orgBranding.name : null;
+  const brandName = orgName ?? t("login.brandName");
   const [loading, setLoading] = React.useState(false);
   // Shown when the redirect to the identity provider fails before leaving
   // the page. A fixed sentence: the underlying error can name hosts or
@@ -126,6 +128,17 @@ export function Login(): React.ReactElement {
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem("ow-theme", theme);
   }, [theme]);
+
+  // The browser tab names the sandbox too. Until the lookup answers (and for every miss) the tab
+  // keeps its generic title, and leaving the page puts it back.
+  React.useEffect(() => {
+    if (orgName === null) return;
+    const previous = document.title;
+    document.title = orgName;
+    return () => {
+      document.title = previous;
+    };
+  }, [orgName]);
 
   function toggleTheme(): void {
     setTheme((t) => (t === "dark" ? "light" : "dark"));
@@ -234,7 +247,15 @@ export function Login(): React.ReactElement {
           {/* Breadcrumb-style header, replacing the stacked logo/title/desc block */}
           <div className="lp-card-head lp-notebook-head">
             <div className="lp-notebook-crumb">
-              <span>{t("login.brandName")}</span>
+              <span
+                style={
+                  orgBranding.status === "loading"
+                    ? { visibility: "hidden" }
+                    : undefined
+                }
+              >
+                {brandName}
+              </span>
               <span className="lp-notebook-crumb-sep" aria-hidden="true">
                 /
               </span>

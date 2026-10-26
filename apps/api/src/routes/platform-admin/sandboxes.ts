@@ -249,12 +249,12 @@ export const sandboxHandoverHandler = platformAdminFactory.createHandlers(
         404,
       );
     }
-    // The login link a prospect is handed is /login?org=<slug> (R13). Read after the credentials
+    // The login link a prospect is handed is /login?org=<loginKey> (R13). Read after the credentials
     // so an expired handover window costs no extra query; a missing row only drops the link.
     const resultTenantId = job.resultTenantId;
     const [tenant] = await withPlatformAdminContext((tx) =>
       tx
-        .select({ slug: tenants.slug })
+        .select({ loginKey: tenants.loginKey })
         .from(tenants)
         .where(eq(tenants.id, resultTenantId))
         .limit(1),
@@ -262,7 +262,7 @@ export const sandboxHandoverHandler = platformAdminFactory.createHandlers(
     return c.json({
       data: {
         tenantId: job.resultTenantId,
-        slug: tenant?.slug ?? null,
+        loginKey: tenant?.loginKey ?? null,
         ...credentials,
       },
     });

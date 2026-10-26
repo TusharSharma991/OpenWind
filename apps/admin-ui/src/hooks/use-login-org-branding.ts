@@ -2,28 +2,24 @@ import { useEffect, useState } from "react";
 import { API_URL } from "../lib/api.js";
 import { isOrgBranding, type OrgBrandingState } from "./use-org-branding.js";
 
-// Same shape the server accepts (apps/api/src/routes/public/org-branding.ts). A value that fails
-// it is never sent: the answer would be the generic page anyway.
-const SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
-const MAX_SLUG_LENGTH = 80;
+// Exactly what the server accepts (apps/api/src/routes/public/org-branding.ts): 16 lowercase hex
+// characters. A value that fails it is never sent: the answer would be the generic page anyway.
+const KEY_RE = /^[0-9a-f]{16}$/;
 // A slow lookup must never hold the sign-in page: past this it is the generic page.
 const LOOKUP_TIMEOUT_MS = 4000;
 
 /**
- * The login page's brand for a sandbox login link, /login?org=<slug> (docs/specs/multi-org-sandbox.md
+ * The login page's brand for a sandbox login link, /login?org=<login key> (docs/specs/multi-org-sandbox.md
  * R13). Unauthenticated, so a plain fetch: fetchWithAuth waits for a session this page exists to
  * create.
  *
- * No slug, or a malformed one, is the generic page at once with no request. Every other way it can
+ * No key, or a malformed one, is the generic page at once with no request. Every other way it can
  * go wrong -- unknown slug, a real tenant, a non-active sandbox, rate limited, a timeout, a network
  * error, a malformed body -- is the same generic page, so the visitor cannot tell the cases apart.
  * `loading` holds the brand's space invisibly, so a sandbox visitor never sees OpenWind flash first.
  */
-export function useLoginOrgBranding(slug: string | null): OrgBrandingState {
-  const usable =
-    slug !== null && slug.length <= MAX_SLUG_LENGTH && SLUG_RE.test(slug)
-      ? slug
-      : null;
+export function useLoginOrgBranding(key: string | null): OrgBrandingState {
+  const usable = key !== null && KEY_RE.test(key) ? key : null;
   const [state, setState] = useState<OrgBrandingState>(
     usable === null ? { status: "default" } : { status: "loading" },
   );

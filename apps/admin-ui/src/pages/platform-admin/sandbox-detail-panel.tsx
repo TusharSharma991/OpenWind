@@ -70,7 +70,7 @@ export function SandboxDetailPanel({
               tenantName={sandbox.name}
               trialEndsAt={sandbox.trialEndsAt}
               logo={sandbox.logo}
-              slug={sandbox.slug}
+              loginKey={sandbox.loginKey}
               onDone={onActionDone}
             />
             <IconButton aria-label="Close details" onClick={onClose}>
@@ -84,10 +84,16 @@ export function SandboxDetailPanel({
           <dd className="pa-id" style={{ fontSize: 13 }}>
             {sandbox.id}
           </dd>
-          <dt>Login link</dt>
-          <dd style={{ fontSize: 13, wordBreak: "break-all" }}>
-            <code style={{ userSelect: "all" }}>{loginLink(sandbox.slug)}</code>
-          </dd>
+          {sandbox.loginKey && (
+            <>
+              <dt>Login link</dt>
+              <dd style={{ fontSize: 13, wordBreak: "break-all" }}>
+                <code style={{ userSelect: "all" }}>
+                  {loginLink(sandbox.loginKey)}
+                </code>
+              </dd>
+            </>
+          )}
           <dt>Created</dt>
           <dd>
             {new Date(sandbox.createdAt).toLocaleString()} (

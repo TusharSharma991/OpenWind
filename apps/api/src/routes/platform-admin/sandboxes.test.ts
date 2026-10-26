@@ -59,7 +59,7 @@ vi.mock("@platform/db", () => ({
     resultTenantId: "resultTenantId",
     rolledBack: "rolledBack",
   },
-  tenants: { id: "id", slug: "slug" },
+  tenants: { id: "id", loginKey: "loginKey" },
   withPlatformAdminContext: (fn: (tx: unknown) => unknown) => fn(mockTx),
   checkSandboxQuota: (...args: unknown[]) => mockCheckSandboxQuota(...args),
   // Real, minimal re-implementation (not mocked away) so these tests exercise the actual
@@ -369,7 +369,7 @@ describe("GET /platform-admin/sandboxes/:jobId/handover", () => {
     mockSelectRows.mockResolvedValueOnce([
       { resultTenantId: TENANT_ID, status: "completed" },
     ]);
-    mockSelectRows.mockResolvedValueOnce([{ slug: "acme-demo-4821" }]);
+    mockSelectRows.mockResolvedValueOnce([{ loginKey: "3f9a1c7e2b4d8a60" }]);
     mockGetSandboxHandoverCredentials.mockResolvedValueOnce({
       seededAccounts: [
         {
@@ -388,7 +388,7 @@ describe("GET /platform-admin/sandboxes/:jobId/handover", () => {
     expect(await res.json()).toEqual({
       data: {
         tenantId: TENANT_ID,
-        slug: "acme-demo-4821",
+        loginKey: "3f9a1c7e2b4d8a60",
         seededAccounts: [
           {
             username: "admin.user",
@@ -401,7 +401,7 @@ describe("GET /platform-admin/sandboxes/:jobId/handover", () => {
     });
   });
 
-  it("still returns the handover, with a null slug, when the tenant row cannot be read back (R13)", async () => {
+  it("still returns the handover, with a null login key, when the tenant row cannot be read back (R13)", async () => {
     mockSelectRows.mockResolvedValueOnce([
       { resultTenantId: TENANT_ID, status: "completed" },
     ]);
@@ -414,7 +414,7 @@ describe("GET /platform-admin/sandboxes/:jobId/handover", () => {
 
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({
-      data: { tenantId: TENANT_ID, slug: null },
+      data: { tenantId: TENANT_ID, loginKey: null },
     });
   });
 

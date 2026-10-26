@@ -32,8 +32,8 @@ export interface PlatformAdminSandboxView {
   trialStatus: "none" | "active" | "expired";
   trialEndsAt: string | null;
   logo: string | null;
-  /** The sandbox's login link is /login?org=<slug> (R13). Never changes after creation. */
-  slug: string;
+  /** The sandbox's login link is /login?org=<loginKey> (R13). Random; never changes after creation. */
+  loginKey: string | null;
 }
 
 /** The only columns toPlatformAdminSandboxView reads -- matches the GRANT in 0135_platform_admin_sandbox_columns.sql exactly. */
@@ -44,7 +44,7 @@ export interface PlatformAdminSandboxRow {
   trialEndsAt: Date | null;
   createdAt: Date;
   logo: string | null;
-  slug: string;
+  loginKey: string | null;
 }
 
 function trialStatus(
@@ -65,7 +65,7 @@ export function toPlatformAdminSandboxView(
     trialStatus: trialStatus(row.trialEndsAt),
     trialEndsAt: row.trialEndsAt ? row.trialEndsAt.toISOString() : null,
     logo: row.logo,
-    slug: row.slug,
+    loginKey: row.loginKey,
   };
 }
 
@@ -190,7 +190,7 @@ export async function setSandboxBranding(
           trialEndsAt: tenants.trialEndsAt,
           createdAt: tenants.createdAt,
           logo: tenants.logo,
-          slug: tenants.slug,
+          loginKey: tenants.loginKey,
         })
         .from(tenants)
         .where(eq(tenants.id, tenantId))

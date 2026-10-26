@@ -118,7 +118,7 @@ describe("the login link column (R13)", () => {
       password: "Ow-def456-9!",
     },
   ];
-  const link = "https://app.example.com/login?org=acme-demo-4821";
+  const link = "https://app.example.com/login?org=3f9a1c7e2b4d8a60";
 
   it("adds a Login link column to the CSV, on every row", () => {
     expect(buildHandoverCsv(accounts, link)).toBe(

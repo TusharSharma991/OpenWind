@@ -111,7 +111,6 @@ export function Login(): React.ReactElement {
   // A sandbox's own login link carries its login key (R13); plain /login has none and stays generic.
   const orgBranding = useLoginOrgBranding(searchParams.get("org"));
   const orgName = orgBranding.status === "org" ? orgBranding.name : null;
-  const brandName = orgName ?? t("login.brandName");
   const [loading, setLoading] = React.useState(false);
   // Shown when the redirect to the identity provider fails before leaving
   // the page. A fixed sentence: the underlying error can name hosts or
@@ -129,16 +128,17 @@ export function Login(): React.ReactElement {
     localStorage.setItem("ow-theme", theme);
   }, [theme]);
 
-  // The browser tab names the sandbox too. Until the lookup answers (and for every miss) the tab
-  // keeps its generic title, and leaving the page puts it back.
+  // The browser tab carries no brand unless a lookup matched (R13): the sandbox's name when it did,
+  // plain "Sign in" otherwise -- on plain /login, on every miss and until the answer arrives.
+  // Leaving the page puts the previous title back.
+  const signInTitle = t("login.signInTag");
   React.useEffect(() => {
-    if (orgName === null) return;
     const previous = document.title;
-    document.title = orgName;
+    document.title = orgName ?? signInTitle;
     return () => {
       document.title = previous;
     };
-  }, [orgName]);
+  }, [orgName, signInTitle]);
 
   function toggleTheme(): void {
     setTheme((t) => (t === "dark" ? "light" : "dark"));
@@ -214,11 +214,14 @@ export function Login(): React.ReactElement {
 
   return (
     <div className="lp-page lp-page-notebook" data-theme={theme}>
-      {/* Brand, floating top-left -- the app navbar's own brand block: OpenWind, or a sandbox's
-          logo and name when this is that sandbox's login link (R13). */}
-      <div className="lp-float-logo">
-        <HeaderBrand branding={orgBranding} />
-      </div>
+      {/* Brand, floating top-left -- only a sandbox's own logo and name, and only when its login link
+          matched (R13). Plain /login, every miss and a lookup still running show nothing here, not
+          even OpenWind. */}
+      {orgBranding.status === "org" && (
+        <div className="lp-float-logo">
+          <HeaderBrand branding={orgBranding} />
+        </div>
+      )}
 
       {/* Theme toggle, floating top-right — icon only, no label */}
       <button
@@ -247,18 +250,14 @@ export function Login(): React.ReactElement {
           {/* Breadcrumb-style header, replacing the stacked logo/title/desc block */}
           <div className="lp-card-head lp-notebook-head">
             <div className="lp-notebook-crumb">
-              <span
-                style={
-                  orgBranding.status === "loading"
-                    ? { visibility: "hidden" }
-                    : undefined
-                }
-              >
-                {brandName}
-              </span>
-              <span className="lp-notebook-crumb-sep" aria-hidden="true">
-                /
-              </span>
+              {orgName !== null && (
+                <>
+                  <span>{orgName}</span>
+                  <span className="lp-notebook-crumb-sep" aria-hidden="true">
+                    /
+                  </span>
+                </>
+              )}
               <span className="lp-notebook-crumb-current">
                 {t("login.signInTag")}
               </span>

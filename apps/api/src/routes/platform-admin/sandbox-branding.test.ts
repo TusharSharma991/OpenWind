@@ -57,6 +57,7 @@ const ROW = {
   trialEndsAt: null,
   createdAt: new Date("2026-10-01T00:00:00.000Z"),
   logo: LOGO,
+  slug: "acme-demo-4821",
 };
 
 beforeEach(() => {

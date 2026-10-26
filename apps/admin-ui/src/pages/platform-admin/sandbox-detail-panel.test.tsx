@@ -25,6 +25,7 @@ const SANDBOX: SandboxView = {
   trialStatus: "expired",
   trialEndsAt: new Date(Date.now() - 2 * 86_400_000 - 3_600_000).toISOString(),
   logo: null,
+  slug: "acme-demo-4821",
 };
 
 function renderPanel(sandbox: SandboxView = SANDBOX): {
@@ -58,6 +59,15 @@ describe("SandboxDetailPanel", () => {
     expect(screen.getByText(/Expired 2 days ago/)).toBeTruthy();
     expect(screen.getByText("Actions for Acme Sandbox")).toBeTruthy();
     expect(screen.getByText(`Timeline ${SANDBOX.id}`)).toBeTruthy();
+  });
+
+  it("shows the sandbox's login link, built from its slug (R13)", () => {
+    renderPanel();
+
+    expect(screen.getByText("Login link")).toBeTruthy();
+    expect(
+      screen.getByText(`${window.location.origin}/login?org=acme-demo-4821`),
+    ).toBeTruthy();
   });
 
   it("says when no trial end is set", () => {

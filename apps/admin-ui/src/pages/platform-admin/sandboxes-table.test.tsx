@@ -20,6 +20,7 @@ const SANDBOXES: SandboxView[] = [
     trialStatus: "active",
     trialEndsAt: new Date(Date.now() + 5 * DAY + 3_600_000).toISOString(),
     logo: null,
+    slug: "acme-demo-4821",
   },
   {
     id: "bbbbbbbb-0000-4000-b000-000000000002",
@@ -29,6 +30,7 @@ const SANDBOXES: SandboxView[] = [
     trialStatus: "none",
     trialEndsAt: null,
     logo: null,
+    slug: "acme-demo-4821",
   },
   {
     id: "cccccccc-0000-4000-c000-000000000003",
@@ -38,6 +40,7 @@ const SANDBOXES: SandboxView[] = [
     trialStatus: "expired",
     trialEndsAt: new Date(Date.now() - 2 * DAY - 3_600_000).toISOString(),
     logo: null,
+    slug: "acme-demo-4821",
   },
 ];
 

@@ -14,6 +14,7 @@ export interface SandboxView {
   trialStatus: TrialStatus;
   trialEndsAt: string | null;
   logo: string | null;
+  slug: string;
 }
 
 export type PlatformAdminAction =

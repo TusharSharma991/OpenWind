@@ -795,12 +795,16 @@ export async function setUserOrgMetadata(
       value: Buffer.from(value, "utf8").toString("base64"),
     }));
   if (entries.length === 0) return true;
-  return provisioningPost(
+  const ok = await provisioningPost(
     "/zitadel.user.v2.UserService/SetUserMetadata",
     { userId, metadata: entries },
     { userId },
     "setUserOrgMetadata: Zitadel set metadata failed",
   );
+  // getOrgMetadataForUser caches a user's metadata for CACHE_TTL_MS; drop it so a read right
+  // after this write (the org sync that follows a re-seed) sees the new values, not the old.
+  _orgMetadataCache.delete(userId);
+  return ok;
 }
 
 // ── List project roles ────────────────────────────────────────────────────────

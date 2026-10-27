@@ -84,8 +84,13 @@ const mockScheduleRow = {
 
 let overlapConflict = false;
 let getReturnsRow = true;
+let teamMemberIds: string[] = [];
+let activeRotationExists = false;
 
 vi.mock("@platform/teams", () => ({
+  ROTATION_MIN_CYCLE_DAYS: 3,
+  ROTATION_MAX_CYCLE_DAYS: 90,
+  loadTeamMemberIds: () => Promise.resolve(teamMemberIds),
   validateCrossTenantRefs: async (
     refs: { fieldName: string; refId: string }[],
     lookup: (ids: string[]) => Promise<Set<string>>,
@@ -117,6 +122,18 @@ vi.mock("@platform/db", () => ({
   // tx below, per the RLS-defense-in-depth fix.
   db: {},
   teams: { id: "id", tenantId: "tenantId", deletedAt: "deletedAt" },
+  onCallRotations: {
+    id: "id",
+    tenantId: "tenantId",
+    teamId: "teamId",
+    status: "status",
+    isRotations: true,
+  },
+  teamMembers: {
+    tenantId: "tenantId",
+    teamId: "teamId",
+    userId: "memberUserId",
+  },
   tenantUsers: {
     tenantId: "tenantId",
     userId: "userId",
@@ -133,12 +150,25 @@ vi.mock("@platform/db", () => ({
   },
   withTenantContext: (_tenantId: unknown, fn: (tx: unknown) => unknown) => {
     callOrder.push("withTenantContext");
+    let fromTable: unknown;
     const tx = {
       select: () => tx,
-      from: () => tx,
+      from: (table: unknown) => {
+        fromTable = table;
+        return tx;
+      },
       where: () => tx,
       orderBy: () => tx,
-      limit: () => Promise.resolve(getReturnsRow ? [mockScheduleRow] : []),
+      limit: () =>
+        Promise.resolve(
+          (fromTable as { isRotations?: boolean } | undefined)?.isRotations
+            ? activeRotationExists
+              ? [{ id: "rot-existing" }]
+              : []
+            : getReturnsRow
+              ? [mockScheduleRow]
+              : [],
+        ),
       insert: () => tx,
       values: () => tx,
       update: () => tx,
@@ -160,7 +190,13 @@ vi.mock("@platform/db", () => ({
       // the RLS-defense-in-depth fix (PR review). Other call sites move
       // past .where() to .limit()/.returning(), which return real Promises
       // and never trigger this.
-      then: (resolve: (v: unknown) => void) => resolve([{ userId: "u-bbb" }]),
+      then: (resolve: (v: unknown) => void) =>
+        resolve(
+          (fromTable as { userId?: string } | undefined)?.userId ===
+            "memberUserId"
+            ? teamMemberIds.map((userId) => ({ userId }))
+            : [{ userId: "u-bbb" }],
+        ),
     };
     return fn(tx);
   },
@@ -211,6 +247,9 @@ beforeEach(() => {
   mockAuth.roles = ["admin"];
   overlapConflict = false;
   getReturnsRow = true;
+  teamMemberIds = [];
+  activeRotationExists = false;
+  mockWriteAuditEntry.mockReset();
   callOrder.length = 0;
   mockResolveTenantMembers.mockReset();
   mockResolveTenantMembers.mockResolvedValue(new Set());
@@ -448,5 +487,112 @@ describe("DELETE /admin/on-call-schedules/:id", () => {
       { method: "DELETE" },
     );
     expect(res.status).toBe(403);
+  });
+});
+
+describe("on-call schedule writes — roles come from the team's members (oncall-team-rotation R3)", () => {
+  const url = `/admin/on-call-schedules/${mockScheduleRow.id}`;
+  const post = (body: object): Promise<Response> =>
+    makeApp().request("/admin/on-call-schedules", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  const patch = (body: object): Promise<Response> =>
+    makeApp().request(url, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  it("creates a window when the primary is a member of the team", async () => {
+    teamMemberIds = ["u-bbb", "u-other"];
+    expect((await post(validCreateBody)).status).toBe(201);
+  });
+
+  it("refuses a primary who is not a member, naming the field", async () => {
+    teamMemberIds = ["u-other"];
+    const res = await post(validCreateBody);
+    expect(res.status).toBe(422);
+    expect((await res.json()).fields).toEqual([
+      {
+        field: "primaryUserId",
+        message: expect.stringMatching(/member of the selected team/),
+      },
+    ]);
+  });
+
+  it("keeps the old any-eligible-user behaviour for a team with no members", async () => {
+    teamMemberIds = [];
+    expect((await post(validCreateBody)).status).toBe(201);
+  });
+
+  it("refuses a backup who is not a member when the edit changes the backup", async () => {
+    teamMemberIds = ["u-other"];
+    const res = await patch({ backupUserId: "u-bbb" });
+    expect(res.status).toBe(422);
+    expect((await res.json()).fields[0].field).toBe("backupUserId");
+  });
+
+  it("lets an edit that changes no role pass even when the holder left the team", async () => {
+    teamMemberIds = ["u-other"];
+    expect((await patch({ label: "Renamed" })).status).toBe(200);
+    // primary resent unchanged (the roster form sends all three)
+    expect(
+      (await patch({ label: "Renamed", primaryUserId: "u-bbb" })).status,
+    ).toBe(200);
+  });
+});
+
+describe("on-call schedule create — repeat (oncall-team-rotation R4)", () => {
+  const post = (body: object): Promise<Response> =>
+    makeApp().request("/admin/on-call-schedules", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  it("creates the first window and a rotation for a team with members", async () => {
+    teamMemberIds = ["u-bbb", "u-other"];
+    const res = await post({ ...validCreateBody, repeat: { cycleDays: 7 } });
+    expect(res.status).toBe(201);
+    const actions = mockWriteAuditEntry.mock.calls.map(
+      (c) => (c[1] as { resourceType: string }).resourceType,
+    );
+    expect(actions).toEqual(["on_call_rotation", "on_call_schedule"]);
+  });
+
+  it("creates only a window when repeat is off (nothing changes from today)", async () => {
+    teamMemberIds = ["u-bbb"];
+    expect((await post(validCreateBody)).status).toBe(201);
+    const types = mockWriteAuditEntry.mock.calls.map(
+      (c) => (c[1] as { resourceType: string }).resourceType,
+    );
+    expect(types).toEqual(["on_call_schedule"]);
+  });
+
+  it("refuses a repeating roster for a team with no members", async () => {
+    teamMemberIds = [];
+    const res = await post({ ...validCreateBody, repeat: { cycleDays: 7 } });
+    expect(res.status).toBe(422);
+    expect((await res.json()).fields).toEqual([
+      expect.objectContaining({ field: "repeat" }),
+    ]);
+    expect(mockWriteAuditEntry).not.toHaveBeenCalled();
+  });
+
+  it("returns 409 when the team already has an active rotation", async () => {
+    teamMemberIds = ["u-bbb"];
+    activeRotationExists = true;
+    const res = await post({ ...validCreateBody, repeat: { cycleDays: 7 } });
+    expect(res.status).toBe(409);
+    expect(mockWriteAuditEntry).not.toHaveBeenCalled();
+  });
+
+  it("rejects a cycle outside 3 to 90 days with 400", async () => {
+    for (const cycleDays of [2, 91, 7.5, 0]) {
+      const res = await post({ ...validCreateBody, repeat: { cycleDays } });
+      expect(res.status).toBe(400);
+    }
   });
 });

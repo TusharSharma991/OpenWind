@@ -3,6 +3,35 @@
 All notable changes to OpenWind are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased — recurring on-call rotation]
+
+### Added
+
+- A roster can repeat every 3 to 90 days. The roster modal has a "Repeat every N days" option; a worker
+  then creates each next window by itself, moving primary and backup to the next people on the team
+  (wrapping, and never the same person twice). A manual window that overlaps the next one stops the
+  rotation and shows why, instead of being overwritten, and it resumes once the overlap is cleared.
+- The people taking over are told once, in the app and by email, when their window starts within two days.
+- The roster page shows which windows belong to a repeating roster and has a panel with the cycle, status,
+  next window and who is next, with stop, resume and end-date controls. Stopping keeps every window.
+  New endpoints: `/admin/on-call-rotations` (list, patch, delete = stop).
+
+## [Unreleased — on-call teams with members]
+
+### Added
+
+- A team can now hold an ordered list of members. The team page builds a team from org users, shows
+  who is on it in rotation order, and lets an admin add, remove and reorder members
+  (`PUT /admin/teams/:id/members`; `memberUserIds` on team create). Removing a member, erasing a user
+  or deleting a team closes the order up so it has no gaps.
+- A team's members are included in the personal-data export.
+
+### Changed
+
+- The on-call roster modal picks the team first, then offers only that team's members for primary,
+  backup and escalation manager. The API enforces the same rule for new and changed roles. A team with
+  no members keeps the old behaviour, and an existing window that names a former member stays editable.
+
 ## [Unreleased — org-view follow-ups (#1072)]
 
 ### Changed

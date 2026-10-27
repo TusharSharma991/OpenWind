@@ -21,7 +21,6 @@
  */
 
 import { Hono } from "hono";
-import type { Context } from "hono";
 import { zValidator } from "../../lib/validator.js";
 import { z } from "zod";
 import { and, eq, gt, or, inArray, isNull, lte, gte, asc } from "drizzle-orm";
@@ -32,6 +31,8 @@ import {
   withTenantContext,
   onCallSchedules,
   teams,
+  teamMembers,
+  onCallRotations,
   tenantUsers,
 } from "@platform/db";
 import type { DbOrTx } from "@platform/db";
@@ -39,14 +40,19 @@ import {
   validateCrossTenantRefs,
   lookupValidIdsInTable,
   classifyOncallUser,
+  loadTeamMemberIds,
+  ROTATION_MIN_CYCLE_DAYS,
+  ROTATION_MAX_CYCLE_DAYS,
   type FieldError,
   type CrossTenantRefCheck,
 } from "@platform/teams";
 import { writeAuditEntry } from "@platform/audit";
 import { logger } from "@platform/logger";
-import { resolveTenantMembers } from "../../lib/ensure-user-refs.js";
-import { listUserRolesByUserId } from "../../lib/zitadel-management.js";
-import { ONCALL_ROLES } from "../../lib/oncall-roles.js";
+import {
+  checkPeopleAreOnCall,
+  peopleCheckResponse,
+  type PeopleCheck,
+} from "../../lib/oncall-people.js";
 
 type Vars = { Variables: { auth: AuthContext } };
 
@@ -73,6 +79,17 @@ const CreateScheduleSchema = z
     primaryUserId: z.string().min(1),
     backupUserId: z.string().min(1).optional(),
     escalationManagerUserId: z.string().min(1).optional(),
+    // Repeat the roster: later windows are made by the rotation worker, each cycleDays long
+    // (docs/specs/oncall-team-rotation.md R4).
+    repeat: z
+      .object({
+        cycleDays: z
+          .number()
+          .int()
+          .min(ROTATION_MIN_CYCLE_DAYS)
+          .max(ROTATION_MAX_CYCLE_DAYS),
+      })
+      .optional(),
   })
   .refine((v) => v.startsAt < v.endsAt, {
     message: "startsAt must be before endsAt",
@@ -105,19 +122,7 @@ function isExclusionViolation(err: unknown): boolean {
   );
 }
 
-const NOT_ONCALL_MESSAGE =
-  "This person doesn't hold an on-call role (admin, agent or user)";
-
-type PeopleCheck =
-  | { status: "unavailable" }
-  | { status: "checked"; errors: { field: string; message: string }[] };
-
-// Every picked person must hold an on-call role, whether or not they have
-// signed in (spec R13a), and a picked person who hasn't signed in yet is
-// recorded. Runs with no transaction open, so the Zitadel lookups never hold
-// a database connection (#952). Without an org there is nobody to confirm,
-// so every pick is refused.
-async function checkPickedPeople(
+function checkPickedPeople(
   auth: AuthContext,
   input: {
     primaryUserId?: string | undefined;
@@ -131,61 +136,10 @@ async function checkPickedPeople(
       ["backupUserId", input.backupUserId],
       ["escalationManagerUserId", input.escalationManagerUserId],
     ] as const
-  ).filter((p): p is readonly [(typeof p)[0], string] => !!p[1]);
-  if (picks.length === 0) return { status: "checked", errors: [] };
-
-  let rolesByUserId = new Map<string, string[]>();
-  if (auth.orgId) {
-    try {
-      rolesByUserId = await listUserRolesByUserId(auth.orgId);
-    } catch (err: unknown) {
-      logger.warn(
-        { err, tenantId: auth.tenantId, orgId: auth.orgId },
-        "on-call schedule: zitadel role lookup failed; refusing the write",
-      );
-      return { status: "unavailable" };
-    }
-  }
-  const isOnCall = (id: string): boolean =>
-    (rolesByUserId.get(id) ?? []).some((r) => ONCALL_ROLES.includes(r));
-
-  const errors = picks
-    .filter(([, id]) => !isOnCall(id))
-    .map(([field]) => ({ field, message: NOT_ONCALL_MESSAGE }));
-  if (errors.length > 0) return { status: "checked", errors };
-
-  await resolveTenantMembers(
-    auth.tenantId,
-    picks.map(([, id]) => id),
-    auth.orgId,
-  );
-  return { status: "checked", errors: [] };
-}
-
-function peopleCheckResponse(
-  c: Context<Vars>,
-  check: PeopleCheck,
-): Response | null {
-  if (check.status === "unavailable") {
-    return c.json(
-      {
-        error: "SERVICE_UNAVAILABLE",
-        message: "Couldn't check people's roles just now. Try again shortly.",
-      },
-      503,
-    );
-  }
-  if (check.errors.length > 0) {
-    return c.json(
-      {
-        error: "VALIDATION_ERROR",
-        message: "Validation failed",
-        fields: check.errors,
-      },
-      422,
-    );
-  }
-  return null;
+  )
+    .filter((p): p is readonly [(typeof p)[0], string] => !!p[1])
+    .map(([field, userId]) => ({ field, userId }));
+  return checkPeopleAreOnCall(auth, picks);
 }
 
 // Runs under the caller's withTenantContext tx (not the raw db client) so
@@ -260,6 +214,36 @@ async function validateScheduleRefs(
   }
 
   return errors;
+}
+
+const NOT_TEAM_MEMBER_MESSAGE =
+  "This person isn't a member of the selected team";
+
+// Roles being set must be held by members of the team (oncall-team-rotation
+// R3). Only changed roles are checked, so an old window that still names a
+// former member stays editable. A team with no members keeps the old
+// any-eligible-user behaviour.
+async function validateTeamMembership(
+  tx: DbOrTx,
+  tenantId: string,
+  teamId: string,
+  changed: { field: string; userId: string | undefined }[],
+): Promise<{ field: string; message: string }[]> {
+  const picks = changed.filter(
+    (p): p is { field: string; userId: string } => !!p.userId,
+  );
+  if (picks.length === 0) return [];
+  const members = await tx
+    .select({ userId: teamMembers.userId })
+    .from(teamMembers)
+    .where(
+      and(eq(teamMembers.tenantId, tenantId), eq(teamMembers.teamId, teamId)),
+    );
+  if (members.length === 0) return [];
+  const memberIds = new Set(members.map((m) => m.userId));
+  return picks
+    .filter((p) => !memberIds.has(p.userId))
+    .map((p) => ({ field: p.field, message: NOT_TEAM_MEMBER_MESSAGE }));
 }
 
 // GET /admin/on-call-schedules
@@ -510,14 +494,87 @@ router.post(
       if (refused) return refused;
       const result = await withTenantContext(auth.tenantId, async (tx) => {
         const refErrors = await validateScheduleRefs(tx, auth.tenantId, input);
+        if (refErrors.length === 0) {
+          refErrors.push(
+            ...(await validateTeamMembership(tx, auth.tenantId, input.teamId, [
+              { field: "primaryUserId", userId: input.primaryUserId },
+              { field: "backupUserId", userId: input.backupUserId },
+              {
+                field: "escalationManagerUserId",
+                userId: input.escalationManagerUserId,
+              },
+            ])),
+          );
+        }
         if (refErrors.length > 0) {
           return { status: "invalid" as const, refErrors };
+        }
+        let rotationId: string | null = null;
+        if (input.repeat) {
+          const members = await loadTeamMemberIds(
+            tx,
+            auth.tenantId,
+            input.teamId,
+          );
+          if (members.length === 0) {
+            return {
+              status: "invalid" as const,
+              refErrors: [
+                {
+                  field: "repeat",
+                  message:
+                    "A repeating roster needs a team with at least one member",
+                },
+              ],
+            };
+          }
+          const [active] = await tx
+            .select({ id: onCallRotations.id })
+            .from(onCallRotations)
+            .where(
+              and(
+                eq(onCallRotations.tenantId, auth.tenantId),
+                eq(onCallRotations.teamId, input.teamId),
+                eq(onCallRotations.status, "active"),
+              ),
+            )
+            .limit(1);
+          if (active) return { status: "rotation_exists" as const };
+          const [rotation] = await tx
+            .insert(onCallRotations)
+            .values({
+              tenantId: auth.tenantId,
+              teamId: input.teamId,
+              cycleDays: input.repeat.cycleDays,
+              nextStartsAt: input.endsAt,
+              lastPrimaryUserId: input.primaryUserId,
+              lastBackupUserId: input.backupUserId ?? null,
+              escalationManagerUserId: input.escalationManagerUserId ?? null,
+              createdBy: auth.userId,
+            })
+            .returning();
+          if (!rotation) throw new Error("rotation insert returned no row");
+          rotationId = rotation.id;
+          await writeAuditEntry(tx, {
+            tenantId: auth.tenantId,
+            actorId: auth.userId,
+            actorType: "user",
+            resourceType: "on_call_rotation",
+            resourceId: rotation.id,
+            action: "created",
+            afterSnapshot: {
+              teamId: rotation.teamId,
+              cycleDays: rotation.cycleDays,
+              nextStartsAt: rotation.nextStartsAt,
+            },
+          });
         }
         const [row] = await tx
           .insert(onCallSchedules)
           .values({
             tenantId: auth.tenantId,
             teamId: input.teamId,
+            rotationId,
             label: input.label,
             startsAt: input.startsAt,
             endsAt: input.endsAt,
@@ -559,8 +616,35 @@ router.post(
           422,
         );
       }
+      if (result.status === "rotation_exists") {
+        return c.json(
+          {
+            error: "CONFLICT",
+            message: "This team already has an active rotation",
+          },
+          409,
+        );
+      }
       return c.json({ data: result.row }, 201);
     } catch (err: unknown) {
+      // The one-active-rotation-per-team index, hit by a concurrent create.
+      if (
+        err &&
+        typeof err === "object" &&
+        "cause" in err &&
+        err.cause &&
+        typeof err.cause === "object" &&
+        "code" in err.cause &&
+        err.cause.code === "23505"
+      ) {
+        return c.json(
+          {
+            error: "CONFLICT",
+            message: "This team already has an active rotation",
+          },
+          409,
+        );
+      }
       // GIST exclusion constraint violation (R5: overlapping window for the
       // same team + tenant).
       if (isExclusionViolation(err)) {
@@ -622,6 +706,39 @@ router.patch(
         if (!existing) return { status: "not_found" as const };
         if (existing.startsAt <= new Date()) {
           return { status: "already_started" as const };
+        }
+
+        const memberErrors = await validateTeamMembership(
+          tx,
+          auth.tenantId,
+          existing.teamId,
+          [
+            {
+              field: "primaryUserId",
+              userId:
+                input.primaryUserId !== existing.primaryUserId
+                  ? input.primaryUserId
+                  : undefined,
+            },
+            {
+              field: "backupUserId",
+              userId:
+                input.backupUserId !== existing.backupUserId
+                  ? input.backupUserId
+                  : undefined,
+            },
+            {
+              field: "escalationManagerUserId",
+              userId:
+                input.escalationManagerUserId !==
+                existing.escalationManagerUserId
+                  ? input.escalationManagerUserId
+                  : undefined,
+            },
+          ],
+        );
+        if (memberErrors.length > 0) {
+          return { status: "invalid" as const, refErrors: memberErrors };
         }
 
         const [row] = await tx

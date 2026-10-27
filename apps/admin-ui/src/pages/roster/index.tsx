@@ -42,7 +42,25 @@ interface OnCallSchedule {
   primaryUserId: string;
   backupUserId: string | null;
   escalationManagerUserId: string | null;
+  rotationId?: string | null;
 }
+
+interface RotationView {
+  id: string;
+  teamId: string;
+  cycleDays: number;
+  status: "active" | "stopped";
+  blocked: boolean;
+  blockedReason: string | null;
+  endsOn: string | null;
+  nextStartsAt: string;
+  nextPrimaryUserId: string | null;
+  nextBackupUserId: string | null;
+}
+
+const MIN_CYCLE_DAYS = 3;
+const MAX_CYCLE_DAYS = 90;
+const DEFAULT_CYCLE_DAYS = 7;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -71,6 +89,7 @@ export function RosterPage(): React.ReactElement {
     startOfWeek(new Date()),
   );
   const [schedules, setSchedules] = useState<OnCallSchedule[]>([]);
+  const [rotations, setRotations] = useState<RotationView[]>([]);
   const [loading, setLoading] = useState(true);
   // The list route has no total count in its response, so an exact-limit
   // result is the only signal available that more rows may exist beyond the
@@ -149,6 +168,29 @@ export function RosterPage(): React.ReactElement {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // Rotation state for the selected team (docs/specs/oncall-team-rotation.md R9). A failure only
+  // hides the panel; the roster itself still works.
+  const refreshRotations = useCallback((): void => {
+    if (!selectedTeamId) {
+      setRotations([]);
+      return;
+    }
+    void Promise.resolve(
+      fetchWithAuth(
+        `${API_URL}/admin/on-call-rotations?teamId=${selectedTeamId}`,
+      ),
+    )
+      .then((res) => {
+        const data = (res as { data?: unknown } | null)?.data;
+        setRotations(Array.isArray(data) ? (data as RotationView[]) : []);
+      })
+      .catch(() => setRotations([]));
+  }, [selectedTeamId]);
+
+  useEffect(() => {
+    refreshRotations();
+  }, [refreshRotations]);
 
   const userName = (userId: string | null): string =>
     userId
@@ -250,6 +292,15 @@ export function RosterPage(): React.ReactElement {
         </div>
       </div>
 
+      <RotationPanel
+        rotations={rotations}
+        userName={userName}
+        onChanged={() => {
+          refresh();
+          refreshRotations();
+        }}
+      />
+
       {loading ? (
         <div className="loading-center">
           <div className="spinner" />
@@ -342,7 +393,7 @@ export function RosterPage(): React.ReactElement {
                       <button
                         type="button"
                         onClick={() => editModal.open(s)}
-                        title={`${s.label} — primary ${userName(s.primaryUserId)}`}
+                        title={`${s.label} — primary ${userName(s.primaryUserId)}${s.rotationId ? " (repeating roster)" : ""}`}
                         style={{
                           gridColumnStart: startOffset + 1,
                           gridColumnEnd: `span ${span}`,
@@ -359,6 +410,14 @@ export function RosterPage(): React.ReactElement {
                           whiteSpace: "nowrap",
                         }}
                       >
+                        {s.rotationId && (
+                          <span
+                            aria-label="Repeating roster"
+                            title="Part of a repeating roster"
+                          >
+                            ↻{" "}
+                          </span>
+                        )}
                         <strong>{s.label}</strong> · {userName(s.primaryUserId)}
                       </button>
                     </div>
@@ -371,18 +430,21 @@ export function RosterPage(): React.ReactElement {
 
       <ScheduleFormModal
         open={createModal.isOpen}
-        teamId={selectedTeamId}
+        teams={teams}
+        defaultTeamId={selectedTeamId}
         users={users}
         onClose={createModal.close}
         onSaved={() => {
           createModal.close();
           refresh();
+          refreshRotations();
         }}
       />
       <ScheduleFormModal
         open={editModal.isOpen}
         schedule={editModal.item ?? undefined}
-        teamId={selectedTeamId}
+        teams={teams}
+        defaultTeamId={selectedTeamId}
         users={users}
         onClose={editModal.close}
         onDelete={() => {
@@ -433,7 +495,8 @@ function toLocalInputValue(iso: string): string {
 interface ScheduleFormModalProps {
   open: boolean;
   schedule?: OnCallSchedule | undefined;
-  teamId: string;
+  teams: Team[];
+  defaultTeamId: string;
   users: TenantUser[];
   onClose: () => void;
   onSaved: () => void;
@@ -447,6 +510,8 @@ interface ScheduleFormData {
   primaryUserId: string;
   backupUserId: string;
   escalationManagerUserId: string;
+  repeatOn: boolean;
+  cycleDays: string;
 }
 
 function initialScheduleFormData(schedule?: OnCallSchedule): ScheduleFormData {
@@ -457,13 +522,16 @@ function initialScheduleFormData(schedule?: OnCallSchedule): ScheduleFormData {
     primaryUserId: schedule?.primaryUserId ?? "",
     backupUserId: schedule?.backupUserId ?? "",
     escalationManagerUserId: schedule?.escalationManagerUserId ?? "",
+    repeatOn: false,
+    cycleDays: String(DEFAULT_CYCLE_DAYS),
   };
 }
 
 function ScheduleFormModal({
   open,
   schedule,
-  teamId,
+  teams,
+  defaultTeamId,
   users,
   onClose,
   onSaved,
@@ -472,6 +540,16 @@ function ScheduleFormModal({
   const [formData, setFormData] = useState<ScheduleFormData>(() =>
     initialScheduleFormData(schedule),
   );
+  // A window's team is fixed once created; a new window picks its team first.
+  const [chosenTeamId, setChosenTeamId] = useState(
+    schedule?.teamId ?? defaultTeamId,
+  );
+  // The dropdown always shows a team, so state must agree with it even when
+  // the page's team was not selected yet at the moment the modal opened.
+  const teamId =
+    [schedule?.teamId, chosenTeamId, defaultTeamId, teams[0]?.id].find(
+      (id) => !!id,
+    ) ?? "";
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // UserPicker portals its dropdown here instead of document.body, so it
@@ -485,9 +563,48 @@ function ScheduleFormModal({
   useEffect(() => {
     if (open) {
       setFormData(initialScheduleFormData(schedule));
+      setChosenTeamId(schedule?.teamId ?? defaultTeamId);
       setError(null);
     }
-  }, [open, schedule]);
+  }, [open, schedule, defaultTeamId]);
+
+  const team = teams.find((t) => t.id === teamId);
+  const memberIds = useMemo(
+    () => (team?.members ?? []).map((m) => m.userId),
+    [team],
+  );
+  // Pickers offer only the team's members, in rotation order. A team with no
+  // members keeps the old any-eligible-user behaviour. When editing, whoever
+  // already holds a role stays visible even if they have left the team.
+  const pickerUsers = useMemo(() => {
+    if (memberIds.length === 0) return users;
+    const allowed = new Set(memberIds);
+    if (schedule) {
+      for (const id of [
+        schedule.primaryUserId,
+        schedule.backupUserId,
+        schedule.escalationManagerUserId,
+      ]) {
+        if (id) allowed.add(id);
+      }
+    }
+    const byId = new Map(users.map((u) => [u.userId, u]));
+    const ordered = memberIds.flatMap((id) => byId.get(id) ?? []);
+    const extra = users.filter(
+      (u) => allowed.has(u.userId) && !memberIds.includes(u.userId),
+    );
+    return [...ordered, ...extra];
+  }, [memberIds, users, schedule]);
+
+  function changeTeam(nextTeamId: string): void {
+    setChosenTeamId(nextTeamId);
+    setFormData((prev) => ({
+      ...prev,
+      primaryUserId: "",
+      backupUserId: "",
+      escalationManagerUserId: "",
+    }));
+  }
 
   const {
     label,
@@ -496,6 +613,8 @@ function ScheduleFormModal({
     primaryUserId,
     backupUserId,
     escalationManagerUserId,
+    repeatOn,
+    cycleDays,
   } = formData;
 
   function updateField<K extends keyof ScheduleFormData>(
@@ -516,13 +635,23 @@ function ScheduleFormModal({
   const hasDuplicateAssignees =
     new Set(assignedUserIds).size !== assignedUserIds.length;
 
+  const cycleDaysNumber = Number(cycleDays);
+  const cycleDaysValid =
+    Number.isInteger(cycleDaysNumber) &&
+    cycleDaysNumber >= MIN_CYCLE_DAYS &&
+    cycleDaysNumber <= MAX_CYCLE_DAYS;
+  // A repeating roster rotates through the team, so it needs members to rotate through.
+  const canRepeat = !schedule && memberIds.length > 0;
+
   const isValid =
     label.trim().length > 0 &&
     startsAt.length > 0 &&
     endsAt.length > 0 &&
+    teamId.length > 0 &&
     primaryUserId.length > 0 &&
     new Date(startsAt) < new Date(endsAt) &&
-    !hasDuplicateAssignees;
+    !hasDuplicateAssignees &&
+    (!repeatOn || cycleDaysValid);
 
   async function handleSubmit(e: React.FormEvent): Promise<void> {
     e.preventDefault();
@@ -543,6 +672,9 @@ function ScheduleFormModal({
           primaryUserId,
           backupUserId: backupUserId || undefined,
           escalationManagerUserId: escalationManagerUserId || undefined,
+          ...(!schedule && repeatOn
+            ? { repeat: { cycleDays: cycleDaysNumber } }
+            : {}),
         }),
       });
       onSaved();
@@ -612,6 +744,33 @@ function ScheduleFormModal({
 
         <form onSubmit={(e) => void handleSubmit(e)}>
           <div className="form-group">
+            <label className="form-label" htmlFor="schedule-team">
+              Team *
+            </label>
+            {schedule ? (
+              <div id="schedule-team">{team?.name ?? "Unknown team"}</div>
+            ) : (
+              <select
+                id="schedule-team"
+                className="form-input"
+                value={teamId}
+                onChange={(e) => changeTeam(e.target.value)}
+              >
+                {teams.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            {memberIds.length === 0 && teamId && (
+              <p className="page-subtitle">
+                This team has no members yet, so anyone eligible can be picked.
+                Adding members to the team limits the choice to them.
+              </p>
+            )}
+          </div>
+          <div className="form-group">
             <label className="form-label">Label *</label>
             <input
               className="form-input"
@@ -648,7 +807,7 @@ function ScheduleFormModal({
           <div className="form-group">
             <label className="form-label">Primary on-call *</label>
             <UserPicker
-              users={users}
+              users={pickerUsers}
               value={primaryUserId || null}
               onChange={(id) => updateField("primaryUserId", id ?? "")}
               placeholder="Select a user"
@@ -658,7 +817,7 @@ function ScheduleFormModal({
           <div className="form-group">
             <label className="form-label">Backup on-call</label>
             <UserPicker
-              users={users}
+              users={pickerUsers}
               value={backupUserId || null}
               onChange={(id) => updateField("backupUserId", id ?? "")}
               placeholder="None"
@@ -668,7 +827,7 @@ function ScheduleFormModal({
           <div className="form-group">
             <label className="form-label">Escalation manager</label>
             <UserPicker
-              users={users}
+              users={pickerUsers}
               value={escalationManagerUserId || null}
               onChange={(id) =>
                 updateField("escalationManagerUserId", id ?? "")
@@ -677,6 +836,49 @@ function ScheduleFormModal({
               portalContainer={contentNode}
             />
           </div>
+          {!schedule && (
+            <div className="form-group">
+              <label className="form-label" htmlFor="schedule-repeat">
+                <input
+                  id="schedule-repeat"
+                  type="checkbox"
+                  checked={repeatOn && canRepeat}
+                  disabled={!canRepeat}
+                  onChange={(e) => updateField("repeatOn", e.target.checked)}
+                />{" "}
+                Repeat every{" "}
+                <input
+                  aria-label="Cycle length in days"
+                  className="form-input"
+                  style={{ width: 70, display: "inline-block" }}
+                  type="number"
+                  min={MIN_CYCLE_DAYS}
+                  max={MAX_CYCLE_DAYS}
+                  value={cycleDays}
+                  disabled={!canRepeat || !repeatOn}
+                  onChange={(e) => updateField("cycleDays", e.target.value)}
+                />{" "}
+                days
+              </label>
+              {!canRepeat ? (
+                <p className="page-subtitle">
+                  Repeating needs a team with at least one member.
+                </p>
+              ) : (
+                <p className="page-subtitle">
+                  This window is made as set; each later window starts when the
+                  last ends, lasts the cycle length, and moves primary and
+                  backup to the next people on the team.
+                </p>
+              )}
+              {repeatOn && canRepeat && !cycleDaysValid && (
+                <div className="alert alert-error">
+                  Use a whole number of days from {MIN_CYCLE_DAYS} to{" "}
+                  {MAX_CYCLE_DAYS}.
+                </div>
+              )}
+            </div>
+          )}
           {hasDuplicateAssignees && (
             <div className="alert alert-error" style={{ marginTop: 8 }}>
               Primary, backup, and escalation manager must be different people —
@@ -704,5 +906,144 @@ function ScheduleFormModal({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+interface RotationPanelProps {
+  rotations: RotationView[];
+  userName: (userId: string | null) => string;
+  onChanged: () => void;
+}
+
+// Shows the team's repeating roster and lets an admin stop, resume or end it (R9). Generated
+// windows are never removed from here: stopping only keeps new ones from being made.
+function RotationPanel({
+  rotations,
+  userName,
+  onChanged,
+}: RotationPanelProps): React.ReactElement | null {
+  const rotation = rotations.find((r) => r.status === "active") ?? rotations[0];
+  const [endsOn, setEndsOn] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setEndsOn(rotation?.endsOn ?? "");
+  }, [rotation?.id, rotation?.endsOn]);
+
+  if (!rotation) return null;
+
+  async function update(body: {
+    status?: "active" | "stopped";
+    endsOn?: string | null;
+  }): Promise<void> {
+    if (!rotation) return;
+    setBusy(true);
+    try {
+      await fetchWithAuth(`${API_URL}/admin/on-call-rotations/${rotation.id}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      });
+      onChanged();
+    } catch (err) {
+      const status = (err as { status?: number }).status;
+      if (!status || status < 500) {
+        showAlert(
+          err instanceof Error ? err.message : "Failed to update the rotation.",
+        );
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const statusLabel = rotation.blocked
+    ? "Blocked"
+    : rotation.status === "active"
+      ? "Active"
+      : "Stopped";
+
+  return (
+    <div
+      className="data-panel"
+      style={{ padding: 16, marginBottom: 16 }}
+      aria-label="Repeating roster"
+    >
+      <div style={{ display: "flex", gap: 12, alignItems: "baseline" }}>
+        <strong>Repeating roster</strong>
+        <span
+          style={{
+            fontSize: 12,
+            fontWeight: 600,
+            color: rotation.blocked ? "var(--danger)" : "var(--text-muted)",
+          }}
+        >
+          {statusLabel}
+        </span>
+      </div>
+      <p className="page-subtitle" style={{ margin: "6px 0" }}>
+        Every {rotation.cycleDays} days
+        {rotation.endsOn ? `, until ${rotation.endsOn}` : ""}.
+        {rotation.status === "active" && (
+          <>
+            {" "}
+            Next window starts{" "}
+            {new Date(rotation.nextStartsAt).toLocaleDateString(undefined, {
+              month: "short",
+              day: "numeric",
+              year: "numeric",
+            })}
+            {rotation.nextPrimaryUserId
+              ? `: primary ${userName(rotation.nextPrimaryUserId)}`
+              : ""}
+            {rotation.nextBackupUserId
+              ? `, backup ${userName(rotation.nextBackupUserId)}`
+              : ""}
+            .
+          </>
+        )}
+      </p>
+      {rotation.blocked && rotation.blockedReason && (
+        <div className="alert alert-error" style={{ margin: "6px 0" }}>
+          {rotation.blockedReason}
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        {rotation.status === "active" ? (
+          <Button
+            variant="secondary"
+            disabled={busy}
+            onClick={() => void update({ status: "stopped" })}
+          >
+            Stop repeating
+          </Button>
+        ) : (
+          <Button
+            variant="secondary"
+            disabled={busy}
+            onClick={() => void update({ status: "active" })}
+          >
+            Resume repeating
+          </Button>
+        )}
+        <label style={{ fontSize: 13 }}>
+          End date{" "}
+          <input
+            aria-label="End date"
+            className="form-input"
+            style={{ width: 160, display: "inline-block" }}
+            type="date"
+            value={endsOn}
+            onChange={(e) => setEndsOn(e.target.value)}
+          />
+        </label>
+        <Button
+          variant="secondary"
+          disabled={busy || endsOn === (rotation.endsOn ?? "")}
+          onClick={() => void update({ endsOn: endsOn || null })}
+        >
+          {endsOn ? "Set end date" : "Clear end date"}
+        </Button>
+      </div>
+    </div>
   );
 }

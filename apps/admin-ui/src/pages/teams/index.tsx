@@ -22,6 +22,7 @@ import {
 } from "@platform/ui";
 import { fetchWithAuth, API_URL } from "../../lib/api.js";
 import { showAlert } from "../../components/global-alert-dialog.js";
+import { SearchableMultiSelect } from "../../components/searchable-multi-select.js";
 import { useModal } from "../../hooks/use-modal.js";
 
 export interface TeamMember {
@@ -173,6 +174,13 @@ export function TeamsPage(): React.ReactElement {
         open={teamModal.isOpen}
         team={teamModal.item ?? undefined}
         users={users}
+        takenUserIds={
+          new Set(
+            teams
+              .filter((t) => t.id !== teamModal.item?.id)
+              .flatMap((t) => (t.members ?? []).map((m) => m.userId)),
+          )
+        }
         onClose={teamModal.close}
         onRefresh={refresh}
         onSaved={() => {
@@ -214,6 +222,8 @@ interface TeamFormModalProps {
   open: boolean;
   team?: Team | undefined;
   users: OrgUser[];
+  /** People already on another team: a person is on one team at a time. */
+  takenUserIds: ReadonlySet<string>;
   onClose: () => void;
   onSaved: () => void;
   onRefresh: () => void;
@@ -227,6 +237,7 @@ function TeamFormModal({
   open,
   team,
   users,
+  takenUserIds,
   onClose,
   onSaved,
   onRefresh,
@@ -307,7 +318,7 @@ function TeamFormModal({
         if (!next) onClose();
       }}
     >
-      <DialogContent showCloseButton={false} style={{ maxWidth: 520 }}>
+      <DialogContent showCloseButton={false} style={{ maxWidth: 720 }}>
         <div
           style={{
             display: "flex",
@@ -367,6 +378,7 @@ function TeamFormModal({
           </div>
           <MemberListEditor
             users={users}
+            takenUserIds={takenUserIds}
             memberIds={memberIds}
             onChange={setMemberIds}
           />
@@ -386,6 +398,7 @@ function TeamFormModal({
 
 interface MemberListEditorProps {
   users: OrgUser[];
+  takenUserIds: ReadonlySet<string>;
   memberIds: string[];
   onChange: (next: string[]) => void;
 }
@@ -394,10 +407,10 @@ interface MemberListEditorProps {
 // person in this list each cycle.
 function MemberListEditor({
   users,
+  takenUserIds,
   memberIds,
   onChange,
 }: MemberListEditorProps): React.ReactElement {
-  const available = users.filter((u) => !memberIds.includes(u.userId));
   const nameOf = (userId: string): string =>
     users.find((u) => u.userId === userId)?.displayName ?? userId;
 
@@ -455,24 +468,16 @@ function MemberListEditor({
           ))}
         </ol>
       )}
-      <select
-        className="form-input"
-        aria-label="Add member"
-        value=""
-        disabled={
-          memberIds.length >= MAX_TEAM_MEMBERS || available.length === 0
-        }
-        onChange={(e) => {
-          if (e.target.value) onChange([...memberIds, e.target.value]);
-        }}
-      >
-        <option value="">Add a member…</option>
-        {available.map((u) => (
-          <option key={u.userId} value={u.userId}>
-            {u.displayName}
-          </option>
-        ))}
-      </select>
+      <SearchableMultiSelect
+        ariaLabel="Add member"
+        placeholder="Add members…"
+        options={users
+          .filter((u) => !takenUserIds.has(u.userId))
+          .map((u) => ({ value: u.userId, label: u.displayName }))}
+        selected={memberIds}
+        onChange={onChange}
+        max={MAX_TEAM_MEMBERS}
+      />
     </div>
   );
 }

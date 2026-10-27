@@ -117,6 +117,8 @@ import {
   teamMembers,
   services,
   onCallSchedules,
+  onCallRotations,
+  onCallScheduleNotices,
   notificationPolicies,
   scheduleRules,
   scheduleExecutions,
@@ -143,7 +145,9 @@ export const PURGED_TENANT_TABLES: readonly string[] = [
   "files",
   "schedule_rules",
   "notification_policies",
+  "on_call_schedule_notices",
   "on_call_schedules",
+  "on_call_rotations",
   "services",
   "team_members",
   "teams",
@@ -359,8 +363,14 @@ export const tenantPurgeWorker = new Worker<PurgeJobData>(
         .delete(notificationPolicies)
         .where(eq(notificationPolicies.tenantId, tenantId));
       await tx
+        .delete(onCallScheduleNotices)
+        .where(eq(onCallScheduleNotices.tenantId, tenantId));
+      await tx
         .delete(onCallSchedules)
         .where(eq(onCallSchedules.tenantId, tenantId));
+      await tx
+        .delete(onCallRotations)
+        .where(eq(onCallRotations.tenantId, tenantId));
       await tx.delete(services).where(eq(services.tenantId, tenantId));
       await tx.delete(teamMembers).where(eq(teamMembers.tenantId, tenantId));
       await tx.delete(teams).where(eq(teams.tenantId, tenantId));

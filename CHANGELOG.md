@@ -3,6 +3,16 @@
 All notable changes to OpenWind are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased — org chart fixes]
+
+### Fixed
+
+- Re-seeding a sandbox's org chart no longer leaves a stale manager on the top-level managers. Before, an
+  account that became a top-level manager after accounts were added or removed kept its earlier manager, and
+  the whole organisation ended up as one long chain.
+- The org chart opens fully expanded for an organisation of 60 people or fewer. Before, it showed only the
+  first three levels, so a chain of managers hid most people behind collapsed cards.
+
 ## [Unreleased — schedule rules page]
 
 ### Changed

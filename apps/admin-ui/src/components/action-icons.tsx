@@ -60,7 +60,17 @@ export function TrashIcon(props: IconProps): React.ReactElement {
   );
 }
 
+export function EditIcon(props: IconProps): React.ReactElement {
+  return (
+    <Svg {...props}>
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+    </Svg>
+  );
+}
+
 const CIRCLE_COLORS = {
+  grey: "hsl(222, 10%, 42%)",
   green: "hsl(145, 60%, 38%)",
   yellow: "hsl(45, 95%, 52%)",
   red: "hsl(0, 70%, 48%)",
@@ -73,6 +83,8 @@ export interface CircleActionButtonProps extends Omit<
   color: keyof typeof CIRCLE_COLORS;
   label: string;
   icon: React.ReactNode;
+  /** Diameter in px; the roster modal uses the default, table rows a smaller one. */
+  size?: number;
 }
 
 /** Round action button: coloured background, icon in the theme's text colour. */
@@ -80,6 +92,7 @@ export function CircleActionButton({
   color,
   label,
   icon,
+  size = 40,
   style,
   disabled,
   ...rest
@@ -94,8 +107,8 @@ export function CircleActionButton({
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
-        width: 40,
-        height: 40,
+        width: size,
+        height: size,
         borderRadius: "50%",
         border: "none",
         background: CIRCLE_COLORS[color],

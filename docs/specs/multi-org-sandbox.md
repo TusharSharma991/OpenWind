@@ -333,7 +333,12 @@ the card's breadcrumb reads just "Sign in", and the browser tab title is "Sign i
 `/login` (which makes no lookup) and every miss: a missing, malformed or unknown key, a real
 (non-sandbox) tenant, a suspended or deleted sandbox, a slow or failed lookup, and a rate-limited one.
 The visitor cannot tell the cases apart, and the page never shows "OpenWind" or any other name there.
-The app learns the org after sign-in from `GET /me/org` (R12), so no org is remembered across logins.
+The app learns the org after sign-in from `GET /me/org` (R12). The one thing this browser remembers
+is the login key of the last sandbox link that matched (2026-10-28, owner request), and only so that
+signing out, an idle logout or an expired session lands the person back on their own organisation's
+link: a plain `/login` visit then goes on to `/login?org=<key>`. The key is stored in the browser only
+(nothing server-side), is checked against the same 16-hex format on every read, and a mistyped or
+unknown link is never remembered.
 ✓ While a lookup runs the page shows no brand either (it never flashes a name before the answer), and
 the sign-in button never waits on it. A hit then fills in the brand, breadcrumb and tab title.
 ✓ The login key is a random value, not derived from the org's name or anything else a visitor could

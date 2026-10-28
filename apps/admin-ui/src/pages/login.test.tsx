@@ -1,3 +1,4 @@
+import type { ReactElement } from "react";
 import {
   describe,
   it,
@@ -14,7 +15,7 @@ import {
   cleanup,
   fireEvent,
 } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import "../i18n.js";
 
 vi.mock("../authProvider.js", () => ({
@@ -27,6 +28,11 @@ vi.mock("../authProvider.js", () => ({
 const { Login } = await import("./login.js");
 const { userManager } = await import("../authProvider.js");
 
+function Where(): ReactElement {
+  const loc = useLocation();
+  return <div data-testid="where">{loc.pathname + loc.search}</div>;
+}
+
 function renderAt(path: string): ReturnType<typeof render> {
   return render(
     <MemoryRouter initialEntries={[path]}>
@@ -34,6 +40,11 @@ function renderAt(path: string): ReturnType<typeof render> {
     </MemoryRouter>,
   );
 }
+
+afterEach(() => {
+  // a matched sandbox link is remembered in storage; keep that out of the next test
+  localStorage.clear();
+});
 
 beforeAll(() => {
   // This Node/jsdom combination leaves the bare `localStorage` global
@@ -56,6 +67,54 @@ describe("Login", () => {
 
   afterEach(() => {
     cleanup();
+  });
+
+  describe("returning to an organisation's own login link", () => {
+    const KEY = "d06206191c8c8062";
+    function renderRouted(path: string): ReturnType<typeof render> {
+      return render(
+        <MemoryRouter initialEntries={[path]}>
+          <Routes>
+            <Route
+              path="/login"
+              element={
+                <>
+                  <Login />
+                  <Where />
+                </>
+              }
+            />
+          </Routes>
+        </MemoryRouter>,
+      );
+    }
+
+    afterEach(() => {
+      localStorage.clear();
+    });
+
+    it("sends plain /login on to the remembered organisation link", () => {
+      localStorage.setItem("ow-login-org", KEY);
+      renderRouted("/login");
+      expect(screen.getByTestId("where").textContent).toBe(`/login?org=${KEY}`);
+    });
+
+    it("leaves plain /login alone when nothing is remembered", () => {
+      renderRouted("/login");
+      expect(screen.getByTestId("where").textContent).toBe("/login");
+    });
+
+    it("does not redirect when the link already names an organisation", () => {
+      localStorage.setItem("ow-login-org", "aaaaaaaaaaaaaaaa");
+      renderRouted(`/login?org=${KEY}`);
+      expect(screen.getByTestId("where").textContent).toBe(`/login?org=${KEY}`);
+    });
+
+    it("ignores a remembered value that is not a valid key", () => {
+      localStorage.setItem("ow-login-org", "not-valid");
+      renderRouted("/login");
+      expect(screen.getByTestId("where").textContent).toBe("/login");
+    });
   });
 
   it("renders translated strings from the i18n common namespace", () => {

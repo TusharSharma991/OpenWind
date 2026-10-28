@@ -3,6 +3,16 @@
 All notable changes to OpenWind are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased — session and login link]
+
+### Changed
+
+- The idle logout now defaults to 15 minutes (it was 5). A `VITE_IDLE_LOGOUT_TIMEOUT_MINUTES` value set in a
+  deployment's environment still overrides it.
+- A person who signed in through their organisation's own login link is sent back to that link after signing
+  out, an idle logout or an expired session, not to the generic `/login`. The link is remembered in the
+  browser only.
+
 ## [Unreleased — org chart fixes]
 
 ### Fixed

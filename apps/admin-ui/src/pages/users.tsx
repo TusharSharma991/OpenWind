@@ -12,7 +12,11 @@ import { fetchWithAuth, API_URL } from "../lib/api.js";
 import { userManager } from "../authProvider.js";
 import { initials } from "../lib/format.js";
 import { avatarColor } from "../lib/theme.js";
+import { Trans, useTranslation } from "react-i18next";
 import { OrgChartPanel } from "./org-directory.js";
+import { ConfirmDeleteDialog } from "../components/confirm-delete-dialog.js";
+import { showAlert } from "../components/global-alert-dialog.js";
+import { showToast, type ToastTone } from "../components/toast.js";
 
 function getRolesFromProfile(
   profile: Record<string, unknown> | undefined,
@@ -42,9 +46,37 @@ interface User {
 interface UserRowProps {
   user: User;
   isAdmin: boolean;
+  /** Set only where erasing is allowed: an admin, and never on their own row. */
+  onErase?: (() => void) | undefined;
+  erasing?: boolean;
 }
 
-function UserRow({ user, isAdmin }: UserRowProps): React.ReactElement {
+/** The name an admin types to confirm an erasure: what the row shows first. */
+function eraseConfirmText(user: User): string {
+  return user.displayName.trim() || user.loginName || user.email;
+}
+
+/**
+ * The API's own sentence about Superset (#728) when it gives one. `queued` and `cache_only` mean
+ * the Superset side is being handled; anything else, `unverified` included (Superset's state could
+ * not be confirmed, #1137), means it was not known to be, which the admin should see as a warning.
+ */
+function supersetToast(
+  superset: { status?: string; message?: string } | undefined,
+): { message?: string; tone: ToastTone } {
+  if (!superset?.message) return { tone: "success" };
+  const handled =
+    superset.status === "queued" || superset.status === "cache_only";
+  return { message: superset.message, tone: handled ? "success" : "warning" };
+}
+
+function UserRow({
+  user,
+  isAdmin,
+  onErase,
+  erasing = false,
+}: UserRowProps): React.ReactElement {
+  const { t } = useTranslation();
   const color = avatarColor(user.userId);
 
   return (
@@ -152,6 +184,26 @@ function UserRow({ user, isAdmin }: UserRowProps): React.ReactElement {
       </TableCell>
       {isAdmin && (
         <TableCell style={{ padding: "12px 16px", textAlign: "right" }}>
+          {onErase && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={onErase}
+              disabled={erasing}
+              title={t("users.eraseButtonTitle")}
+              aria-label={t("users.eraseAriaLabel", {
+                name: eraseConfirmText(user),
+              })}
+              style={{
+                marginRight: "8px",
+                padding: "4px 10px",
+                fontSize: "12px",
+                color: "var(--danger, hsl(350, 80%, 60%))",
+              }}
+            >
+              {erasing ? t("users.erasingButton") : t("users.eraseButton")}
+            </button>
+          )}
           <a
             href={zitadelUserUrl(user.userId)}
             target="_blank"
@@ -191,12 +243,16 @@ function UserRow({ user, isAdmin }: UserRowProps): React.ReactElement {
 }
 
 export function UsersPage(): React.ReactElement {
+  const { t } = useTranslation();
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [roles, setRoles] = useState<string[]>([]);
   const [showOrgChart, setShowOrgChart] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [eraseTarget, setEraseTarget] = useState<User | null>(null);
+  const [erasingId, setErasingId] = useState<string | null>(null);
   const isAdmin = roles.includes("admin");
 
   useEffect(() => {
@@ -204,8 +260,50 @@ export function UsersPage(): React.ReactElement {
       setRoles(
         getRolesFromProfile(u?.profile as Record<string, unknown> | undefined),
       );
+      const sub = (u?.profile as { sub?: unknown } | undefined)?.sub;
+      setCurrentUserId(typeof sub === "string" ? sub : null);
     });
   }, []);
+
+  // DELETE /users/:userId is the GDPR erasure (admin-only on the server). The dialog closes before
+  // the request (see ConfirmDeleteDialog), so the row's button shows the progress instead.
+  const eraseUser = async (user: User): Promise<void> => {
+    const name = eraseConfirmText(user);
+    setEraseTarget(null);
+    setErasingId(user.userId);
+    try {
+      const res = (await fetchWithAuth(
+        `${API_URL}/users/${encodeURIComponent(user.userId)}`,
+        { method: "DELETE" },
+      )) as { superset?: { status?: string; message?: string } } | undefined;
+      setUsers((all) => all.filter((u) => u.userId !== user.userId));
+      const superset = supersetToast(res?.superset);
+      showToast({
+        title: t("users.eraseSuccessToast", { name }),
+        message: superset.message,
+        tone: superset.tone,
+      });
+    } catch (err) {
+      // The data is gone but the sign-in is not: the user stays listed (they can still sign in),
+      // and erasing again retries the sign-in removal.
+      if ((err as { code?: string }).code === "SIGN_IN_NOT_REMOVED") {
+        showAlert(
+          t("users.eraseIncompleteMessage", { name }),
+          t("users.eraseIncompleteTitle"),
+        );
+        return;
+      }
+      showAlert(
+        t("users.eraseFailedMessage", {
+          name,
+          error: err instanceof Error ? err.message : t("users.requestFailed"),
+        }),
+        t("users.eraseFailedTitle"),
+      );
+    } finally {
+      setErasingId(null);
+    }
+  };
 
   useEffect(() => {
     fetchWithAuth(`${API_URL}/users`)
@@ -213,7 +311,7 @@ export function UsersPage(): React.ReactElement {
         setUsers((res as { data: User[] }).data);
       })
       .catch((err: unknown) =>
-        setError(err instanceof Error ? err.message : "Failed to load users"),
+        setError(err instanceof Error ? err.message : t("users.failedToLoad")),
       )
       .finally(() => setLoading(false));
   }, []);
@@ -240,7 +338,7 @@ export function UsersPage(): React.ReactElement {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="modal-header">
-              <h3 className="modal-title">Org Chart</h3>
+              <h3 className="modal-title">{t("users.orgChart")}</h3>
               <button
                 type="button"
                 className="modal-close"
@@ -256,6 +354,27 @@ export function UsersPage(): React.ReactElement {
           </div>
         </div>
       )}
+      <ConfirmDeleteDialog
+        open={eraseTarget !== null}
+        title={t("users.eraseDialogTitle")}
+        message={
+          eraseTarget ? (
+            <Trans
+              i18nKey="users.eraseDialogMessage"
+              values={{ name: eraseConfirmText(eraseTarget) }}
+              components={{ strong: <strong /> }}
+            />
+          ) : (
+            ""
+          )
+        }
+        confirmLabel={t("users.eraseButton")}
+        typeToConfirm={eraseTarget ? eraseConfirmText(eraseTarget) : undefined}
+        onConfirm={() => {
+          if (eraseTarget) void eraseUser(eraseTarget);
+        }}
+        onCancel={() => setEraseTarget(null)}
+      />
       {/* Header */}
       <div
         style={{
@@ -266,17 +385,15 @@ export function UsersPage(): React.ReactElement {
         }}
       >
         <div>
-          <h2 className="page-title">Users</h2>
-          <p className="page-subtitle">
-            All members of your organization, sorted alphabetically.
-          </p>
+          <h2 className="page-title">{t("users.title")}</h2>
+          <p className="page-subtitle">{t("users.subtitle")}</p>
         </div>
         <button
           type="button"
           className="btn btn-secondary"
           onClick={() => setShowOrgChart(true)}
         >
-          View org chart
+          {t("users.viewOrgChart")}
         </button>
       </div>
 
@@ -311,7 +428,7 @@ export function UsersPage(): React.ReactElement {
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by name or email…"
+          placeholder={t("users.searchByEmail")}
           className="form-input"
           style={{ paddingLeft: "32px" }}
         />
@@ -320,7 +437,7 @@ export function UsersPage(): React.ReactElement {
       {loading && (
         <div className="loading-center">
           <div className="spinner" />
-          <span className="loader-text">Loading users…</span>
+          <span className="loader-text">{t("users.loading")}</span>
         </div>
       )}
 
@@ -330,12 +447,10 @@ export function UsersPage(): React.ReactElement {
         <div className="empty-state">
           <div className="empty-state-icon">👥</div>
           <div className="empty-state-title">
-            {query ? "No users match your search" : "No users found"}
+            {query ? t("users.noMatches") : t("users.noUsers")}
           </div>
           <div className="empty-state-subtitle">
-            {query
-              ? "Try a different search term."
-              : "Users appear here after they log in, or when Zitadel is connected."}
+            {query ? t("users.tryDifferentSearch") : t("users.emptyHint")}
           </div>
         </div>
       )}
@@ -349,11 +464,11 @@ export function UsersPage(): React.ReactElement {
             <TableHeader>
               <TableRow>
                 {[
-                  "Name",
-                  "Login",
-                  "Email",
-                  "Roles",
-                  "User ID",
+                  t("users.name"),
+                  t("users.columnLogin"),
+                  t("users.email"),
+                  t("users.columnRoles"),
+                  t("users.columnUserId"),
                   ...(isAdmin ? [""] : []),
                 ].map((h) => (
                   <TableHead
@@ -370,7 +485,19 @@ export function UsersPage(): React.ReactElement {
             </TableHeader>
             <TableBody>
               {filtered.map((u) => (
-                <UserRow key={u.userId} user={u} isAdmin={isAdmin} />
+                <UserRow
+                  key={u.userId}
+                  user={u}
+                  isAdmin={isAdmin}
+                  onErase={
+                    isAdmin &&
+                    currentUserId !== null &&
+                    u.userId !== currentUserId
+                      ? () => setEraseTarget(u)
+                      : undefined
+                  }
+                  erasing={erasingId === u.userId}
+                />
               ))}
             </TableBody>
           </Table>
@@ -382,8 +509,10 @@ export function UsersPage(): React.ReactElement {
               borderTop: `1px solid ${TOKENS.borderColor}`,
             }}
           >
-            {filtered.length} user{filtered.length !== 1 ? "s" : ""}
-            {query ? ` matching "${query}"` : " total"}
+            {t(query ? "users.countMatching" : "users.countTotal", {
+              count: filtered.length,
+              query,
+            })}
           </div>
         </div>
       )}

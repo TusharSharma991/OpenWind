@@ -13,7 +13,7 @@
 -- come from 8 random bytes, 64 bits.
 --
 -- platform_admin_role (0135, 0144, 0155) reads the key so the dashboard can show the link, and no
--- longer reads the slug, which 0156 had granted for the first version and nothing needs now. It gets
+-- longer reads the slug, which 0161 had granted for the first version and nothing needs now. It gets
 -- no UPDATE on `tenants` (still only through the audited SECURITY DEFINER functions).
 --
 -- DOWN MIGRATION:

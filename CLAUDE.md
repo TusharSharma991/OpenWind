@@ -15,11 +15,36 @@ TypeScript in `modules/` (ADR-004). Full architecture: `docs/architecture-brief.
 
 ## Read before touching
 
-**Before changing code in an area, open
-[.claude/context/read-before-touching.md](.claude/context/read-before-touching.md)** — it maps each
-area (tenancy/RLS, workflow, entity engine, `modules/`, api_keys, connectors, on-call, scheduler,
-reporting, sandboxes, secrets, org directory, …) to its ADR or spec. Parallel approval is
-off-limits (#65).
+| Area                                                                                                 | Read                                                                                 |
+| ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Tenancy, RLS                                                                                         | ADR-001                                                                              |
+| Workflow state machine                                                                               | ADR-002, `.claude/context/workflow-engine.md`                                        |
+| Entity field validation                                                                              | ADR-003, `.claude/context/entity-engine.md`                                          |
+| Anything under `modules/`                                                                            | ADR-004 (config-first)                                                               |
+| Module category / auto-provisioning (`tender`, `optional`)                                           | ADR-005                                                                              |
+| Workflow ownership / access grants (v1 gap: guards ignore `__accessUsers`)                           | ADR-006                                                                              |
+| RLS on entity_types/workflows/workflow_states/workflow_transitions, `tenant-purge.ts` state deletion | ADR-007                                                                              |
+| `api_keys` (audit, expiry, rotation, scopes)                                                         | ADR-008                                                                              |
+| Connector runtime, webhook gateway, outbound delivery (3A)                                           | ADR-009, `.claude/context/phase-3-primer.md`                                         |
+| Public / partner-facing API (Tier 1 only)                                                            | ADR-010                                                                              |
+| `packages/plugin-sdk`, plugin install/uninstall                                                      | ADR-011 (known gaps: #644)                                                           |
+| Third-party ticket API (Phases A–G)                                                                  | ADR-012, `docs/third-party-api-design.md` (index), `docs/specs/third-party-api-*.md` |
+| Rate limiting (`packages/redis/src/rate-limit.ts`, api middleware, auth middleware)                  | ADR-013                                                                              |
+| `apps/worker/src/notification-*.ts`, `alert-worker.ts`                                               | ADR-014                                                                              |
+| `packages/telemetry`, retention/erasure sweeps                                                       | ADR-015                                                                              |
+| Production TLS/HSTS, storage and backup encryption, production OpenBao                               | `docs/deployment-hardening.md`, `docs/local-setup.md`                                |
+| Teams/services, on-call schedules, severity + labels, `resolve_oncall`, notification policies (3E)   | ADR-016, `docs/oncall-routing-design.md`                                             |
+| `schedule_rules` / `schedule_executions`, scheduler tick (3F)                                        | ADR-017, `docs/temporal-scheduler-design.md`                                         |
+| Reporting: `analytics_user` grants, Superset connection mutator, guest tokens, reporting audit (3G)  | ADR-019 (Proposed), ADR-001                                                          |
+| `packages/automation-engine`                                                                         | `.claude/context/automation-engine.md` (always `/security-review`)                   |
+| Helpdesk/reimbursements/CRM modules, platform services, admin-ui generic views, no-code builders     | `.claude/context/phase-2-primer.md`                                                  |
+| AI features, `packages/ai`, model calls (3C — not started)                                           | ADR-018 (Proposed; accepting it does not start 3C)                                   |
+| New modules, module ownership / placement (3H)                                                       | ADR-020 (Proposed), ADR-004, ADR-005                                                 |
+| Ticket relations, child tickets, `__accessUsers` grants, access requests                             | ADR-021 (Proposed), ADR-006                                                          |
+| Platform admin, multi-org sandboxes (provision, reset, delete, handover)                             | ADR-022 (Proposed), `docs/specs/multi-org-sandbox.md`                                |
+| `packages/secrets`, OpenBao (startup loader, Transit, AppRole), production secrets delivery          | ADR-023 (Proposed), ADR-009, `docs/deployment-hardening.md`                          |
+| Org directory (`packages/org-directory`, org chart, sync)                                            | `docs/specs/org-directory.md`                                                        |
+| Parallel approval                                                                                    | Off-limits — `.claude/context/parallel-approval-pattern.md`, #65                     |
 
 Status and history: `docs/tracker/roadmap-tracker.md` and `docs/tracker/week-log/`, one file per
 session. The frozen pre-2026-08-14 log is `week-log/archive/week-log.md`; never edit it. Specs are
@@ -37,17 +62,17 @@ content in it.
 and live % live **only** in [roadmap-tracker.md](docs/tracker/roadmap-tracker.md). Edit this table
 only when a track's headline changes (started / done / blocked).
 
-| ID    | Track                                                           | Headline                                                                                                      |
-| ----- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| 3A    | Integration layer — connector runtime, partner API, marketplace | 🟡 Runtime + partner API (ADR-012 A–G) shipped; connectors #368 + marketplace UI #369 not started             |
-| 3B    | Plugin system — Module Federation, slot registry                | ✅ Done (#397); 2 known gaps tracked in #644                                                                  |
-| 3C    | AI layer — automation gen, workflow suggestion, RAG             | 🔴 Not started, no ADR — human scope call (#18, #614–618)                                                     |
-| 3D    | Observability + compliance — OTel, Prometheus, GDPR             | ✅ Done (#503–507, ADR-015)                                                                                   |
-| 3E    | On-call routing & severity-based notification                   | 🟡 Phases 1–4 merged (ADR-016); gaps: SMS/WhatsApp/voice delivery, duration metrics, 2 UI badges (#570, #571) |
-| 3F    | Temporal scheduler — auto-create tickets on schedule            | 🟡 Phases 1–4 merged (ADR-017); gap: schedule alert rules (#580)                                              |
-| 3G    | MIS reporting — embedded Superset + standalone/Zitadel SSO      | 🟡 Stages 1–2 merged (#663–671); ADR-019 proposed (#707); Stage 2 stays off pending review                    |
-| 3H    | Cross-functional workflow visibility                            | 🟡 Phase 1 merged — vendor-approval seed module (#680); live walk-through #691; ADR-020 in review (#702)      |
-| 3-OPS | Deferred ops/infra concerns                                     | 🔴 Not started (#6)                                                                                           |
+| ID    | Track                                                           | Headline                                                                                                 |
+| ----- | --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| 3A    | Integration layer — connector runtime, partner API, marketplace | 🟡 Runtime + partner API (ADR-012 A–G) shipped; connectors #368 + marketplace UI #369 not started        |
+| 3B    | Plugin system — Module Federation, slot registry                | ✅ Done (#397); 2 known gaps tracked in #644                                                             |
+| 3C    | AI layer — automation gen, workflow suggestion, RAG             | 🔴 Not started, no ADR — human scope call (#18, #614–618)                                                |
+| 3D    | Observability + compliance — OTel, Prometheus, GDPR             | ✅ Done (#503–507, ADR-015)                                                                              |
+| 3E    | On-call routing & severity-based notification                   | 🟡 Phases 1–4 merged (ADR-016); gap: SMS/WhatsApp/voice delivery (#570)                                  |
+| 3F    | Temporal scheduler — auto-create tickets on schedule            | 🟡 Phases 1–4 merged (ADR-017); schedule alert rules shipped (#867); no open gap issues                  |
+| 3G    | MIS reporting — embedded Superset + standalone/Zitadel SSO      | 🟡 Stages 1–2 merged (#663–671); ADR-019 proposed (#707); Stage 2 stays off pending review               |
+| 3H    | Cross-functional workflow visibility                            | 🟡 Phase 1 merged — vendor-approval seed module (#680); live walk-through #691; ADR-020 in review (#702) |
+| 3-OPS | Deferred ops/infra concerns                                     | 🔴 Not started (#6)                                                                                      |
 
 Also active outside this table, with no track ID (see "Spec-driven efforts outside the track table" in
 the tracker): the multi-org sandbox ([spec](docs/specs/multi-org-sandbox.md), ADR-022 Proposed) and
@@ -68,30 +93,77 @@ testing, #4).
 
 ---
 
-## Layout and dependency rule
+## Repository layout
 
-`apps/*` (api, worker, admin-ui) → `packages/*`; `modules/*` → `packages/*` only, never another
-module. Cross-module communication goes through the event bus, the entity-engine relations API or
-tRPC. `pnpm dep:check` enforces the graph. The full layout, per-package boundary rules and
-`pnpm dep:impact` usage are in
-[.claude/context/repo-layout.md](.claude/context/repo-layout.md).
+```
+apps/
+  api/            Hono API server
+  worker/         BullMQ workers (outbox, automations, SLA, schedule tick, notifications, AV scan)
+  admin-ui/       Refine + shadcn/ui — the single UI for agents, admins and customers (RBAC);
+                  apps/portal is only a workspace stub (source removed in PR #211)
+packages/
+  db/             Drizzle schema, migrations, client
+  entity-engine/  workflow-engine/  automation-engine/
+  auth/           Zitadel JWT + RBAC helpers
+  notifications/  Novu wrapper
+  files/          Tenant-scoped local-disk storage + async ClamAV scan (PR #340; async exports moved to local storage in #787)
+  audit/          Append-only audit log
+  config/         Zod-validated env — import from @platform/config
+  logger/         Structured pino logger
+  redis/          Shared ioredis client + rate-limit helper
+  secrets/        OpenBao client
+  connector-sdk/  plugin-sdk/   Phase 3 extension SDKs
+  ui/             Shared design system (shadcn/ui + tokens)
+  ai/             Anthropic SDK wrapper + RAG helpers
+  teams/          Teams/services/on-call primitives + shared cross-tenant FK helper (3E/3F)
+  org-directory/  Org chart from Zitadel metadata: importer, tree build, sync, query API
+  scheduler/      Cron + next-fire, timezone/template validation, cross-tenant ref checks (3F)
+  telemetry/      OTel, Prometheus metrics, PII-scrubbed Sentry (3D)
+  tsconfig/       Shared TypeScript base configs
+modules/          Seed SQL + one-line stub index.ts per module
+tests/            integration/ · isolation/ (tenant RLS, every db/ PR) · e2e/
+```
+
+## Dependency rule (ESLint-enforced; `pnpm dep:check` checks the transitive graph)
+
+```
+apps/*             → packages/*
+modules/*          → packages/*   (no cross-module imports ever)
+entity-engine      → db only
+workflow-engine    → db, entity-engine
+automation-engine  → db, workflow-engine, entity-engine, teams, audit
+teams              → db only
+scheduler          → db, teams, config, logger   (no package-specific boundary rule yet)
+```
+
+Cross-module communication goes through the event bus, the entity-engine relations API, or tRPC
+only. To check what depends on a file, run `pnpm dep:impact -- '<path-regex>'`. A stale `dist/`
+makes it under-report, so treat an empty result as inconclusive and cross-check with grep (see
+`.claude/context/dependency-graph.md`).
 
 ---
 
 ## Commands
 
-Everything is containerized: `docker compose up -d` is the standard way to run the app, in dev and
-on servers (Zitadel is a separate compose project, `../zitadel/`). `pnpm dev` is host-mode hot
-reload for tight loops only. Optional profiles, macOS and Windows notes, and full setup are in
-`docs/local-setup.md`.
+Everything is containerized. `docker compose up -d` is the standard way to run the app, in dev and
+on servers alike. It starts Postgres, PgBouncer, Redis, OpenBao, ClamAV, `ow-backend`,
+`ow-frontend` and `ow-worker`. Zitadel is a separate compose project (`../zitadel/`, joined via the
+external `openwind_zitadel` network). `pnpm dev` is host-mode hot reload for tight loops only; it
+is not what CI or servers run.
 
 ```bash
 docker compose up -d                          # default stack
+docker compose --profile notifications up -d  # + Novu
+docker compose --profile observability up -d  # + Prometheus/Grafana/Alertmanager/OTel collector
+docker compose --profile reporting up -d      # + Superset (3G)   (also: tools, bootstrap)
 pnpm typecheck && pnpm lint && pnpm test && pnpm test:isolation   # exit condition
 pnpm test:e2e         # end-to-end API tests (needs the stack)
 pnpm db:migrate       # run pending migrations
 pnpm db:seed          # seed development data
 ```
+
+macOS: OrbStack, not Docker Desktop. Windows: run isolation/e2e in CI or WSL2. Full setup:
+`docs/local-setup.md`.
 
 ---
 

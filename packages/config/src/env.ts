@@ -76,6 +76,39 @@ const EnvSchema = z
     // erasure or tenant purge flushes the `superset_` and `superset_data_` key prefixes there
     // (#728, docs/specs/superset-gdpr-erasure.md). Unset, nothing is flushed.
     SUPERSET_REDIS_URL: z.string().url().optional(),
+    // Whether this install runs Superset at all (#1137). "off" (default): no Superset is expected, so
+    // the erasure self-check records "skipped", a user erasure reports Superset as disabled, a tenant
+    // purge does not wait on Superset and nothing alerts; no other Superset variable is needed.
+    // "on": Superset is expected, the self-check is mandatory and erasure fails closed ("unverified"
+    // until the worker has confirmed Superset's state, a failing tenant purge). Set it to "on" on
+    // the API and the worker of every deployment that runs Superset. Strict, so a typo fails startup.
+    SUPERSET_DEPLOYMENT: z.enum(["off", "on"]).default("off"),
+    // Superset Stage 2 (standalone SSO) is on when this is set. Superset reads it itself; the API
+    // and worker read it to know whether Superset holds user accounts to erase (#728, D8), only
+    // when SUPERSET_DEPLOYMENT is "on". It is OAuth wiring, not the switch for erasure.
+    // Empty counts as unset, since compose passes unset variables through as empty strings.
+    SUPERSET_OAUTH_CLIENT_ID: z
+      .string()
+      .optional()
+      .transform((v) => (v?.trim() ? v.trim() : undefined)),
+    // Deprecated and ignored since #1137: replaced by SUPERSET_DEPLOYMENT. Kept in the schema only so
+    // the API and worker can log a startup warning when it is still set (see supersetErasureEnabledIsSet).
+    SUPERSET_ERASURE_ENABLED: z.string().optional(),
+    // The worker's Superset erasure self-check (#1137) runs as one BullMQ repeatable job every
+    // interval, however many workers there are, and keeps its answer in Redis for the TTL. The TTL
+    // must be at least twice the interval, so one slow or missed run does not leave the answer stale.
+    SUPERSET_SELFCHECK_INTERVAL_MINUTES: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(1440)
+      .default(15),
+    SUPERSET_SELFCHECK_TTL_MINUTES: z.coerce
+      .number()
+      .int()
+      .min(2)
+      .max(2880)
+      .default(30),
     // Disposable cache instance (LRU, no persistence). REDIS_URL is the queue/state instance and
     // must be noeviction (BullMQ jobs and locks, rate limits, MFA markers). Unset, the cache shares
     // REDIS_URL, which is fine for dev and tiny installs but warns in production (#1013).
@@ -135,7 +168,7 @@ const EnvSchema = z
     RETENTION_REQUIRE_SHORTEN_CONFIRM: z
       .string()
       .transform((v) => v !== "false")
-      .default("true"),
+      .prefault("true"),
     RETENTION_DEFAULT_DAYS: z.coerce.number().int().min(1).default(90),
     RETENTION_COMMENT_DAYS: z.coerce.number().int().min(1).default(365),
     RETENTION_EVIDENCE_DAYS: z.coerce.number().int().min(1).default(2555),
@@ -239,7 +272,7 @@ const EnvSchema = z
     PLATFORM_ADMIN_MFA_DEV_BYPASS: z
       .string()
       .transform((v) => v === "true")
-      .default("false"),
+      .prefault("false"),
     // ADR-022 Decision 10, #865 — sandbox reset and delete are the two irreversible
     // platform_admin actions, so they need a verification this recent even though the
     // general MFA window is 12 hours. Config, not hardcoded: the bounds keep it a real
@@ -314,7 +347,10 @@ const EnvSchema = z
     // the caller's auth.tenantId matches this value — blocking a customer user
     // who has been granted 'superadmin' from accessing other tenants' lifecycle
     // routes. Unset in dev/test (where DEV_TENANT_ID already unifies tenantIds).
-    PLATFORM_ORG_ID: z.string().uuid().optional(),
+    // z.guid() on purpose: it is zod 3's uuid() check; zod 4's uuid() also wants RFC 9562
+    // version and variant digits and would reject seeded ids like 00000000-0000-0000-0000-000000000001.
+    // It only gates by exact match against auth.tenantId, so the shape check adds no access.
+    PLATFORM_ORG_ID: z.guid().optional(),
     // Service account key JSON (raw JSON string from Zitadel console).
     // Used to call the Zitadel Management API for live role/user queries.
     // Store the full JSON string. Never commit this value.
@@ -426,7 +462,7 @@ const EnvSchema = z
     SKIP_AV_SCAN: z
       .string()
       .transform((v) => v === "true")
-      .default("false"),
+      .prefault("false"),
     // Secrets Provider: "openbao" for external vault, "local" for local AES-256-GCM encryption
     SECRETS_PROVIDER: z.enum(["openbao", "local"]).default("openbao"),
     // OpenBao — Transit envelope encryption for connector credentials
@@ -452,14 +488,14 @@ const EnvSchema = z
     TELEMETRY_ENABLED: z
       .string()
       .transform((v) => v === "true")
-      .default("false"),
+      .prefault("false"),
     OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
     OTEL_SERVICE_NAME: z.string().optional(),
     METRICS_TOKEN: z.string().default(DEV_METRICS_TOKEN),
     OTEL_TRACE_SAMPLE_RATIO: z
       .string()
       .transform((v) => parseFloat(v))
-      .default("0.01"),
+      .prefault("0.01"),
     // Error Tracking (Stage 1)
     ERROR_TRACKING_PROVIDER: z
       .enum(["sentry", "glitchtip", "bugsink", "none"])
@@ -728,6 +764,15 @@ const EnvSchema = z
         "SUPERSET_ADMIN_PASSWORD must not be its development default in production",
     },
   )
+  .refine(
+    (v) =>
+      v.SUPERSET_SELFCHECK_TTL_MINUTES >=
+      2 * v.SUPERSET_SELFCHECK_INTERVAL_MINUTES,
+    {
+      message:
+        "SUPERSET_SELFCHECK_TTL_MINUTES must be at least twice SUPERSET_SELFCHECK_INTERVAL_MINUTES",
+    },
+  )
   // R14: the two URLs address different networks — the browser cannot resolve a
   // docker service name, and inside a container `localhost` is that container.
   // Equal values in production mean one of the two is wrong, and the failure is
@@ -768,6 +813,48 @@ export type Env = z.infer<typeof EnvSchema>;
 // parse a minimal env object directly instead of mutating process.env before
 // this module's top-level `env.parse(process.env)` side effect has already run.
 export { EnvSchema };
+
+/**
+ * What an erasure or tenant purge does in Superset (docs/specs/superset-gdpr-erasure.md, D8).
+ * "full": Stage 2 is on, so Superset holds user accounts; erase them and flush the cache.
+ * "cache-only": Stage 2 is off; guests are not stored as Superset users, so only the cache is flushed.
+ * "off": SUPERSET_DEPLOYMENT is "off": no Superset is expected, so nothing is done there (the
+ *   worker's self-check can still override this when Superset reports Stage 2 on).
+ */
+export type SupersetErasureMode = "full" | "cache-only" | "off";
+
+export function supersetErasureMode(
+  v: Pick<Env, "SUPERSET_DEPLOYMENT" | "SUPERSET_OAUTH_CLIENT_ID">,
+): SupersetErasureMode {
+  if (v.SUPERSET_DEPLOYMENT === "off") return "off";
+  return v.SUPERSET_OAUTH_CLIENT_ID ? "full" : "cache-only";
+}
+
+/**
+ * Startup warnings about Superset settings that are ignored or contradict each other. The API and
+ * the worker log each one once at startup (config cannot log: the logger depends on it).
+ */
+export function supersetConfigWarnings(
+  v: Pick<
+    Env,
+    | "SUPERSET_DEPLOYMENT"
+    | "SUPERSET_OAUTH_CLIENT_ID"
+    | "SUPERSET_ERASURE_ENABLED"
+  >,
+): string[] {
+  const warnings: string[] = [];
+  if (v.SUPERSET_ERASURE_ENABLED !== undefined) {
+    warnings.push(
+      "SUPERSET_ERASURE_ENABLED is deprecated and ignored: set SUPERSET_DEPLOYMENT=on (Superset runs here) or leave it off (docs/runbooks/superset-erasure.md)",
+    );
+  }
+  if (v.SUPERSET_DEPLOYMENT === "off" && v.SUPERSET_OAUTH_CLIENT_ID) {
+    warnings.push(
+      "SUPERSET_OAUTH_CLIENT_ID is set but SUPERSET_DEPLOYMENT is off: this service treats Superset as absent. Set SUPERSET_DEPLOYMENT=on if Superset runs (docs/runbooks/superset-erasure.md)",
+    );
+  }
+  return warnings;
+}
 
 export interface PlanLimits {
   apiCallsPerDay: number;

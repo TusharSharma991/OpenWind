@@ -60,7 +60,7 @@ export const teamMembers = pgTable(
   },
   (t) => ({
     tenantIdx: index("team_members_tenant_idx").on(t.tenantId),
-    tenantUserIdx: index("team_members_tenant_user_idx").on(
+    tenantUserUnique: uniqueIndex("team_members_tenant_user_unique").on(
       t.tenantId,
       t.userId,
     ),
@@ -135,7 +135,7 @@ export const onCallSchedules = pgTable(
     // scheduleId remain resolvable after admin deletion (spec §V).
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     // Set on a window the recurring rotation generated (ADR-016 addendum A2);
-    // unique (rotation_id, starts_at) in migration 0159 makes generation exactly-once.
+    // unique (rotation_id, starts_at) in migration 0157 makes generation exactly-once.
     rotationId: uuid("rotation_id"),
   },
   (t) => ({

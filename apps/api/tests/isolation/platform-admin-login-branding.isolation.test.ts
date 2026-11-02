@@ -1,5 +1,5 @@
 /**
- * R13 (docs/specs/multi-org-sandbox.md), migration 0157. Real Postgres: the sandbox's login key and
+ * R13 (docs/specs/multi-org-sandbox.md), migration 0162. Real Postgres: the sandbox's login key and
  * what may touch it are database properties, so they are tested against the database -- format,
  * uniqueness, sandbox-only, the backfill, and what platform_admin_role may read and change (the key,
  * yes; the slug, no longer; neither is writable).

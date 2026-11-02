@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useLogout, useGetIdentity } from "@refinedev/core";
 import { Link, useLocation } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { TOKENS } from "@platform/ui";
 import { userManager } from "../authProvider.js";
 import { initials } from "../lib/format.js";
@@ -13,7 +14,7 @@ import { useOrgBranding } from "../hooks/use-org-branding.js";
 // Nav shown to super-admins only
 const USERS_NAV = {
   route: "/users",
-  label: "Users",
+  label: "nav.users",
   icon: (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -35,7 +36,7 @@ const USERS_NAV = {
 // apps/api/src/routes/admin/system-logs.ts) — agents don't see this entry.
 const SYSTEM_LOGS_NAV = {
   route: "/admin/system-logs",
-  label: "System Logs",
+  label: "nav.systemLogs",
   icon: (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -59,7 +60,7 @@ const SYSTEM_LOGS_NAV = {
 // own access-logs view, not buried in a generic settings screen.
 const API_KEYS_NAV = {
   route: "/admin/api-keys",
-  label: "API Keys",
+  label: "nav.apiKeys",
   icon: (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -88,7 +89,7 @@ const API_KEYS_NAV = {
 // including reads) -- docs/specs/temporal-scheduler.md T15.
 const SCHEDULE_RULES_NAV = {
   route: "/admin/schedule-rules",
-  label: "Schedule Rules",
+  label: "nav.scheduleRules",
   icon: (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -111,7 +112,7 @@ const SCHEDULE_RULES_NAV = {
 // tab-switched on /admin/on-call instead of 4 separate top-level nav rows.
 const ON_CALL_NAV = {
   route: "/admin/on-call",
-  label: "On-Call",
+  label: "nav.onCall",
   icon: (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -133,7 +134,7 @@ const ON_CALL_NAV = {
 // Reachable by every role (admin/agent nav here, customer nav below).
 const DASHBOARD_NAV = {
   route: "/dashboard",
-  label: "Dashboard",
+  label: "nav.dashboard",
   icon: (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -158,7 +159,7 @@ const DASHBOARD_NAV = {
 // admin-only, 2026-09-22 nav reorganization.
 const ANALYTICS_NAV = {
   route: "/analytics",
-  label: "Analytics",
+  label: "nav.analytics",
   icon: (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -181,7 +182,7 @@ const ANALYTICS_NAV = {
 // (reporting.tsx narrows by role either way).
 const REPORTING_NAV = {
   route: "/reporting",
-  label: "Reporting",
+  label: "nav.reporting",
   icon: (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -207,7 +208,7 @@ const REPORTING_NAV = {
 // Moved from the normal workspace nav to admin-only, 2026-09-22 nav reorganization.
 const TEMPLATES_NAV = {
   route: "/modules",
-  label: "Templates",
+  label: "nav.templates",
   icon: (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -227,7 +228,7 @@ const TEMPLATES_NAV = {
 
 const WORKFLOWS_NAV = {
   route: "/workflows",
-  label: "Workflows",
+  label: "nav.workflows",
   icon: (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -248,7 +249,7 @@ const WORKFLOWS_NAV = {
 // Moved from the normal workspace nav to admin-only, 2026-09-22 nav reorganization.
 const AUTOMATIONS_NAV = {
   route: "/automations",
-  label: "Automations",
+  label: "nav.automations",
   icon: (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -268,7 +269,7 @@ const AUTOMATIONS_NAV = {
 
 const RECORDS_NAV = {
   route: "/records",
-  label: "Records",
+  label: "nav.records",
   icon: (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -315,7 +316,7 @@ const SUPER_ADMIN_NAV_EXTRA = [
 
 const SETTINGS_NAV = {
   route: "/settings",
-  label: "Settings",
+  label: "nav.settings",
   icon: (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -419,6 +420,7 @@ export function Layout({
 }: {
   children: React.ReactNode;
 }): React.ReactElement {
+  const { t } = useTranslation();
   const { mutate: refineLogout } = useLogout();
   const { data: identity } = useGetIdentity<{
     id: string;
@@ -471,12 +473,12 @@ export function Layout({
     !isAgent;
   const isPlainUser = isCustomer && roles.includes("user");
   const roleLabel = isAdmin
-    ? "Administrator"
+    ? t("layout.roleAdmin")
     : isAgent
-      ? "Agent"
+      ? t("layout.roleAgent")
       : roles.includes("user")
-        ? "User"
-        : "Customer";
+        ? t("layout.roleUser")
+        : t("layout.roleCustomer");
 
   const name = identity?.name ?? (isCustomer ? "User" : "Admin");
   const email = identity?.email ?? "";
@@ -516,7 +518,7 @@ export function Layout({
               setSidebarOpen((o) => !o);
             }
           }}
-          aria-label="Toggle sidebar"
+          aria-label={t("layout.toggleSidebar")}
         >
           <span />
           <span />
@@ -551,7 +553,7 @@ export function Layout({
               maxWidth: "180px",
             }}
             onClick={() => setProfileOpen((o) => !o)}
-            aria-label="Open profile"
+            aria-label={t("layout.openProfile")}
           >
             <InitialsAvatar
               name={name}
@@ -647,7 +649,7 @@ export function Layout({
                         marginBottom: "2px",
                       }}
                     >
-                      Email
+                      {t("layout.email")}
                     </div>
                     <div
                       style={{
@@ -674,7 +676,7 @@ export function Layout({
                         marginBottom: "2px",
                       }}
                     >
-                      Username
+                      {t("layout.username")}
                     </div>
                     <div
                       style={{
@@ -728,7 +730,7 @@ export function Layout({
                     d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75"
                   />
                 </svg>
-                Sign out
+                {t("layout.signOut")}
               </button>
             </div>
           )}
@@ -765,7 +767,7 @@ export function Layout({
               <Link
                 to="/dashboard"
                 className={`menu-item ${!sidebarOpen && !mobileNavOpen ? "menu-item-icon-only" : ""} ${isActive("/dashboard") ? "active" : ""}`}
-                title={!sidebarOpen ? "Dashboard" : undefined}
+                title={!sidebarOpen ? t("nav.dashboard") : undefined}
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -780,14 +782,16 @@ export function Layout({
                     d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"
                   />
                 </svg>
-                {(sidebarOpen || mobileNavOpen) && <span>Dashboard</span>}
+                {(sidebarOpen || mobileNavOpen) && (
+                  <span>{t("nav.dashboard")}</span>
+                )}
               </Link>
 
               {/* Records — shows cards where user has assigned tickets */}
               <Link
                 to="/records"
                 className={`menu-item ${!sidebarOpen && !mobileNavOpen ? "menu-item-icon-only" : ""} ${isActive("/records") ? "active" : ""}`}
-                title={!sidebarOpen ? "Records" : undefined}
+                title={!sidebarOpen ? t("nav.records") : undefined}
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -802,7 +806,9 @@ export function Layout({
                     d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 00-1.883 2.542l.857 6a2.25 2.25 0 002.227 1.932H19.05a2.25 2.25 0 002.227-1.932l.857-6a2.25 2.25 0 00-1.883-2.542m-16.5 0V6A2.25 2.25 0 016 3.75h3.879a1.5 1.5 0 011.06.44l2.122 2.12a1.5 1.5 0 001.06.44H18A2.25 2.25 0 0120.25 9v.776"
                   />
                 </svg>
-                {(sidebarOpen || mobileNavOpen) && <span>Records</span>}
+                {(sidebarOpen || mobileNavOpen) && (
+                  <span>{t("nav.records")}</span>
+                )}
               </Link>
 
               {/* Reporting — a customer's own "My Performance" dashboard
@@ -815,7 +821,7 @@ export function Layout({
               <Link
                 to="/reporting"
                 className={`menu-item ${!sidebarOpen && !mobileNavOpen ? "menu-item-icon-only" : ""} ${isActive("/reporting") ? "active" : ""}`}
-                title={!sidebarOpen ? "Reporting" : undefined}
+                title={!sidebarOpen ? t("nav.reporting") : undefined}
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -835,7 +841,9 @@ export function Layout({
                     d="M13.5 10.5H21A7.5 7.5 0 0013.5 3v7.5z"
                   />
                 </svg>
-                {(sidebarOpen || mobileNavOpen) && <span>Reporting</span>}
+                {(sidebarOpen || mobileNavOpen) && (
+                  <span>{t("nav.reporting")}</span>
+                )}
               </Link>
 
               {/* Templates — customers can browse / fork workflows. Hidden
@@ -844,7 +852,7 @@ export function Layout({
                 <Link
                   to="/modules"
                   className={`menu-item ${!sidebarOpen && !mobileNavOpen ? "menu-item-icon-only" : ""} ${isActive("/modules") ? "active" : ""}`}
-                  title={!sidebarOpen ? "Templates" : undefined}
+                  title={!sidebarOpen ? t("nav.templates") : undefined}
                 >
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
@@ -859,7 +867,9 @@ export function Layout({
                       d="M13.5 16.875h3.375m0 0h3.375m-3.375 0V13.5m0 3.375v3.375M6 10.5h2.25a2.25 2.25 0 002.25-2.25V6a2.25 2.25 0 00-2.25-2.25H6A2.25 2.25 0 003.75 6v2.25A2.25 2.25 0 006 10.5zm0 9.75h2.25A2.25 2.25 0 0010.5 18v-2.25a2.25 2.25 0 00-2.25-2.25H6a2.25 2.25 0 00-2.25 2.25V18A2.25 2.25 0 006 20.25zm9.75-9.75H18a2.25 2.25 0 002.25-2.25V6A2.25 2.25 0 0018 3.75h-2.25A2.25 2.25 0 0013.5 6v2.25a2.25 2.25 0 002.25 2.25z"
                     />
                   </svg>
-                  {(sidebarOpen || mobileNavOpen) && <span>Templates</span>}
+                  {(sidebarOpen || mobileNavOpen) && (
+                    <span>{t("nav.templates")}</span>
+                  )}
                 </Link>
               )}
 
@@ -870,7 +880,7 @@ export function Layout({
                 <Link
                   to="/workflows"
                   className={`menu-item ${!sidebarOpen && !mobileNavOpen ? "menu-item-icon-only" : ""} ${isActive("/workflows") ? "active" : ""}`}
-                  title={!sidebarOpen ? "Workflows" : undefined}
+                  title={!sidebarOpen ? t("nav.workflows") : undefined}
                 >
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
@@ -885,7 +895,9 @@ export function Layout({
                       d="M3 8.689c0-.864.933-1.406 1.683-.977l7.108 4.061a1.125 1.125 0 010 1.954l-7.108 4.061A1.125 1.125 0 013 16.811V8.69zM12.75 8.689c0-.864.933-1.406 1.683-.977l7.108 4.061a1.125 1.125 0 010 1.954l-7.108 4.061a1.125 1.125 0 01-1.683-.977V8.69z"
                     />
                   </svg>
-                  {(sidebarOpen || mobileNavOpen) && <span>Workflows</span>}
+                  {(sidebarOpen || mobileNavOpen) && (
+                    <span>{t("nav.workflows")}</span>
+                  )}
                 </Link>
               )}
 
@@ -893,11 +905,11 @@ export function Layout({
               <Link
                 to={USERS_NAV.route}
                 className={`menu-item ${!sidebarOpen && !mobileNavOpen ? "menu-item-icon-only" : ""} ${isActive(USERS_NAV.route) ? "active" : ""}`}
-                title={!sidebarOpen ? USERS_NAV.label : undefined}
+                title={!sidebarOpen ? t(USERS_NAV.label) : undefined}
               >
                 {USERS_NAV.icon}
                 {(sidebarOpen || mobileNavOpen) && (
-                  <span>{USERS_NAV.label}</span>
+                  <span>{t(USERS_NAV.label)}</span>
                 )}
               </Link>
             </nav>
@@ -907,16 +919,18 @@ export function Layout({
               <Link
                 to="/settings"
                 className={`menu-item ${!sidebarOpen && !mobileNavOpen ? "menu-item-icon-only" : ""} ${isActive("/settings") ? "active" : ""}`}
-                title={!sidebarOpen ? "Settings" : undefined}
+                title={!sidebarOpen ? t("nav.settings") : undefined}
               >
                 {SETTINGS_NAV.icon}
-                {(sidebarOpen || mobileNavOpen) && <span>Settings</span>}
+                {(sidebarOpen || mobileNavOpen) && (
+                  <span>{t("nav.settings")}</span>
+                )}
               </Link>
               <button
                 type="button"
                 onClick={handleLogout}
                 className={`menu-item sidebar-logout ${!sidebarOpen && !mobileNavOpen ? "menu-item-icon-only" : ""}`}
-                title={!sidebarOpen ? "Sign out" : undefined}
+                title={!sidebarOpen ? t("layout.signOut") : undefined}
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -931,7 +945,9 @@ export function Layout({
                     d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75"
                   />
                 </svg>
-                {(sidebarOpen || mobileNavOpen) && <span>Sign out</span>}
+                {(sidebarOpen || mobileNavOpen) && (
+                  <span>{t("layout.signOut")}</span>
+                )}
               </button>
             </div>
           </aside>
@@ -957,10 +973,10 @@ export function Layout({
         key={item.route}
         to={item.route}
         className={`menu-item ${!sidebarOpen && !mobileNavOpen ? "menu-item-icon-only" : ""} ${isActive(item.route) ? "active" : ""}`}
-        title={!sidebarOpen ? item.label : undefined}
+        title={!sidebarOpen ? t(item.label) : undefined}
       >
         {item.icon}
-        {(sidebarOpen || mobileNavOpen) && <span>{item.label}</span>}
+        {(sidebarOpen || mobileNavOpen) && <span>{t(item.label)}</span>}
       </Link>
     );
   }
@@ -987,7 +1003,9 @@ export function Layout({
               <>
                 <div className="nav-divider" />
                 {(sidebarOpen || mobileNavOpen) && (
-                  <div className="sidebar-section-label">Admin</div>
+                  <div className="sidebar-section-label">
+                    {t("nav.adminSection")}
+                  </div>
                 )}
                 {adminOnlyNav.map(renderNavItem)}
               </>
@@ -1000,17 +1018,17 @@ export function Layout({
             <Link
               to={SETTINGS_NAV.route}
               className={`menu-item ${!sidebarOpen && !mobileNavOpen ? "menu-item-icon-only" : ""} ${isActive(SETTINGS_NAV.route) ? "active" : ""}`}
-              title={!sidebarOpen ? SETTINGS_NAV.label : undefined}
+              title={!sidebarOpen ? t(SETTINGS_NAV.label) : undefined}
             >
               {SETTINGS_NAV.icon}
-              {sidebarOpen && <span>{SETTINGS_NAV.label}</span>}
+              {sidebarOpen && <span>{t(SETTINGS_NAV.label)}</span>}
             </Link>
 
             <button
               type="button"
               onClick={handleLogout}
               className={`menu-item sidebar-logout ${!sidebarOpen && !mobileNavOpen ? "menu-item-icon-only" : ""}`}
-              title={!sidebarOpen ? "Sign out" : undefined}
+              title={!sidebarOpen ? t("layout.signOut") : undefined}
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -1025,7 +1043,7 @@ export function Layout({
                   d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75"
                 />
               </svg>
-              {sidebarOpen && <span>Sign out</span>}
+              {sidebarOpen && <span>{t("layout.signOut")}</span>}
             </button>
           </div>
         </aside>

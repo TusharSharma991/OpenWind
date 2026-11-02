@@ -16,7 +16,7 @@ opened only after #1077 merges, replaying these commits with `git rebase --onto 
   own per-IP limiter, bucket `rl:public-branding:<ip>`, apart from the `/auth` class (10 per minute,
   shared with sign-in), set by `RATE_LIMIT_PUBLIC_BRANDING_PER_MIN` (default 30). It lets requests
   through if Redis is down, as the other limiters do.
-- **Link for the platform admin.** Migration `0156_platform_admin_slug_grant` gives
+- **Link for the platform admin.** Migration `0161_platform_admin_slug_grant` gives
   `platform_admin_role` `SELECT (slug)` and nothing wider. `slug` is on the sandbox view, the row
   menu has "Copy login link", the detail panel shows it, and the creation reveal, handover CSV and
   clipboard text carry it (the handover response now has the slug).

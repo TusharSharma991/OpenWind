@@ -31,14 +31,49 @@ const router = new Hono<Vars>();
 
 router.use("*", requireAuth(db));
 
-const TeamIdParamSchema = z.object({ id: z.string().uuid() });
+const TeamIdParamSchema = z.object({ id: z.guid() });
 
 const ListTeamsQuerySchema = z.object({
-  cursor: z.string().uuid().optional(),
+  cursor: z.guid().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
+// Also set in apps/admin-ui/src/pages/teams/index.tsx, which cannot import @platform/teams.
 const MAX_TEAM_MEMBERS = 100;
+
+class TeamChangedError extends Error {}
+
+// The refuseBadMembers check and the write are separate transactions, so two admins adding the same
+// person to two teams at once both pass it; the unique index is what stops the second.
+function isOneTeamViolation(err: unknown): boolean {
+  if (!err || typeof err !== "object" || !("cause" in err)) return false;
+  const cause = err.cause;
+  return (
+    !!cause &&
+    typeof cause === "object" &&
+    "code" in cause &&
+    cause.code === "23505" &&
+    "constraint_name" in cause &&
+    cause.constraint_name === "team_members_tenant_user_unique"
+  );
+}
+
+function oneTeamViolationResponse(c: Context<Vars>): Response {
+  return c.json(
+    {
+      error: "VALIDATION_ERROR",
+      message: "Validation failed",
+      fields: [
+        {
+          field: "memberUserIds",
+          message:
+            "Someone in this list was just added to another team. Reload and try again.",
+        },
+      ],
+    },
+    422,
+  );
+}
 
 const MemberUserIdsSchema = z
   .array(z.string().trim().min(1).max(255))
@@ -89,7 +124,11 @@ async function loadMembers(
 
 // Duplicate and eligibility checks for a submitted member list. Returns the
 // refusal response, or null when the list is acceptable. Runs before any
-// transaction opens (the Zitadel lookup must not hold a connection, #952).
+// transaction opens (the Zitadel lookup must not hold a connection, #952). That
+// leaves two accepted windows: a role revoked at Zitadel after the check is not
+// seen by the write, and the next schedule create or patch re-checks membership
+// anyway; and the list of current members used to skip people already on the
+// team is re-checked against the locked rows by the PUT handler below.
 async function refuseBadMembers(
   c: Context<Vars>,
   auth: AuthContext,
@@ -358,6 +397,7 @@ router.post(
       }
       return c.json({ data: row }, 201);
     } catch (err: unknown) {
+      if (isOneTeamViolation(err)) return oneTeamViolationResponse(c);
       // Postgres unique_violation on teams_tenant_name_unique (R3: duplicate
       // name within a tenant returns 409).
       if (
@@ -570,11 +610,12 @@ router.put(
       if (!current) {
         return c.json({ error: "NOT_FOUND", message: "Team not found" }, 404);
       }
+      const alreadyChecked = new Set(current.map((m) => m.userId));
       const refused = await refuseBadMembers(
         c,
         auth,
         memberUserIds,
-        new Set(current.map((m) => m.userId)),
+        alreadyChecked,
         id,
       );
       if (refused) return refused;
@@ -591,8 +632,19 @@ router.put(
           )
           .limit(1);
         if (!team) return undefined;
-        const before = (await loadMembers(tx, auth.tenantId, [id])).get(id);
-        await replaceTeamMembers(tx, auth.tenantId, id, memberUserIds);
+        const previous = await replaceTeamMembers(
+          tx,
+          auth.tenantId,
+          id,
+          memberUserIds,
+        );
+        // The pre-check skipped people the team had when it ran. Anyone who left the team since
+        // was skipped without being checked, so refuse and roll back instead of writing them.
+        const nowOnTeam = new Set(previous);
+        const unchecked = memberUserIds.filter(
+          (u) => alreadyChecked.has(u) && !nowOnTeam.has(u),
+        );
+        if (unchecked.length > 0) throw new TeamChangedError();
         await writeAuditEntry(tx, {
           tenantId: auth.tenantId,
           actorId: auth.userId,
@@ -601,7 +653,7 @@ router.put(
           resourceId: id,
           action: "updated",
           beforeSnapshot: {
-            memberUserIds: (before ?? []).map((m) => m.userId),
+            memberUserIds: previous,
           },
           afterSnapshot: { memberUserIds },
         });
@@ -619,6 +671,16 @@ router.put(
       }
       return c.json({ data: row });
     } catch (err: unknown) {
+      if (isOneTeamViolation(err)) return oneTeamViolationResponse(c);
+      if (err instanceof TeamChangedError) {
+        return c.json(
+          {
+            error: "CONFLICT",
+            message: "The team changed while saving. Reload it and try again.",
+          },
+          409,
+        );
+      }
       logger.error(
         { err, tenantId: auth.tenantId, teamId: id },
         "setTeamMembers failed",

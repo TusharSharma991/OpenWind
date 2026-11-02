@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React from "react";
 import { IconButton } from "@platform/ui";
 import { SandboxRowActions } from "./sandbox-row-actions.js";
@@ -32,6 +33,7 @@ export function SandboxDetailPanel({
   onClose,
   onActionDone,
 }: SandboxDetailPanelProps): React.ReactElement {
+  const { t } = useTranslation();
   React.useEffect(() => {
     function onKey(e: KeyboardEvent): void {
       if (e.key === "Escape") onClose();
@@ -73,14 +75,17 @@ export function SandboxDetailPanel({
               loginKey={sandbox.loginKey}
               onDone={onActionDone}
             />
-            <IconButton aria-label="Close details" onClick={onClose}>
+            <IconButton
+              aria-label={t("platformAdmin.closeDetails")}
+              onClick={onClose}
+            >
               ✕
             </IconButton>
           </div>
         </div>
 
         <dl className="pa-meta">
-          <dt>Tenant ID</dt>
+          <dt>{t("platformAdmin.tenantId")}</dt>
           <dd className="pa-id" style={{ fontSize: 13 }}>
             {sandbox.id}
           </dd>
@@ -94,16 +99,16 @@ export function SandboxDetailPanel({
               </dd>
             </>
           )}
-          <dt>Created</dt>
+          <dt>{t("platformAdmin.created")}</dt>
           <dd>
             {new Date(sandbox.createdAt).toLocaleString()} (
             {relativeTime(sandbox.createdAt)})
           </dd>
-          <dt>Trial ends</dt>
+          <dt>{t("platformAdmin.trialEnds")}</dt>
           <dd>
             {sandbox.trialEndsAt
-              ? `${new Date(sandbox.trialEndsAt).toLocaleString()} (${trialCountdown(sandbox.trialEndsAt)})`
-              : "No trial end set"}
+              ? `${new Date(sandbox.trialEndsAt).toLocaleString()} (${trialCountdown(t, sandbox.trialEndsAt)})`
+              : t("platformAdmin.noTrialEndSet")}
           </dd>
         </dl>
 

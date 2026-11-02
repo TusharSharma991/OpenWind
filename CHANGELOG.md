@@ -3,40 +3,72 @@
 All notable changes to OpenWind are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [Unreleased — session and login link]
+## [Unreleased — organisation login link and branding]
+
+### Added
+
+- A sandbox organisation has its own login link, `/login?org=<key>`, where the key is 16 random hex characters
+  (never the organisation's name). The login page shows that organisation's name and logo before anyone signs
+  in, through a public, rate-limited lookup that returns only the name and logo. A platform admin sees and
+  can copy the link from the sandbox list and detail panel. A key that matches no sandbox shows a plain login
+  page with no brand.
+- Migrations 0161 and 0162: `tenants.login_key` (unique, format-checked, filled in for existing sandboxes) and
+  the column-level grants that go with it.
 
 ### Changed
 
-- The idle logout now defaults to 15 minutes (it was 5). A `VITE_IDLE_LOGOUT_TIMEOUT_MINUTES` value set in a
-  deployment's environment still overrides it.
-- A person who signed in through their organisation's own login link is sent back to that link after signing
-  out, an idle logout or an expired session, not to the generic `/login`. The link is remembered in the
-  browser only.
+- A person who signed in through their organisation's own link is sent back to that link after signing out, an
+  idle logout or an expired session, not to the generic `/login`. The key is remembered in the browser only,
+  checked as 16 lowercase hex characters on every read and write, and ignored if storage fails.
 
-## [Unreleased — org chart fixes]
+## [Unreleased — Superset erasure enablement check (#1137)]
 
-### Fixed
+### Added
 
-- Re-seeding a sandbox's org chart no longer leaves a stale manager on the top-level managers. Before, an
-  account that became a top-level manager after accounts were added or removed kept its earlier manager, and
-  the whole organisation ended up as one long chain.
+- `SUPERSET_DEPLOYMENT` (`off` default, `on`): says whether an install runs Superset. Read by the API and the
+  worker. `off`: no Superset is expected, the self-check records `skipped`, a user erase answers `disabled`,
+  a tenant purge does not wait on Superset, nothing alerts and no other Superset variable is needed. `on`:
+  the self-check is mandatory and erasure fails closed (see Changed).
+- Superset `GET /openwind/erasure/status` (service account only) reports whether Stage 2 and erasure are on
+  there. A worker BullMQ repeatable job (queue `superset-erasure-selfcheck`, fixed job id, one run per
+  interval however many worker replicas) compares it with the local setting, runs a no-op smoke erase for a
+  synthetic tenant, and records the result in Redis. New settings `SUPERSET_SELFCHECK_INTERVAL_MINUTES`
+  (default 15) and `SUPERSET_SELFCHECK_TTL_MINUTES` (default 30, at least twice the interval). New metrics
+  `openwind_superset_erasure_selfcheck_total{outcome}` and `openwind_superset_erasure_config_mismatch`; new
+  alerts `SupersetErasureConfigMismatch` and `SupersetErasureSelfcheckFailing`; `SupersetErasureFailed` also
+  covers `outcome="unverified"`.
+- API: `DELETE /users/:userId` can answer `superset.status: "unverified"` (additive enum value, HTTP 200). It
+  also writes a `superset_erasure.failed` audit row (existing action, no migration) with
+  `metadata.status: "unverified"` for the reconciler (#1138).
+
+### Upgrade note
+
+- **Existing deployments that run Superset must set `SUPERSET_DEPLOYMENT=on`** on `ow-backend` and `ow-worker`.
+  `docker-compose.prod.yml` now defaults it to `on` for both; with `docker-compose.yml` and the `reporting`
+  profile, set it in `.env`. Left at `off`, the worker's self-check still notices a Superset that reports
+  Stage 2 on (a `mismatch` alert) and erasure still runs in full, but a Stage 1 install would flush nothing.
+- `SUPERSET_ERASURE_ENABLED` is removed from the settings: it is ignored, and the API and worker log a startup
+  warning if it is still set. Remove it. Installs without Superset need nothing: `off` is the default.
+- An `SUPERSET_OAUTH_CLIENT_ID` set while `SUPERSET_DEPLOYMENT` is `off` logs a startup warning. The id no
+  longer decides whether erasure is enabled; with the deployment `on` it only tells Stage 2 from Stage 1.
+
+### Changed
+
+- Erasure fails closed when Superset's Stage 2 state cannot be confirmed (deployment `on` only). A user erase
+  with the local mode "cache-only" and no fresh self-check answers `unverified` (200, admin-ui warning)
+  instead of "Superset holds no account"; the tenant purge job fails and retries instead of completing. When
+  Superset reports Stage 2 on, user erase, tenant purge and the cache flush run in full even if this service
+  has the flag `off` or no `SUPERSET_OAUTH_CLIENT_ID`.
+- The Superset cache flush with the flag `off` is logged at info instead of warn.
+
+## [Unreleased — org chart and idle logout]
+
+### Changed
+
 - The org chart opens fully expanded for an organisation of 60 people or fewer. Before, it showed only the
   first three levels, so a chain of managers hid most people behind collapsed cards.
-
-## [Unreleased — schedule rules page]
-
-### Changed
-
-- New schedule rules default to India time (Asia/Kolkata) instead of UTC. Existing rules keep the zone they
-  were saved with.
-- The rule list uses round icon buttons (pause or resume, edit, delete), as the on-call roster does. Pausing
-  and deleting now ask for confirmation first, and the warning says what happens to missed fire times and to
-  tickets already created. Resuming has no warning.
-
-### Removed
-
-- The Archive button on the rule list. Pausing a rule does the same job. The API still accepts the archived
-  status, and rules archived earlier still show.
+- A signed-in session now logs out after 15 minutes of inactivity by default (was 5).
+  `VITE_IDLE_LOGOUT_TIMEOUT_MINUTES` still overrides it.
 
 ## [Unreleased — recurring on-call rotation]
 
@@ -62,8 +94,131 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   roster runs per team, so a paused roster cannot be resumed once another is active.
 - A window's end is calculated from its start and the cycle length. A window that is running can have its end
   moved; editing a repeating window's length updates the roster's cycle and the next window.
-- A person can be on only one team at a time. The team member picker is a searchable multi-select that lists
-  only people not on another team.
+- A person can be on only one team at a time, enforced by the database as well as the API, so two admins
+  saving at once cannot put someone on two teams. The team member picker is a searchable multi-select that
+  lists only people not on another team.
+
+## [Unreleased — schedule rules page]
+
+### Changed
+
+- New schedule rules default to India time (Asia/Kolkata) instead of UTC. Existing rules keep the zone they
+  were saved with.
+- The rule list uses round icon buttons (pause or resume, edit, delete). Pausing and deleting now ask for
+  confirmation first, and the warning says what happens to missed fire times and to records already created.
+  Resuming has no warning.
+
+### Removed
+
+- The Archive button on the rule list. Pausing a rule does the same job. The API still accepts the archived
+  status, and rules archived earlier still show.
+
+## [Unreleased — module catalog sync (#1079)]
+
+### Fixed
+
+- The module catalog (`modules`, which drives the Templates page and which modules new tenants
+  get automatically) is now written by `pnpm db:migrate` / the `bootstrap` container as
+  `migration_user`, on every run, instead of by the API at runtime. Since migration 0061 the API
+  role could not write it, so a fresh database stayed empty and catalog changes never applied.
+  The admin visibility toggle works again (migration 0159, column-scoped grant on `is_visible`).
+
+### Changed
+
+- **Operators must run the migration step** (`pnpm db:migrate`, or `docker compose --profile
+bootstrap up bootstrap`) on a fresh database and after any change to the catalog. The API now
+  exits non-zero at startup, with a message naming that step, when the catalog is empty.
+- Removed `POST /modules/seed`, the "Seed Templates" button and the empty-registry auto-seed.
+  `pnpm seed:demo` and `pnpm reset:data` need `MIGRATION_DATABASE_URL` and re-sync the catalog.
+
+## [Unreleased — migration 0158 fresh install (#1153)]
+
+### Fixed
+
+- Migration 0158 (`access_log_retention_role`) no longer stops a from-scratch migrate as the
+  non-superuser `migration_user`. The unconditional `ALTER ROLE` is replaced by an attribute check that
+  raises on a pre-existing role with unsafe attributes (and repairs it only for a superuser). Edited in
+  place; databases that already applied 0158 are unaffected.
+
+## [Unreleased — OTel/Sentry upgrade (#793)]
+
+### Security
+
+- Upgraded `@sentry/node` to 10.x and removed an unused OTel 1.x metrics dependency, clearing
+  GHSA-8988-4f7v-96qf (OTel core baggage memory) and GHSA-qqmp-wf37-98f9 (DB username in spans).
+  Sentry PII (`sendDefaultPii: false`) is now pinned explicitly; tracing stays off.
+- Stopped Sentry adding `sentry-trace` and `baggage` headers (which carry the DSN public key) to
+  outbound HTTP calls to connectors, webhooks and partners (`tracePropagationTargets: []`).
+
+## [Unreleased — Superset production config (#1142)]
+
+### Fixed
+
+- Production compose now requires `SUPERSET_SERVICE_ACCOUNT_PASSWORD` for `ow-worker` and passes it
+  `SUPERSET_INTERNAL_URL` and `SUPERSET_SERVICE_ACCOUNT_USER`, so GDPR erasure jobs no longer retry for
+  about 26 hours against a worker that cannot log in to Superset. The Superset erasure runbook lists
+  the four OpenBao paths to set when Stage 2 is enabled.
+
+### Upgrade note
+
+- Add `SUPERSET_SERVICE_ACCOUNT_PASSWORD` to `openwind/<env>/worker` in OpenBao before deploying this
+  compose file, even with reporting off, or `ow-worker` refuses to start (exit 78).
+
+## [Unreleased — access-log retention role (#1131)]
+
+### Fixed
+
+- The daily access-log retention job could not delete from `admin_audit_log` under the default
+  stack (the worker runs as `app_user`, which is append-only there). Added a narrow
+  `access_log_retention_role` (migration 0158) that the sweep switches into; `app_user` gains no
+  new privileges.
+
+## [Unreleased — Sentry free-text scrubbing (#1149)]
+
+### Security
+
+- Sentry events and `@platform/logger` now share one scrubbing module (`packages/logger/src/redact.ts`).
+  Besides key-based redaction, string values (message, exception values, breadcrumbs, `extra`,
+  `contexts`, `tags`) are scrubbed for email addresses, bearer/JWT tokens and `key=value` secrets.
+- Sentry events no longer carry `user.ip_address`, `server_name`, `request.data`, the request query
+  string or stack-frame source context lines.
+  Free-text IP addresses inside messages are not scrubbed.
+- The logger now also redacts one level of nested sensitive keys, and scrubs the log message and
+  top-level string fields. Its redaction marker is `[REDACTED]` (was pino's `[Redacted]`).
+
+## [Unreleased — multi-lingual support Phase 1 (#200)]
+
+### Added
+
+- 11-language i18n infrastructure: English (default) + Hindi, Marathi, Bengali, Tamil, Telugu,
+  Kannada, French, German, Italian, Spanish. Language preference is stored in `localStorage`
+  (`ow:language`) and validated against the supported list on every read — unrecognised or
+  injected values silently fall back to English.
+- Language selector tab in Settings (available to all users, not admin-only). The active
+  language is reflected on `document.documentElement.lang` for screen readers.
+- Noto Sans + Noto Sans Devanagari loaded via Google Fonts with `unicode-range` blocks so
+  Indic-script fonts (~1.5 MB) download only for users who need them.
+- Refine `i18nProvider` wired in `App.tsx` (`translate`, `changeLocale`, `getLocale`).
+- Locale-completeness CI test — fails if any non-English `common.json` is missing a key
+  present in the English baseline.
+
+### Changed
+
+- `analytics.tsx` `getTodayLabel` and `dashboard.tsx` `formatDueDateLong` now read the active
+  locale from `useLocale()` instead of hardcoding `"en-IN"`.
+
+## [Unreleased — erase a user from the Users page (#728)]
+
+### Added
+
+- Admins can erase a user from the Users page (`DELETE /users/:userId`, the existing GDPR erasure).
+  The Erase button never shows on the admin's own row. A confirmation dialog asks them to type the
+  user's name before Erase is enabled; afterwards the user leaves the list and a toast reports the
+  result, including the API's sentence about Superset when it sends one (#1100). A failed erasure
+  keeps the user and shows the error; when only the sign-in removal failed (`SIGN_IN_NOT_REMOVED`,
+  #1100) it says "Erase incomplete" and that erasing again retries it.
+- `ConfirmDeleteDialog` takes an optional `typeToConfirm` for deletes that cannot be undone, and
+  the admin-ui has a toast (`showToast`, mounted once in `App.tsx`).
 
 ## [Unreleased — on-call teams with members]
 
@@ -74,12 +229,51 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   (`PUT /admin/teams/:id/members`; `memberUserIds` on team create). Removing a member, erasing a user
   or deleting a team closes the order up so it has no gaps.
 - A team's members are included in the personal-data export.
+- Saving a team's members answers 409 when someone left the team between the eligibility check and the write, instead of saving a person who was never checked.
 
 ### Changed
 
 - The on-call roster modal picks the team first, then offers only that team's members for primary,
   backup and escalation manager. The API enforces the same rule for new and changed roles. A team with
   no members keeps the old behaviour, and an existing window that names a former member stays editable.
+
+## [Unreleased — Superset erasure runs automatically (#728)]
+
+### Security
+
+- `DELETE /users/:userId` now erases only a person of the admin's own organisation (signed in, or
+  in the organisation's Zitadel users). Any other id gets 404 and nothing is touched. Before, the
+  Zitadel login of any user id was deleted, including one from another organisation.
+- An admin can no longer erase their own account (403), and each admin may send at most 10 erase
+  requests a minute (429 with `Retry-After`).
+
+### Fixed
+
+- When the user's data is erased but their Zitadel sign-in cannot be removed, the erase now answers
+  502 (`SIGN_IN_NOT_REMOVED`) instead of success, so the admin knows the person can still sign in;
+  erasing again retries it. A sign-in that is already gone counts as removed.
+
+### Added
+
+- Erasing a user, or purging a tenant, now also erases their data from Superset's own database
+  when Superset Stage 2 is on. A `superset-erasure` worker job calls Superset's erase endpoint
+  until it finishes and retries for about 26 hours (1 minute up to 1 hour apart) if Superset is
+  down. Migration `0156_superset_erasure_audit_actions` adds the audit actions
+  `superset_erasure.completed` and `superset_erasure.failed`; each is written by the system with the
+  same tenant and resource id as the platform's own erase row, and holds counts only.
+- `SUPERSET_OAUTH_CLIENT_ID` (empty counts as unset) and `SUPERSET_ERASURE_ENABLED` (default
+  `true`) for `ow-backend` and `ow-worker`. With Stage 2 off the erasure only flushes Superset's
+  cache, or does nothing (and logs a warning) when `SUPERSET_ERASURE_ENABLED=false`; with Stage 2 on
+  it cannot be turned off.
+- A user's Superset data is erased only when they were a member of the erasing admin's tenant.
+  `ow-worker` now receives `SUPERSET_INTERNAL_URL`, `SUPERSET_SERVICE_ACCOUNT_USER` and
+  `SUPERSET_SERVICE_ACCOUNT_PASSWORD`, as `ow-backend` does.
+- `SupersetErasureFailed` alert (an erasure spent every retry, or could not be queued at all:
+  `outcome="not_queued"`; a tenant purge then fails and retries so it is queued again),
+  `SupersetErasureJobFailedInQueue` (a
+  failed job is waiting in the queue, which also catches a job BullMQ failed after it stalled) and the
+  [Superset erasure runbook](docs/runbooks/superset-erasure.md). Production needs the Stage 2 client
+  id and the service account password at the API's and worker's own settings; see the runbook.
 
 ## [Unreleased — org-view follow-ups (#1072)]
 

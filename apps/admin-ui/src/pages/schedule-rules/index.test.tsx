@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import "../../i18n.js";
 import {
   render,
   screen,
@@ -494,6 +495,18 @@ describe("ScheduleRulesPage", () => {
     expect((JSON.parse(patchInit.body) as { timezone: string }).timezone).toBe(
       "Pacific/Auckland",
     );
+  });
+
+  it("says what pausing does for a rule with catch-up on, and names no record type", async () => {
+    queueRefresh([{ ...RULE_A, catchUp: true }]);
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByText("Weekly Standup")).toBeTruthy(),
+    );
+
+    fireEvent.click(screen.getByLabelText("Pause rule"));
+    expect(screen.getByText(/Catch-up is on/)).toBeTruthy();
+    expect(screen.getByRole("alertdialog").textContent).not.toMatch(/ticket/i);
   });
 
   it("toggles pause/resume on a rule", async () => {

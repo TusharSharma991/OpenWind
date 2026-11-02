@@ -13,6 +13,8 @@ export {
   notificationDispatchDurationSeconds,
   notificationPolicyMatchTotal,
   mentionRecordFailureTotal,
+  supersetErasureTotal,
+  supersetErasureSelfcheckTotal,
   retentionDeletedRowsTotal,
   getSerializedMetrics,
 } from "./metrics.js";

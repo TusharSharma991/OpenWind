@@ -359,7 +359,7 @@ A Redis outage lets the request through, as ADR-013's limiter already does.
 login link within that minute.
 ✓ The platform admin gets the link. `loginKey` is on the sandbox view (R2: tenant metadata, not
 business data) and `platform_admin_role` gains `SELECT (login_key)` and nothing wider; the earlier
-`SELECT (slug)` grant (migration 0156) is revoked, since nothing reads the slug any more. The
+`SELECT (slug)` grant (migration 0161) is revoked, since nothing reads the slug any more. The
 dashboard row menu and the detail panel offer a copyable `<origin>/login?org=<login_key>`, and the
 handover CSV, the clipboard text and the creation reveal include the same link.
 ✓ Accepted risks (security review, 2026-10-26, low): the per-IP key trusts `X-Real-IP` and

@@ -61,7 +61,11 @@
  * each DELETE targets by tenant_id and missing rows are a no-op.
  */
 
-import { Worker } from "@platform/telemetry";
+import { Worker, supersetErasureTotal } from "@platform/telemetry";
+import {
+  readSupersetSelfcheck,
+  resolveSupersetErasureMode,
+} from "@platform/redis";
 import { and, eq, inArray } from "drizzle-orm";
 import {
   db,
@@ -82,12 +86,14 @@ import {
   pluginErrors,
   pluginDefinitions,
 } from "@platform/db";
+import { env, supersetErasureMode } from "@platform/config";
 import { logger } from "@platform/logger";
 import { writeAuditEntry, anonymizeAuditLogForTenant } from "@platform/audit";
 import { deleteTenantFiles } from "@platform/files";
 import { deleteSandboxHandoverCredentials } from "@platform/auth";
 import { connection } from "./queues.js";
 import { enqueueSupersetCacheFlush } from "./superset-cache-flush.js";
+import { enqueueSupersetErasure } from "./superset-erasure.js";
 
 import {
   entityInstances,
@@ -226,6 +232,48 @@ async function cleanUpOutsideDatabase(tenantId: string): Promise<void> {
   // #728: Superset caches query results (including this tenant's) under keys that are not
   // namespaced by tenant, so the cache is flushed once after the purge. Never throws.
   await enqueueSupersetCacheFlush(tenantId, "tenant_purged");
+
+  // #728: with Stage 2 on, Superset holds this tenant's user accounts, queries and logs. The
+  // erasure retries until it finishes and records the outcome. If it cannot even be queued, this
+  // purge job fails so its own retry (the "already purged" path) queues it again.
+  //
+  // #1137: "on" is what Superset reports (the worker self-check), not only this process's own
+  // SUPERSET_DEPLOYMENT / SUPERSET_OAUTH_CLIENT_ID. With SUPERSET_DEPLOYMENT=off nothing waits on
+  // Superset. When the deployment is on, this process says Stage 2 is off and Superset has not confirmed
+  // that, the purge must not look finished: it fails, so the job shows as failed (and its retry
+  // looks again) instead of leaving a tenant's Superset accounts behind with no signal.
+  const localMode = supersetErasureMode(env);
+  const { mode, verified, overridden } = resolveSupersetErasureMode(
+    localMode,
+    localMode === "full" ? null : await readSupersetSelfcheck(),
+  );
+  if (overridden) {
+    logger.error(
+      { tenantId },
+      "tenant-purge: Superset reports Stage 2 is on but the worker has SUPERSET_DEPLOYMENT off or no SUPERSET_OAUTH_CLIENT_ID; erasing in Superset anyway",
+    );
+  }
+  if (mode === "full") {
+    if (
+      !(await enqueueSupersetErasure(
+        { kind: "tenant", tenantId },
+        { force: overridden },
+      ))
+    ) {
+      throw new Error(
+        "tenant-purge: the Superset erasure could not be queued; retrying the purge job",
+      );
+    }
+  } else if (mode === "cache-only" && !verified) {
+    supersetErasureTotal.add(1, { outcome: "unverified" });
+    logger.error(
+      { tenantId },
+      "tenant-purge: Superset's Stage 2 state could not be confirmed, so it is not known whether Superset holds this tenant's accounts; see docs/runbooks/superset-erasure.md",
+    );
+    throw new Error(
+      "tenant-purge: the Superset erasure could not be verified (no fresh self-check result); retrying the purge job",
+    );
+  }
 }
 
 export const tenantPurgeWorker = new Worker<PurgeJobData>(

@@ -1,7 +1,7 @@
 ## 2026-10-28 — On-call rotation: edit-modal controls, pause, preview, one team per person
 
 **Session type:** implementation after local testing (owner-directed changes on `tushar`)
-**PR:** none yet. Folds into PR B (`feat/oncall-rotation`) when it opens after PR A (#1103) merges.
+**PR:** PR B, opened after PR A (#1103) merged.
 **Spec:** [oncall-team-rotation](../../specs/oncall-team-rotation.md) R1, R7, R9, R11.
 
 Owner testing of the rebuilt local stack changed how repeating rosters are edited.
@@ -24,3 +24,17 @@ Owner testing of the rebuilt local stack changed how repeating rosters are edite
 - Pausing deletes rows for good (with audit entries), unlike a soft delete, so a later resume does not collide with the `(rotation_id, starts_at)` unique index.
 - The ADR-016 addendum (A2) still says stopping keeps generated windows and does not mention one team per person; a human needs to update it.
 - Local dev data: the one existing rotation was corrected by hand (cycle 3, cursor at its window's end) after the fix.
+- Security review of PR B (2026-10-30): no blocking findings. `PATCH /admin/on-call-rotations/:id` now
+  locks the rotation row before reading it, so the audit snapshot and the resume check cannot go stale
+  against the worker. Known and accepted: messages already sent are not retracted when pausing removes a
+  future window.
+- Review follow-up (2026-10-30): migration 0160 now adds a unique index on `team_members (tenant_id,
+user_id)` in place of the plain one, so the one-team-per-person race ends in a `422`; schedule `PATCH`
+  also filters deleted windows in its write; a rotation whose team was deleted shows why it makes no
+  windows; Escape closes the member picker. Not changed: the worker still polls every active rotation,
+  because a rotation's next start is past the notice lead as soon as its windows exist, so filtering on it
+  would skip the notices still due on those windows.
+- Merge with main (2026-11-02): main took migrations 0158 (access-log retention role, #1131) and 0159, so the
+  rotation migration is now `0160_oncall_rotations` with a journal `when` later than 0159's. A database that
+  applied the old 0158 rotation migration from this branch (local or test only, never main) has the objects
+  already and needs the journal row for `0160_oncall_rotations` inserted by hand instead of re-running it.

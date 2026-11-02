@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
+import "../../i18n.js";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import type { SandboxView } from "./format.js";
 
@@ -25,7 +26,6 @@ const SANDBOX: SandboxView = {
   trialStatus: "expired",
   trialEndsAt: new Date(Date.now() - 2 * 86_400_000 - 3_600_000).toISOString(),
   logo: null,
-  loginKey: "3f9a1c7e2b4d8a60",
 };
 
 function renderPanel(sandbox: SandboxView = SANDBOX): {
@@ -59,22 +59,6 @@ describe("SandboxDetailPanel", () => {
     expect(screen.getByText(/Expired 2 days ago/)).toBeTruthy();
     expect(screen.getByText("Actions for Acme Sandbox")).toBeTruthy();
     expect(screen.getByText(`Timeline ${SANDBOX.id}`)).toBeTruthy();
-  });
-
-  it("shows the sandbox's login link, built from its login key (R13)", () => {
-    renderPanel();
-
-    expect(screen.getByText("Login link")).toBeTruthy();
-    expect(
-      screen.getByText(`${window.location.origin}/login?org=3f9a1c7e2b4d8a60`),
-    ).toBeTruthy();
-  });
-
-  it("shows no login link row for a sandbox that has no login key", () => {
-    renderPanel({ ...SANDBOX, loginKey: null });
-
-    expect(screen.queryByText("Login link")).toBeNull();
-    expect(screen.queryByText(/\/login\?org=/)).toBeNull();
   });
 
   it("says when no trial end is set", () => {

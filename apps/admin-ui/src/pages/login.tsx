@@ -3,8 +3,6 @@ import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { userManager } from "../authProvider.js";
 import { contactUsHref } from "./login-contact.js";
-import { HeaderBrand } from "../components/header-brand.js";
-import { useLoginOrgBranding } from "../hooks/use-login-org-branding.js";
 
 // Hosted ticket-create handoff (docs/specs/hosted-ticket-create-handoff.md).
 // A 3rd party opens this route with these params instead of the bare
@@ -108,9 +106,6 @@ function MoonIcon(): React.ReactElement {
 export function Login(): React.ReactElement {
   const { t } = useTranslation();
   const [searchParams] = useSearchParams();
-  // A sandbox's own login link carries its login key (R13); plain /login has none and stays generic.
-  const orgBranding = useLoginOrgBranding(searchParams.get("org"));
-  const orgName = orgBranding.status === "org" ? orgBranding.name : null;
   const [loading, setLoading] = React.useState(false);
   // Shown when the redirect to the identity provider fails before leaving
   // the page. A fixed sentence: the underlying error can name hosts or
@@ -127,18 +122,6 @@ export function Login(): React.ReactElement {
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem("ow-theme", theme);
   }, [theme]);
-
-  // The browser tab carries no brand unless a lookup matched (R13): the sandbox's name when it did,
-  // plain "Sign in" otherwise -- on plain /login, on every miss and until the answer arrives.
-  // Leaving the page puts the previous title back.
-  const signInTitle = t("login.signInTag");
-  React.useEffect(() => {
-    const previous = document.title;
-    document.title = orgName ?? signInTitle;
-    return () => {
-      document.title = previous;
-    };
-  }, [orgName, signInTitle]);
 
   function toggleTheme(): void {
     setTheme((t) => (t === "dark" ? "light" : "dark"));
@@ -214,14 +197,11 @@ export function Login(): React.ReactElement {
 
   return (
     <div className="lp-page lp-page-notebook" data-theme={theme}>
-      {/* Brand, floating top-left -- only a sandbox's own logo and name, and only when its login link
-          matched (R13). Plain /login, every miss and a lookup still running show nothing here, not
-          even OpenWind. */}
-      {orgBranding.status === "org" && (
-        <div className="lp-float-logo">
-          <HeaderBrand branding={orgBranding} />
-        </div>
-      )}
+      {/* Logo, floating top-left -- the same icon and wordmark as the app's navbar. */}
+      <div className="lp-float-logo">
+        <img src="/favicon.svg" alt="" className="logo-icon" />
+        <span className="logo-text">OpenWind</span>
+      </div>
 
       {/* Theme toggle, floating top-right — icon only, no label */}
       <button
@@ -250,14 +230,10 @@ export function Login(): React.ReactElement {
           {/* Breadcrumb-style header, replacing the stacked logo/title/desc block */}
           <div className="lp-card-head lp-notebook-head">
             <div className="lp-notebook-crumb">
-              {orgName !== null && (
-                <>
-                  <span>{orgName}</span>
-                  <span className="lp-notebook-crumb-sep" aria-hidden="true">
-                    /
-                  </span>
-                </>
-              )}
+              <span>{t("login.brandName")}</span>
+              <span className="lp-notebook-crumb-sep" aria-hidden="true">
+                /
+              </span>
               <span className="lp-notebook-crumb-current">
                 {t("login.signInTag")}
               </span>

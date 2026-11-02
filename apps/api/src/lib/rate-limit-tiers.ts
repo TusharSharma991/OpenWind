@@ -73,33 +73,32 @@ export async function enforceExportRateLimit(
   }
 }
 
-const PUBLIC_BRANDING_RATE_LIMIT_WINDOW_SECONDS = 60;
-
 /**
- * docs/specs/multi-org-sandbox.md R13 -- per-IP cap on GET /public/org-branding/:slug, which has
- * no identity to key on. Its own bucket (`rl:public-branding:`), never the `/auth` class that
- * sign-in shares. Fails open like every other tier, as ADR-013's limiter already does.
+ * Per-(tenant, admin) cap on DELETE /users/:userId (GDPR erasure), so a script or a stuck client
+ * cannot erase many people in a burst. A constant, not a setting: an admin erases people one at a
+ * time from the Users page, and no deployment needs a different number.
  */
-export async function enforcePublicBrandingRateLimit(
-  clientIp: string,
+export const ERASURE_RATE_LIMIT_PER_MIN = 10;
+const ERASURE_RATE_LIMIT_WINDOW_SECONDS = 60;
+
+/** Keyed on the verified auth identity, so it must run after requireAuth. Fails open like every other tier. */
+export async function enforceErasureRateLimit(
+  tenantId: string,
+  userId: string,
 ): Promise<{ allowed: boolean; remaining: number; resetAt: number }> {
   try {
     return await checkRateLimit(
       getRedis(),
-      `rl:public-branding:${clientIp}`,
-      env.RATE_LIMIT_PUBLIC_BRANDING_PER_MIN,
-      PUBLIC_BRANDING_RATE_LIMIT_WINDOW_SECONDS,
+      `rl:erase:${tenantId}:${userId}`,
+      ERASURE_RATE_LIMIT_PER_MIN,
+      ERASURE_RATE_LIMIT_WINDOW_SECONDS,
     );
   } catch (err) {
     logger.warn(
-      { err },
-      "rate-limit-tiers: public branding check failed unexpectedly — failing open",
+      { err, tenantId, userId },
+      "rate-limit-tiers: erasure check failed unexpectedly — failing open",
     );
-    return {
-      allowed: true,
-      remaining: env.RATE_LIMIT_PUBLIC_BRANDING_PER_MIN,
-      resetAt: 0,
-    };
+    return { allowed: true, remaining: ERASURE_RATE_LIMIT_PER_MIN, resetAt: 0 };
   }
 }
 

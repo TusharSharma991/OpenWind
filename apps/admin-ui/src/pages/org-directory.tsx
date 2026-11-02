@@ -1,3 +1,5 @@
+import i18next from "i18next";
+import { useTranslation } from "react-i18next";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import ReactFlow, {
   Background,
@@ -26,12 +28,12 @@ import {
 import { relativeTime } from "../lib/format.js";
 
 // docs/specs/org-directory.md T7 — the org chart page. Visible to every
-// authenticated tenant user (R7); only the manual "Sync now" button is
+// authenticated tenant user (R7); only the manual t("orgDirectory.syncNow") button is
 // admin-gated (also enforced server-side by the route itself — this is a UX
 // affordance, not the security boundary).
 //
-// Loads expanded to depth 3 by default; deeper levels expand on demand per
-// node (R8). Search matches name or email, highlights the match, and
+// Loads fully expanded for a small organisation, and to depth 3 for a large one;
+// deeper levels expand on demand per node (R8). Search matches name or email, highlights the match, and
 // auto-expands its ancestor path so it's visible in context (R9).
 
 // Same duplicated profile-role-parsing pattern as users.tsx (no shared
@@ -46,11 +48,30 @@ function getRolesFromProfile(
 }
 
 const DEFAULT_EXPAND_DEPTH = 3;
+// Up to this many people the whole chart opens expanded: a chain of managers is deeper than
+// DEFAULT_EXPAND_DEPTH and would otherwise hide most of a small organisation behind collapsed cards.
+const EXPAND_ALL_UP_TO = 60;
+
+// Counts what the chart can reach from the root, the same nodes collectDefaultExpanded walks.
+function countNodes(tree: OrgTree): number {
+  const seen = new Set<string>();
+  const pending = [tree.root.userId];
+  while (pending.length > 0) {
+    const id = pending.pop();
+    if (id === undefined || seen.has(id)) continue;
+    seen.add(id);
+    for (const child of tree.nodesByParentId[id] ?? [])
+      pending.push(child.userId);
+  }
+  return seen.size;
+}
 
 function collectDefaultExpanded(tree: OrgTree, maxDepth: number): Set<string> {
+  const limit =
+    countNodes(tree) <= EXPAND_ALL_UP_TO ? Number.POSITIVE_INFINITY : maxDepth;
   const expanded = new Set<string>();
   function walk(node: OrgNode, depth: number): void {
-    if (depth >= maxDepth) return;
+    if (depth >= limit) return;
     expanded.add(node.userId);
     for (const child of tree.nodesByParentId[node.userId] ?? []) {
       walk(child, depth + 1);
@@ -189,6 +210,7 @@ const HIDDEN_HANDLE_STYLE: React.CSSProperties = {
 };
 
 function OrgFlowNode({ data }: NodeProps<OrgFlowNodeData>): React.ReactElement {
+  const { t } = useTranslation();
   const { node, highlighted, hasChildren, isExpanded, onToggle } = data;
   return (
     <div style={{ position: "relative" }}>
@@ -203,7 +225,9 @@ function OrgFlowNode({ data }: NodeProps<OrgFlowNodeData>): React.ReactElement {
           type="button"
           className="nodrag nopan"
           onClick={() => onToggle(node.userId)}
-          aria-label={isExpanded ? "Collapse" : "Expand"}
+          aria-label={
+            isExpanded ? t("orgDirectory.collapse") : t("orgDirectory.expand")
+          }
           style={{
             position: "absolute",
             bottom: "-10px",
@@ -351,8 +375,10 @@ function OrgFlow({
 
 function formatSyncStatus(status: SyncStatus | null): string {
   if (!status) return "";
-  if (status.syncInProgress) return "Sync in progress…";
-  if (status.lastSyncedAt === null) return "Never synced";
+  if (status.syncInProgress)
+    return i18next.t("orgDirectory.syncInProgress") as string;
+  if (status.lastSyncedAt === null)
+    return i18next.t("orgDirectory.neverSynced") as string;
   const when = relativeTime(status.lastSyncedAt);
   return status.lastSyncOk
     ? `Last synced ${when}`
@@ -370,6 +396,7 @@ export function OrgChartPanel({
 }: {
   embedded?: boolean;
 }): React.ReactElement {
+  const { t } = useTranslation();
   const [tree, setTree] = useState<OrgTree | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -388,7 +415,7 @@ export function OrgChartPanel({
           setExpanded(collectDefaultExpanded(data, DEFAULT_EXPAND_DEPTH));
         setError(null);
       })
-      .catch(() => setError("Failed to load org chart"))
+      .catch(() => setError(t("orgDirectory.failedToLoad")))
       .finally(() => setLoading(false));
     getOrgSyncStatus()
       .then(setSyncStatus)
@@ -455,7 +482,7 @@ export function OrgChartPanel({
       await triggerOrgSync();
       load();
     } catch {
-      setError("Failed to trigger sync");
+      setError(t("orgDirectory.failedToSync"));
     } finally {
       setSyncing(false);
     }
@@ -496,7 +523,7 @@ export function OrgChartPanel({
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder={"Search by name or email…"}
+            placeholder={t("orgDirectory.searchPlaceholder")}
             style={{
               fontSize: "12px",
               padding: "7px 14px",
@@ -526,7 +553,7 @@ export function OrgChartPanel({
                 cursor: syncing ? "default" : "pointer",
               }}
             >
-              {syncing ? "Syncing…" : "Sync now"}
+              {syncing ? t("orgDirectory.syncing") : "Sync now"}
             </button>
           )}
         </div>
@@ -534,7 +561,7 @@ export function OrgChartPanel({
 
       {loading ? (
         <div style={{ fontSize: "13px", color: "var(--text-muted)" }}>
-          {"Loading org chart…"}
+          {t("orgDirectory.loading")}
         </div>
       ) : error ? (
         <div style={{ fontSize: "13px", color: "hsl(350,80%,60%)" }}>
@@ -542,7 +569,7 @@ export function OrgChartPanel({
         </div>
       ) : !tree ? (
         <div style={{ fontSize: "13px", color: "var(--text-muted)" }}>
-          {"No org chart yet — an admin needs to run the first sync."}
+          {t("orgDirectory.noData")}
         </div>
       ) : (
         <div className="data-panel" style={{ padding: 0, overflow: "hidden" }}>

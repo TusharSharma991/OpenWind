@@ -6,11 +6,7 @@ export type OrgBrandingState =
   | { status: "default" }
   | { status: "org"; name: string; logo: string | null };
 
-// The server and tenants_logo_check already allow only these; checked again here so a logo that
-// is ever anything else (a remote URL, say) is never put into an <img>.
-const RASTER_DATA_URL = /^data:image\/(png|jpeg|webp);base64,/;
-
-export function isOrgBranding(
+function isOrgBranding(
   value: unknown,
 ): value is { name: string; logo: string | null } {
   if (typeof value !== "object" || value === null) return false;
@@ -19,8 +15,7 @@ export function isOrgBranding(
   return (
     typeof v["name"] === "string" &&
     v["name"].trim() !== "" &&
-    (v["logo"] === null ||
-      (typeof v["logo"] === "string" && RASTER_DATA_URL.test(v["logo"])))
+    (v["logo"] === null || typeof v["logo"] === "string")
   );
 }
 

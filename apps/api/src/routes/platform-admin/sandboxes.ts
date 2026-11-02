@@ -8,7 +8,6 @@ import {
 import {
   db,
   sandboxProvisioningJobs,
-  tenants,
   withPlatformAdminContext,
   checkSandboxQuota,
   toProvisioningProgressView,
@@ -151,7 +150,7 @@ export const createSandboxHandler = platformAdminFactory.createHandlers(
  * `AND eq(sandboxProvisioningJobs.requestedBy, userId)` filter here when multi-admin support lands,
  * alongside the same fix in sandboxHandoverHandler.
  */
-const JobIdParamSchema = z.object({ jobId: z.string().uuid() });
+const JobIdParamSchema = z.object({ jobId: z.guid() });
 
 export const sandboxProgressHandler = platformAdminFactory.createHandlers(
   requirePlatformAdmin(),
@@ -206,7 +205,7 @@ export const sandboxProgressHandler = platformAdminFactory.createHandlers(
  * tenant UUID, so a `:tenantId` route was unreachable from any real client. The handler
  * looks up the job row by its own id and reads resultTenantId internally instead.
  */
-const JobIdHandoverParamSchema = z.object({ jobId: z.string().uuid() });
+const JobIdHandoverParamSchema = z.object({ jobId: z.guid() });
 
 export const sandboxHandoverHandler = platformAdminFactory.createHandlers(
   requirePlatformAdmin(),
@@ -249,22 +248,6 @@ export const sandboxHandoverHandler = platformAdminFactory.createHandlers(
         404,
       );
     }
-    // The login link a prospect is handed is /login?org=<loginKey> (R13). Read after the credentials
-    // so an expired handover window costs no extra query; a missing row only drops the link.
-    const resultTenantId = job.resultTenantId;
-    const [tenant] = await withPlatformAdminContext((tx) =>
-      tx
-        .select({ loginKey: tenants.loginKey })
-        .from(tenants)
-        .where(eq(tenants.id, resultTenantId))
-        .limit(1),
-    );
-    return c.json({
-      data: {
-        tenantId: job.resultTenantId,
-        loginKey: tenant?.loginKey ?? null,
-        ...credentials,
-      },
-    });
+    return c.json({ data: { tenantId: job.resultTenantId, ...credentials } });
   },
 );

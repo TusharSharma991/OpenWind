@@ -64,6 +64,7 @@ const {
   authorizeUser,
   listUserRolesByUserId,
   getUserById,
+  deleteUser,
 } = await import("./zitadel-management.js");
 
 describe("listOrgUsers", () => {
@@ -656,7 +657,7 @@ describe("grantProjectToOrg", () => {
 describe("setUserOrgMetadata", () => {
   const b64 = (v: string): string => Buffer.from(v, "utf8").toString("base64");
 
-  it("writes the three org keys as base64 to SetUserMetadata and skips null or empty values", async () => {
+  it("writes the org keys it is given as base64 and skips undefined or empty values", async () => {
     setProvisioningKey();
     queueFailedIssuerDiscovery();
     queueJsonResponse(200, { access_token: "ptoken", expires_in: 0 });
@@ -664,9 +665,9 @@ describe("setUserOrgMetadata", () => {
 
     await expect(
       setUserOrgMetadata("user-9", {
-        managerId: null,
         department: "sales",
         title: "Sales Executive",
+        managerId: undefined,
       }),
     ).resolves.toBe(true);
 
@@ -680,11 +681,61 @@ describe("setUserOrgMetadata", () => {
     });
   });
 
-  it("makes no request when there is nothing to write", async () => {
+  it("removes the manager when managerId is an explicit null, so a re-seed clears a stale one", async () => {
+    setProvisioningKey();
+    queueFailedIssuerDiscovery();
+    queueJsonResponse(200, { access_token: "ptoken", expires_in: 0 });
+    const set = queueCapturedJsonResponse(200, {});
+    queueFailedIssuerDiscovery();
+    queueJsonResponse(200, { access_token: "ptoken", expires_in: 0 });
+    const del = queueCapturedJsonResponse(200, {});
+
+    await expect(
+      setUserOrgMetadata("user-9", {
+        managerId: null,
+        department: "sales",
+        title: "Sales Manager",
+      }),
+    ).resolves.toBe(true);
+
+    expect(set.path).toBe("/zitadel.user.v2.UserService/SetUserMetadata");
+    expect(del.path).toBe("/zitadel.user.v2.UserService/DeleteUserMetadata");
+    expect(del.body).toEqual({ userId: "user-9", keys: ["manager_id"] });
+  });
+
+  it("treats a missing manager key (404 on delete) as already cleared", async () => {
+    setProvisioningKey();
+    queueFailedIssuerDiscovery();
+    queueJsonResponse(200, { access_token: "ptoken", expires_in: 0 });
+    queueJsonResponse(404, { message: "metadata not found" });
+
+    mockLoggerWarn.mockClear();
+
+    await expect(
+      setUserOrgMetadata("user-9", { managerId: null }),
+    ).resolves.toBe(true);
+    expect(mockLoggerWarn).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 404, userId: "user-9" }),
+      expect.stringContaining("already done"),
+    );
+  });
+
+  it("reports failure when Zitadel refuses the manager removal", async () => {
+    setProvisioningKey();
+    queueFailedIssuerDiscovery();
+    queueJsonResponse(200, { access_token: "ptoken", expires_in: 0 });
+    queueJsonResponse(403, { message: "permission denied" });
+
+    await expect(
+      setUserOrgMetadata("user-9", { managerId: null }),
+    ).resolves.toBe(false);
+  });
+
+  it("makes no request when there is nothing to write or clear", async () => {
     mockHttpRequest.mockClear();
 
     await expect(
-      setUserOrgMetadata("user-9", { managerId: null, department: "" }),
+      setUserOrgMetadata("user-9", { managerId: undefined, department: "" }),
     ).resolves.toBe(true);
 
     expect(mockHttpRequest).not.toHaveBeenCalled();
@@ -1111,4 +1162,66 @@ describe("listOrgUsers pagination", () => {
       mockHttpRequest.mockReset();
     }
   });
+});
+
+describe("deleteUser", () => {
+  // A fake Zitadel: the token exchange always works; DeleteUser answers with `deleteStatus`.
+  let deleteStatus = 200;
+  function serveZitadel(): void {
+    mockEnv.ZITADEL_SERVICE_ACCOUNT_KEY = JSON.stringify({
+      type: "serviceaccount",
+      keyId: "key-1",
+      key: "-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----",
+      userId: "service-user-1",
+    });
+    mockHttpRequest.mockImplementation(
+      (
+        options: { path?: string },
+        callback?: (res: IncomingMessage) => void,
+      ) => {
+        const req: Partial<ClientRequest> = {
+          setTimeout: vi.fn() as unknown as ClientRequest["setTimeout"],
+          on: vi.fn() as unknown as ClientRequest["on"],
+          write: vi.fn() as unknown as ClientRequest["write"],
+          end: vi.fn() as unknown as ClientRequest["end"],
+        };
+        const path = options.path ?? "";
+        let status = 200;
+        let body: unknown = {};
+        if (path.includes("/oauth/v2/token")) {
+          body = { access_token: "delete-token", expires_in: 60 };
+        } else if (path.includes("DeleteUser")) {
+          status = deleteStatus;
+        }
+        const response = new EventEmitter() as EventEmitter & {
+          statusCode: number;
+        };
+        response.statusCode = status;
+        queueMicrotask(() => {
+          callback?.(response as IncomingMessage);
+          response.emit("data", Buffer.from(JSON.stringify(body)));
+          response.emit("end");
+        });
+        return req as ClientRequest;
+      },
+    );
+  }
+
+  it.each([
+    [200, true],
+    [404, true],
+    [500, false],
+    [403, false],
+  ])(
+    "Zitadel answering %i means the login is gone: %s",
+    async (status, gone) => {
+      serveZitadel();
+      deleteStatus = status;
+      try {
+        expect(await deleteUser("u-1")).toBe(gone);
+      } finally {
+        mockHttpRequest.mockReset();
+      }
+    },
+  );
 });

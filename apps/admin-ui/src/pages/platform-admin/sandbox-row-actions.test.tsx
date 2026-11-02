@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import "../../i18n.js";
 import {
   render,
   screen,
@@ -90,7 +91,6 @@ function renderComponent(onDone: () => void = vi.fn()): () => void {
       tenantName="Acme Sandbox"
       trialEndsAt="2026-12-01T00:00:00.000Z"
       logo={null}
-      loginKey="3f9a1c7e2b4d8a60"
       onDone={onDone}
     />,
   );
@@ -104,8 +104,7 @@ function choose(
     | "Extend trial"
     | "End trial"
     | "Seed org chart"
-    | "Edit branding"
-    | "Copy login link",
+    | "Edit branding",
 ): void {
   fireEvent.click(screen.getByLabelText("Actions for Acme Sandbox"));
   fireEvent.click(screen.getByRole("menuitem", { name: item }));
@@ -324,7 +323,6 @@ describe("SandboxRowActions", () => {
         "Seed org chart",
         "Extend trial",
         "Edit branding",
-        "Copy login link",
         "End trial",
         "Delete",
       ],
@@ -339,7 +337,6 @@ describe("SandboxRowActions", () => {
           tenantName="Acme Sandbox"
           trialEndsAt={null}
           logo={null}
-          loginKey="3f9a1c7e2b4d8a60"
           onDone={vi.fn()}
         />
       </div>,
@@ -412,20 +409,12 @@ describe("SandboxRowActions", () => {
         tenantName="Acme Sandbox"
         trialEndsAt="2026-01-01T00:00:00.000Z"
         logo={null}
-        loginKey="3f9a1c7e2b4d8a60"
         onDone={vi.fn()}
       />,
     );
     fireEvent.click(screen.getByLabelText("Actions for Acme Sandbox"));
     expect(screen.getAllByRole("menuitem").map((el) => el.textContent)).toEqual(
-      [
-        "Reset",
-        "Seed org chart",
-        "Extend trial",
-        "Edit branding",
-        "Copy login link",
-        "Delete",
-      ],
+      ["Reset", "Seed org chart", "Extend trial", "Edit branding", "Delete"],
     );
   });
 
@@ -437,20 +426,12 @@ describe("SandboxRowActions", () => {
         tenantName="Acme Sandbox"
         trialEndsAt={null}
         logo={null}
-        loginKey="3f9a1c7e2b4d8a60"
         onDone={vi.fn()}
       />,
     );
     fireEvent.click(screen.getByLabelText("Actions for Acme Sandbox"));
     expect(screen.getAllByRole("menuitem").map((el) => el.textContent)).toEqual(
-      [
-        "Reset",
-        "Seed org chart",
-        "Extend trial",
-        "Edit branding",
-        "Copy login link",
-        "Delete",
-      ],
+      ["Reset", "Seed org chart", "Extend trial", "Edit branding", "Delete"],
     );
   });
 
@@ -463,80 +444,6 @@ describe("SandboxRowActions", () => {
     fireEvent.click(screen.getByText("Save trial"));
     expect(onDone).toHaveBeenCalledTimes(1);
     expect(screen.queryByText(/Trial dialog/)).toBeNull();
-  });
-
-  it("offers no Copy login link for a sandbox that has no login key", () => {
-    render(
-      <SandboxRowActions
-        tenantId={TENANT_ID}
-        tenantName="Acme Sandbox"
-        trialEndsAt={null}
-        logo={null}
-        loginKey={null}
-        onDone={vi.fn()}
-      />,
-    );
-    fireEvent.click(screen.getByLabelText("Actions for Acme Sandbox"));
-
-    expect(
-      screen.queryByRole("menuitem", { name: "Copy login link" }),
-    ).toBeNull();
-  });
-
-  describe("Copy login link (R13)", () => {
-    const writeText = vi.fn();
-
-    beforeEach(() => {
-      writeText.mockReset().mockResolvedValue(undefined);
-      Object.defineProperty(navigator, "clipboard", {
-        value: { writeText },
-        configurable: true,
-        writable: true,
-      });
-    });
-
-    it("copies the sandbox's /login?org=<login key> link and closes the menu", async () => {
-      renderComponent();
-      choose("Copy login link");
-
-      await waitFor(() =>
-        expect(writeText).toHaveBeenCalledWith(
-          `${window.location.origin}/login?org=3f9a1c7e2b4d8a60`,
-        ),
-      );
-      expect(screen.queryByRole("menu")).toBeNull();
-    });
-
-    it("confirms the copy on the button and to assistive technology", async () => {
-      renderComponent();
-      choose("Copy login link");
-
-      await waitFor(() =>
-        expect(screen.getByRole("status").textContent).toBe(
-          "Login link copied",
-        ),
-      );
-      expect(
-        screen.getByLabelText("Actions for Acme Sandbox").textContent,
-      ).toBe("✓");
-    });
-
-    it("says so, and does not claim success, when the clipboard is refused", async () => {
-      writeText.mockRejectedValueOnce(new Error("denied"));
-      const consoleError = vi
-        .spyOn(console, "error")
-        .mockImplementation(() => undefined);
-      renderComponent();
-      choose("Copy login link");
-
-      await waitFor(() =>
-        expect(mockShowAlert).toHaveBeenCalledWith(
-          "Could not copy the login link",
-        ),
-      );
-      expect(screen.getByRole("status").textContent).toBe("");
-      consoleError.mockRestore();
-    });
   });
 
   it("opens the branding dialog with the current logo and calls onDone after saving", () => {

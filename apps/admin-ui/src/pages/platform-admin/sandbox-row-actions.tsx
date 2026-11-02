@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import React from "react";
 import { createPortal } from "react-dom";
 import { ConfirmDeleteDialog } from "../../components/confirm-delete-dialog.js";
@@ -5,7 +6,6 @@ import { showAlert } from "../../components/global-alert-dialog.js";
 import { fetchWithAuth, API_URL } from "../../lib/api.js";
 import { ExtendTrialDialog } from "./extend-trial-dialog.js";
 import { EditBrandingDialog } from "./edit-branding-dialog.js";
-import { loginLink } from "./login-link.js";
 import { StepUpMfaDialog } from "./step-up-mfa-dialog.js";
 
 type ActionKind = "reset" | "delete" | "end_trial" | "seed_org_tree";
@@ -23,62 +23,9 @@ export interface SandboxRowActionsProps {
   tenantName: string;
   trialEndsAt: string | null;
   logo: string | null;
-  loginKey: string | null;
   /** Called after a reset, delete, trial or branding change succeeds, so the parent can refresh. */
   onDone: () => void;
 }
-
-const CONFIRM_COPY: Record<
-  ActionKind,
-  {
-    title: string;
-    message: (name: string) => React.ReactNode;
-    confirmLabel: string;
-  }
-> = {
-  reset: {
-    title: "Reset this sandbox?",
-    message: (name) => (
-      <>
-        This wipes and re-seeds all module data in <strong>{name}</strong>. The
-        org chart, accounts, and credentials are untouched.
-      </>
-    ),
-    confirmLabel: "Reset",
-  },
-  delete: {
-    title: "Delete this sandbox?",
-    message: (name) => (
-      <>
-        This removes the Zitadel organization and every seeded account for{" "}
-        <strong>{name}</strong>, and deletes all of its OpenWind data.
-      </>
-    ),
-    confirmLabel: "Delete",
-  },
-  end_trial: {
-    title: "End this trial now?",
-    message: (name) => (
-      <>
-        The trial for <strong>{name}</strong> ends immediately: its users can no
-        longer sign in and its background jobs stop. No data is deleted, and
-        Extend trial reactivates it.
-      </>
-    ),
-    confirmLabel: "End trial",
-  },
-  seed_org_tree: {
-    title: "Seed the org chart?",
-    message: (name) => (
-      <>
-        This sets the default departments, titles and managers on every account
-        in <strong>{name}</strong> (overwriting those three fields in Zitadel)
-        and rebuilds its org chart from them. Safe to run again.
-      </>
-    ),
-    confirmLabel: "Seed org chart",
-  },
-};
 
 /**
  * T17 (docs/specs/multi-org-sandbox.md). Failures are reported via the shared global
@@ -106,9 +53,9 @@ const CONFIRM_COPY: Record<
  * so the row's stopPropagation keeps a menu click from selecting the row.
  */
 
-// Rough rendered height of the full menu (seven items with an active trial), used only to decide whether it fits below
+// Rough rendered height of the three-item menu, used only to decide whether it fits below
 // the button or should open upward.
-const MENU_HEIGHT_ESTIMATE = 245;
+const MENU_HEIGHT_ESTIMATE = 170;
 const MENU_GAP = 6;
 
 interface MenuPosition {
@@ -130,9 +77,54 @@ export function SandboxRowActions({
   tenantName,
   trialEndsAt,
   logo,
-  loginKey,
   onDone,
 }: SandboxRowActionsProps): React.ReactElement {
+  const { t } = useTranslation();
+  const confirmCopy: Record<
+    ActionKind,
+    {
+      title: string;
+      message: (name: string) => React.ReactNode;
+      confirmLabel: string;
+    }
+  > = {
+    reset: {
+      title: "Reset this sandbox?",
+      message: (name) => (
+        <>
+          This wipes and re-seeds all module data in <strong>{name}</strong>.
+          The org chart, accounts, and credentials are untouched.
+        </>
+      ),
+      confirmLabel: "Reset",
+    },
+    delete: {
+      title: "Delete this sandbox?",
+      message: (name) => (
+        <>
+          This removes the Zitadel organization and every seeded account for{" "}
+          <strong>{name}</strong>, and deletes all of its OpenWind data.
+        </>
+      ),
+      confirmLabel: "Delete",
+    },
+    end_trial: {
+      title: "End this trial now?",
+      message: (name) => (
+        <>
+          The trial for <strong>{name}</strong> ends immediately: its users can
+          no longer sign in and its background jobs stop. No data is deleted,
+          and Extend trial reactivates it.
+        </>
+      ),
+      confirmLabel: "End trial",
+    },
+    seed_org_tree: {
+      title: t("platformAdmin.seedOrgChartDialogTitle"),
+      message: (name) => t("platformAdmin.seedOrgChartDialogMessage", { name }),
+      confirmLabel: t("platformAdmin.seedOrgChart"),
+    },
+  };
   const [confirming, setConfirming] = React.useState<ActionKind | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [menuPosition, setMenuPosition] = React.useState<MenuPosition | null>(
@@ -140,8 +132,6 @@ export function SandboxRowActions({
   );
   const [trialOpen, setTrialOpen] = React.useState(false);
   const [brandingOpen, setBrandingOpen] = React.useState(false);
-  const [linkCopied, setLinkCopied] = React.useState(false);
-  const copyTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   // Reset and delete need a freshly verified code (ADR-022 Decision 10, #865). When the
   // server asks for one, the action waits here until the admin has verified, then retries.
   const [reauthFor, setReauthFor] = React.useState<ActionKind | null>(null);
@@ -185,27 +175,6 @@ export function SandboxRowActions({
     open();
   }
 
-  React.useEffect(
-    () => () => {
-      if (copyTimer.current) clearTimeout(copyTimer.current);
-    },
-    [],
-  );
-
-  // R13: the link a prospect is sent, /login?org=<login key>, so the login page shows their brand.
-  async function copyLoginLink(): Promise<void> {
-    if (!loginKey) return;
-    try {
-      await navigator.clipboard.writeText(loginLink(loginKey));
-      setLinkCopied(true);
-      if (copyTimer.current) clearTimeout(copyTimer.current);
-      copyTimer.current = setTimeout(() => setLinkCopied(false), 2_000);
-    } catch (err) {
-      console.error("Sandbox login link copy failed:", err);
-      showAlert("Could not copy the login link");
-    }
-  }
-
   async function runAction(
     action: ActionKind,
     afterReauth: boolean,
@@ -226,10 +195,10 @@ export function SandboxRowActions({
       }
       showAlert(
         status === 409
-          ? "Already in progress for this sandbox — try again shortly."
+          ? t("platformAdmin.actionInProgress")
           : err instanceof Error
             ? err.message
-            : "The action failed",
+            : t("platformAdmin.actionFailed"),
       );
     } finally {
       setBusy(false);
@@ -268,21 +237,8 @@ export function SandboxRowActions({
         disabled={busy}
         onClick={toggleMenu}
       >
-        {busy ? "…" : linkCopied ? "✓" : "⋮"}
+        {busy ? "…" : "⋮"}
       </button>
-      <span
-        role="status"
-        aria-live="polite"
-        style={{
-          position: "absolute",
-          width: 1,
-          height: 1,
-          overflow: "hidden",
-          clip: "rect(0, 0, 0, 0)",
-        }}
-      >
-        {linkCopied ? "Login link copied" : ""}
-      </span>
       {menuPosition &&
         createPortal(
           <>
@@ -317,7 +273,7 @@ export function SandboxRowActions({
                 className="rcd-kebab-menu-item"
                 onClick={() => choose(() => setConfirming("seed_org_tree"))}
               >
-                Seed org chart
+                {t("platformAdmin.seedOrgChart")}
               </button>
               <button
                 type="button"
@@ -335,16 +291,6 @@ export function SandboxRowActions({
               >
                 Edit branding
               </button>
-              {loginKey && (
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="rcd-kebab-menu-item"
-                  onClick={() => choose(() => void copyLoginLink())}
-                >
-                  Copy login link
-                </button>
-              )}
               {trialActive && (
                 <button
                   type="button"
@@ -371,9 +317,9 @@ export function SandboxRowActions({
       {confirming && (
         <ConfirmDeleteDialog
           open={true}
-          title={CONFIRM_COPY[confirming].title}
-          message={CONFIRM_COPY[confirming].message(tenantName)}
-          confirmLabel={CONFIRM_COPY[confirming].confirmLabel}
+          title={confirmCopy[confirming].title}
+          message={confirmCopy[confirming].message(tenantName)}
+          confirmLabel={confirmCopy[confirming].confirmLabel}
           onConfirm={() => void handleConfirm()}
           onCancel={handleCancel}
         />

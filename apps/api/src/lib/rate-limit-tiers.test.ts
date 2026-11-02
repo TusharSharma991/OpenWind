@@ -1,11 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("@platform/config", () => ({
-  env: {
-    RATE_LIMIT_API_KEY_PERSON_PER_MIN: 20,
-    RATE_LIMIT_EXPORT_PER_MIN: 5,
-    RATE_LIMIT_PUBLIC_BRANDING_PER_MIN: 30,
-  },
+  env: { RATE_LIMIT_API_KEY_PERSON_PER_MIN: 20, RATE_LIMIT_EXPORT_PER_MIN: 5 },
 }));
 
 vi.mock("@platform/logger", () => ({
@@ -21,7 +17,7 @@ vi.mock("@platform/redis", () => ({
 const {
   enforceKeyPersonRateLimit,
   enforceExportRateLimit,
-  enforcePublicBrandingRateLimit,
+  enforceErasureRateLimit,
 } = await import("./rate-limit-tiers.js");
 
 describe("enforceKeyPersonRateLimit", () => {
@@ -147,54 +143,26 @@ describe("enforceExportRateLimit", () => {
   });
 });
 
-describe("enforcePublicBrandingRateLimit", () => {
+describe("enforceErasureRateLimit", () => {
   beforeEach(() => {
     mockCheckRateLimit.mockReset();
   });
 
-  it("keys the check on the client address in a bucket of its own, 30 per 60s", async () => {
+  it("keys the check on tenant + admin with a 10-per-60s budget", async () => {
     mockCheckRateLimit.mockResolvedValueOnce({
       allowed: true,
-      remaining: 29,
+      remaining: 9,
       resetAt: 1,
     });
 
-    await enforcePublicBrandingRateLimit("203.0.113.7");
+    await enforceErasureRateLimit("tenant-a", "admin-1");
 
     expect(mockCheckRateLimit).toHaveBeenCalledWith(
       expect.anything(),
-      "rl:public-branding:203.0.113.7",
-      30,
+      "rl:erase:tenant-a:admin-1",
+      10,
       60,
     );
-  });
-
-  it("never shares a key with the /auth class bucket that sign-in uses", async () => {
-    mockCheckRateLimit.mockResolvedValue({
-      allowed: true,
-      remaining: 29,
-      resetAt: 1,
-    });
-
-    await enforcePublicBrandingRateLimit("203.0.113.7");
-
-    const key = mockCheckRateLimit.mock.calls[0]?.[1] as string;
-    expect(key).not.toBe("rl:ip:203.0.113.7:auth");
-    expect(key.startsWith("rl:ip:")).toBe(false);
-  });
-
-  it("gives different addresses independent buckets", async () => {
-    mockCheckRateLimit.mockResolvedValue({
-      allowed: true,
-      remaining: 29,
-      resetAt: 1,
-    });
-
-    await enforcePublicBrandingRateLimit("203.0.113.7");
-    await enforcePublicBrandingRateLimit("203.0.113.8");
-
-    const keys = mockCheckRateLimit.mock.calls.map((c) => c[1] as string);
-    expect(keys[0]).not.toBe(keys[1]);
   });
 
   it("returns allowed:false when the budget is spent", async () => {
@@ -204,16 +172,18 @@ describe("enforcePublicBrandingRateLimit", () => {
       resetAt: 123,
     });
 
-    expect((await enforcePublicBrandingRateLimit("203.0.113.7")).allowed).toBe(
-      false,
-    );
+    expect(await enforceErasureRateLimit("tenant-a", "admin-1")).toEqual({
+      allowed: false,
+      remaining: 0,
+      resetAt: 123,
+    });
   });
 
-  it("fails open (allowed:true) when the underlying check throws", async () => {
+  it("fails open when Redis errors", async () => {
     mockCheckRateLimit.mockRejectedValueOnce(new Error("redis down"));
 
-    expect((await enforcePublicBrandingRateLimit("203.0.113.7")).allowed).toBe(
-      true,
-    );
+    const result = await enforceErasureRateLimit("tenant-a", "admin-1");
+
+    expect(result.allowed).toBe(true);
   });
 });

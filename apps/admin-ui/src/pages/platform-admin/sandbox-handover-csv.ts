@@ -12,19 +12,6 @@ export interface HandoverCsvAccount {
 }
 
 const HEADER = ["Username", "Email", "Role", "Password"];
-const LINK_HEADER = "Login link";
-
-// The sandbox's login link (R13) rides along as one more column, so the sheet stays a plain table.
-function withLink(
-  row: string[],
-  loginLink: string | null | undefined,
-): string[] {
-  return loginLink ? [...row, loginLink] : row;
-}
-
-function header(loginLink: string | null | undefined): string[] {
-  return loginLink ? [...HEADER, LINK_HEADER] : HEADER;
-}
 
 // A cell starting with one of these is run as a formula by Excel/Sheets (CSV injection).
 const FORMULA_TRIGGERS = ["=", "+", "-", "@", "\t", "\r"];
@@ -37,15 +24,10 @@ function csvCell(value: string): string {
 }
 
 /** RFC 4180 CSV with a UTF-8 BOM, so Excel opens it as UTF-8 on a double-click. */
-export function buildHandoverCsv(
-  accounts: HandoverCsvAccount[],
-  loginLink?: string | null,
-): string {
+export function buildHandoverCsv(accounts: HandoverCsvAccount[]): string {
   const rows = [
-    header(loginLink),
-    ...accounts.map((a) =>
-      withLink([a.username, a.email, a.role, a.password], loginLink),
-    ),
+    HEADER,
+    ...accounts.map((a) => [a.username, a.email, a.role, a.password]),
   ];
   return "﻿" + rows.map((r) => r.map(csvCell).join(",")).join("\r\n");
 }
@@ -62,13 +44,10 @@ export function buildHandoverCsv(
  */
 export function formatHandoverClipboard(
   accounts: HandoverCsvAccount[],
-  loginLink?: string | null,
 ): string {
   const rows = [
-    header(loginLink),
-    ...accounts.map((a) =>
-      withLink([a.username, a.email, a.role, a.password], loginLink),
-    ),
+    HEADER,
+    ...accounts.map((a) => [a.username, a.email, a.role, a.password]),
   ];
   return rows.map((r) => r.join("\t")).join("\n");
 }
@@ -84,9 +63,8 @@ export function handoverCsvFileName(orgName: string): string {
 export function downloadHandoverCsv(
   orgName: string,
   accounts: HandoverCsvAccount[],
-  loginLink?: string | null,
 ): void {
-  const blob = new Blob([buildHandoverCsv(accounts, loginLink)], {
+  const blob = new Blob([buildHandoverCsv(accounts)], {
     type: "text/csv;charset=utf-8",
   });
   const url = URL.createObjectURL(blob);

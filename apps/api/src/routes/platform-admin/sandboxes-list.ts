@@ -15,7 +15,7 @@ import { platformAdminFactory } from "./factory.js";
  * no route reading through it until now -- see that function's own doc comment for why its
  * output shape is the only thing platform_admin-reachable routes may ever return (R2, no
  * business data). Both handlers select only the columns platform_admin_role is actually
- * granted (migration 0135, 0155, 0157): id, name, isSandbox, trialEndsAt, createdAt, logo, loginKey. The list also
+ * granted (migration 0135, 0155): id, name, isSandbox, trialEndsAt, createdAt, logo. The list also
  * filters on status (granted in 0144) so deleted sandboxes, still waiting on or done with their
  * purge, drop out of the dashboard.
  */
@@ -26,7 +26,6 @@ const SANDBOX_VIEW_COLUMNS = {
   trialEndsAt: tenants.trialEndsAt,
   createdAt: tenants.createdAt,
   logo: tenants.logo,
-  loginKey: tenants.loginKey,
 };
 
 const SandboxListQuerySchema = z.object({
@@ -64,7 +63,7 @@ export const sandboxListHandler = platformAdminFactory.createHandlers(
   },
 );
 
-const TenantIdParamSchema = z.object({ tenantId: z.string().uuid() });
+const TenantIdParamSchema = z.object({ tenantId: z.guid() });
 
 export const sandboxDetailHandler = platformAdminFactory.createHandlers(
   requirePlatformAdmin(),

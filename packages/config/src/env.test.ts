@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { EnvSchema } from "./env.js";
+import {
+  EnvSchema,
+  supersetErasureMode,
+  supersetConfigWarnings,
+} from "./env.js";
 import { DEV_SUPERSET_DEFAULTS, DEV_METRICS_TOKEN } from "./dev-defaults.js";
 
 // Mirrors vitest.config.ts's fixture, minus RATE_LIMIT_TENANT_PER_MIN — the
@@ -37,6 +41,79 @@ describe("SUPERSET_REDIS_URL (#728)", () => {
       EnvSchema.safeParse({ ...MINIMAL_VALID_ENV, SUPERSET_REDIS_URL: "nope" })
         .success,
     ).toBe(false);
+  });
+});
+
+describe("Superset erasure mode (#728, D8)", () => {
+  const parse = (extra: Record<string, string>) =>
+    EnvSchema.parse({ ...MINIMAL_VALID_ENV, ...extra });
+
+  it("treats an unset or empty OAuth client id as Stage 2 off", () => {
+    expect(parse({}).SUPERSET_OAUTH_CLIENT_ID).toBeUndefined();
+    expect(
+      parse({ SUPERSET_OAUTH_CLIENT_ID: "" }).SUPERSET_OAUTH_CLIENT_ID,
+    ).toBeUndefined();
+    expect(
+      parse({ SUPERSET_OAUTH_CLIENT_ID: "  " }).SUPERSET_OAUTH_CLIENT_ID,
+    ).toBeUndefined();
+  });
+
+  it("defaults SUPERSET_DEPLOYMENT to off and rejects a typo", () => {
+    expect(parse({}).SUPERSET_DEPLOYMENT).toBe("off");
+    expect(parse({ SUPERSET_DEPLOYMENT: "on" }).SUPERSET_DEPLOYMENT).toBe("on");
+    expect(
+      EnvSchema.safeParse({ ...MINIMAL_VALID_ENV, SUPERSET_DEPLOYMENT: "yes" })
+        .success,
+    ).toBe(false);
+  });
+
+  it("follows the flag: off is off, on is full with an OAuth client id and cache-only without", () => {
+    const mode = (extra: Record<string, string>) =>
+      supersetErasureMode(parse(extra));
+    expect(mode({})).toBe("off");
+    expect(mode({ SUPERSET_OAUTH_CLIENT_ID: "abc" })).toBe("off");
+    expect(mode({ SUPERSET_DEPLOYMENT: "on" })).toBe("cache-only");
+    expect(
+      mode({ SUPERSET_DEPLOYMENT: "on", SUPERSET_OAUTH_CLIENT_ID: "abc" }),
+    ).toBe("full");
+    expect(
+      mode({ SUPERSET_DEPLOYMENT: "on", SUPERSET_OAUTH_CLIENT_ID: "" }),
+    ).toBe("cache-only");
+  });
+
+  it("warns about the deprecated setting and about an OAuth client id with the flag off", () => {
+    expect(supersetConfigWarnings(parse({}))).toEqual([]);
+    expect(
+      supersetConfigWarnings(parse({ SUPERSET_ERASURE_ENABLED: "false" })),
+    ).toEqual([expect.stringContaining("SUPERSET_ERASURE_ENABLED")]);
+    expect(
+      supersetConfigWarnings(parse({ SUPERSET_OAUTH_CLIENT_ID: "abc" })),
+    ).toEqual([expect.stringContaining("SUPERSET_DEPLOYMENT is off")]);
+    expect(
+      supersetConfigWarnings(
+        parse({ SUPERSET_DEPLOYMENT: "on", SUPERSET_OAUTH_CLIENT_ID: "abc" }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("defaults the self-check interval to 15 minutes and the result TTL to 30, TTL at least twice the interval", () => {
+    const v = parse({});
+    expect(v.SUPERSET_SELFCHECK_INTERVAL_MINUTES).toBe(15);
+    expect(v.SUPERSET_SELFCHECK_TTL_MINUTES).toBe(30);
+    expect(
+      EnvSchema.safeParse({
+        ...MINIMAL_VALID_ENV,
+        SUPERSET_SELFCHECK_INTERVAL_MINUTES: "20",
+        SUPERSET_SELFCHECK_TTL_MINUTES: "30",
+      }).success,
+    ).toBe(false);
+    expect(
+      EnvSchema.safeParse({
+        ...MINIMAL_VALID_ENV,
+        SUPERSET_SELFCHECK_INTERVAL_MINUTES: "15",
+        SUPERSET_SELFCHECK_TTL_MINUTES: "30",
+      }).success,
+    ).toBe(true);
   });
 });
 
@@ -719,5 +796,21 @@ describe("user data export settings (docs/specs/user-data-export.md)", () => {
     ]) {
       expect(() => EnvSchema.parse({ ...MINIMAL_VALID_ENV, ...bad })).toThrow();
     }
+  });
+});
+
+// zod 4's .default() hands back the default without running .transform(), so a flag written
+// as .transform(...).default("false") came out as the string "false" -- truthy, which turned
+// the AV-scan skip and the MFA bypass on when unset. They use .prefault() so the default is
+// parsed like a real value; this pins the parsed type, not just the truthiness.
+describe("string-parsed flags read their defaults through the transform", () => {
+  it.each([
+    ["SKIP_AV_SCAN", false],
+    ["PLATFORM_ADMIN_MFA_DEV_BYPASS", false],
+    ["TELEMETRY_ENABLED", false],
+    ["RETENTION_REQUIRE_SHORTEN_CONFIRM", true],
+    ["OTEL_TRACE_SAMPLE_RATIO", 0.01],
+  ] as const)("%s defaults to %s when unset", (varName, expected) => {
+    expect(EnvSchema.parse(MINIMAL_VALID_ENV)[varName]).toStrictEqual(expected);
   });
 });

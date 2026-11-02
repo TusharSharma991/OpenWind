@@ -1,3 +1,4 @@
+import "../../i18n.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import type { SandboxView } from "./format.js";
@@ -20,7 +21,6 @@ const SANDBOXES: SandboxView[] = [
     trialStatus: "active",
     trialEndsAt: new Date(Date.now() + 5 * DAY + 3_600_000).toISOString(),
     logo: null,
-    loginKey: "3f9a1c7e2b4d8a60",
   },
   {
     id: "bbbbbbbb-0000-4000-b000-000000000002",
@@ -30,7 +30,6 @@ const SANDBOXES: SandboxView[] = [
     trialStatus: "none",
     trialEndsAt: null,
     logo: null,
-    loginKey: "3f9a1c7e2b4d8a60",
   },
   {
     id: "cccccccc-0000-4000-c000-000000000003",
@@ -40,7 +39,6 @@ const SANDBOXES: SandboxView[] = [
     trialStatus: "expired",
     trialEndsAt: new Date(Date.now() - 2 * DAY - 3_600_000).toISOString(),
     logo: null,
-    loginKey: "3f9a1c7e2b4d8a60",
   },
 ];
 
